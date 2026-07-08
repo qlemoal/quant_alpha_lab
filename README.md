@@ -23,7 +23,10 @@ Technology
 
 Pipeline
 
+↓
+
 download
+
 ↓
 
 clean
@@ -43,6 +46,8 @@ portfolio construction
 ↓
 
 evaluation
+
+-----------
 
 Future work
 

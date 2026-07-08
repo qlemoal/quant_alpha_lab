@@ -38,6 +38,10 @@ for ticker in tqdm(tickers[:]):
         )
 
         if len(df) > 1:
+            # yahoo apparently creates multi index, creating issues later on, so we are flattening
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
             df.to_csv(RAW_DIR / f'{ticker}.csv')
 
     except Exception:
