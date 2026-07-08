@@ -15,7 +15,7 @@ con = duckdb.connect()
 con.execute(f'''
 CREATE OR REPLACE TABLE prices AS
 SELECT
-    filename, Date, Open, High, Low, Close, Volume
+    filename, Date, Open, High, Low, "Adj Close", Volume
 FROM            
     read_csv_auto('{RAW_DIR}/*.csv', filename=True)
 ''')
@@ -29,12 +29,12 @@ SELECT
     CAST(Open AS DOUBLE) AS open,
     CAST(High AS DOUBLE) AS high,
     CAST(Low AS DOUBLE) AS low,
-    CAST(Close AS DOUBLE) AS close,
+    CAST("Adj Close" AS DOUBLE) AS close,
     CAST(Volume AS BIGINT) AS volume
 FROM 
     prices
 WHERE
-    Close > 0
+    "Adj Close" > 0
 AND 
     Volume >= 0
 ''')
