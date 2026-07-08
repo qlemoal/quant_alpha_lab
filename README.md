@@ -1,45 +1,53 @@
-# Trading Strategies 01
+# Trading Strategies
 
-Build a modular quantitative research framework inspired by systematic hedge funds.
+This repository is a complete quantitative research framework built from scratch.
 
-Systematic equity research platform.
+Objectives
 
-Stack
+- data engineering
+- SQL pipelines
+- Polars feature engineering
+- systematic alpha research
+- portfolio construction
+- backtesting
+- statistical evaluation
+
+Technology
 
 - Python
-
-- Polars
-
 - DuckDB
-
 - SQL
-
-- Scikit-Learn
+- Polars
+- Pandas
+- Matplotlib
 
 Pipeline
 
-Raw data
+download
+↓
+
+clean
 
 ↓
 
-Cleaning
+feature engineering
 
 ↓
 
-Feature engineering
+signal generation
 
 ↓
 
-Signal construction
+portfolio construction
 
 ↓
 
-Portfolio construction
+evaluation
 
-↓
+Future work
 
-Backtesting
-
-↓
-
-Analysis
+- Random Forests
+- XGBoost
+- regime detection
+- feature neutralization
+- walk-forward validation
