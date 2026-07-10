@@ -1,5 +1,5 @@
 import setup
-from utils.my_plotting import new_fig, finish_fig
+from src.utils.my_plotting import new_fig, finish_fig
 import matplotlib.pyplot as plt
 import sys
 
