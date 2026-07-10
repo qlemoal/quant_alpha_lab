@@ -16,5 +16,5 @@ def finish_fig(ax, title = "", xl="", yl="", legend=True):
         handles, labels = ax.get_legend_handles_labels()
         if handles:
             ax.legend()
-
     plt.tight_layout()
+    plt.show()

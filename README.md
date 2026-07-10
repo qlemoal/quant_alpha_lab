@@ -1,121 +1,240 @@
-# Systematic Equity Research Platform
+# Alpha Research Framework
 
-This project is a modular quantitative research platform for developing, testing and evaluating systematic equity trading signals.
+A modular quantitative research framework built from scratch to reproduce the workflow used by systematic investment firms.
 
-The goal is not to implement a single trading strategy, but to build a reusable research framework similar to those used in systematic hedge funds.
+The objective of this project is **not** to produce a single profitable strategy, but to build a reusable research infrastructure capable of supporting many different alpha ideas.
 
-## Objectives
+The project emphasizes:
 
-The project aims to reproduce the complete quantitative research workflow:
-
-- acquisition of historical market data
-- data validation and cleaning
-- feature engineering
-- alpha signal research
-- portfolio construction
-- backtesting and evaluation
-- statistical validation and false discovery control
-
-The emphasis is placed on writing clean, modular and reproducible code rather than producing isolated notebooks.
+- reproducibility
+- modularity
+- computational efficiency
+- statistical rigor
+- realistic quantitative research practices
 
 ---
 
-## Technology stack
+# Objectives
 
-Each tool is used where it is most appropriate.
+The long-term goal is to reproduce the complete research pipeline used by professional quantitative researchers.
 
-### DuckDB / SQL
+The framework will support
 
-Used for
+- downloading raw market data
+- data validation and cleaning
+- feature engineering
+- alpha generation
+- statistical evaluation
+- false discovery control (FDR)
+- portfolio construction
+- backtesting
+- robustness testing
+- signal comparison
 
-- importing large datasets
+Every new alpha should require only writing the signal itself. Everything else should already exist.
+
+---
+
+# Technologies
+
+## SQL + DuckDB
+
+Used for operations involving millions of observations:
+
+- imports
 - joins
 - filtering
 - aggregations
-- data validation
 
-SQL remains one of the most widely used languages in quantitative finance, and many firms rely heavily on database queries for research pipelines.
+DuckDB operates directly on parquet files and avoids loading unnecessary data into memory.
 
-### Polars
+---
+
+## Polars
 
 Used for feature engineering.
 
-Rolling statistics, lagged variables, ranking and group operations are implemented using Polars LazyFrames.
+Reasons:
 
-Reasons for choosing Polars:
+- lazy evaluation
+- automatic parallelization
+- very fast rolling operations
+- memory efficient
 
-- significantly faster than pandas
-- lazy execution
-- parallel execution
-- excellent memory efficiency
-
-### Pandas + Matplotlib
-
-Only used for
-
-- visualization
-- debugging
-- exploratory inspection
-
-Large datasets remain in Polars until a small subset needs to be visualized.
+The goal is to keep every transformation lazy until the final collect().
 
 ---
 
-## Repository structure
+## Pandas
 
-scripts/
-    executable scripts
+Only used after reducing the dataset to a manageable size.
 
-features/
-    reusable feature engineering
+Main uses:
 
-signals/
-    alpha signal generation
+- plotting
+- debugging
+- exploratory analysis
 
-portfolio/
-    portfolio construction
+---
 
-evaluation/
-    performance evaluation
+## Matplotlib
 
-utils/
-    reusable helper functions
+Used for every visual sanity check.
 
-notebooks/
-    exploratory analysis and reports
+Every transformation should be inspected before moving to the next stage.
+
+---
+
+# Repository structure
+
+```
+config/
+    Project configuration
 
 data/
+    raw/
+        Original downloaded data
 
-raw/
-original downloaded datasets
+    processed/
+        Clean datasets ready for research
 
-processed/
-clean datasets used throughout research
+    intermediate/
+        Temporary files
 
-exports/
-figures and reports
+    exports/
+        Figures and reports
+
+scripts/
+    Executable scripts
+
+signals/
+    One file = one alpha idea
+
+features/
+    Feature engineering
+
+portfolio/
+    Portfolio construction
+
+evaluation/
+    IC, Sharpe, robustness, FDR
+
+utils/
+    Reusable helper functions
+
+sql/
+    SQL queries
+
+tests/
+    Unit tests
+
+notebooks/
+    Exploration and debugging
+```
 
 ---
 
-## Philosophy
+# Development philosophy
 
-The project follows several design principles.
+This project intentionally avoids automatic code generation.
 
-- immutable raw data
-- reproducible pipelines
-- modular research
-- no duplicated computations
-- separation between features, signals and portfolios
-- reproducible experiments
+The objective is to understand every design decision and reproduce professional research workflows rather than maximizing coding speed.
 
-The objective is that adding a new alpha requires writing only a single new research module.
+Large language models are used as:
+
+- technical guidance
+- code review
+- debugging assistance
+- discussion of best practices
+
+All implementation decisions remain manual and are understood before being added to the project.
 
 ---
 
-## AI assistance
+# Workflow
 
-The code is written manually.
+```
+Download
 
-Large language models are used only as technical advisors to discuss software architecture, quantitative research methodology, and implementation choices. Code is understood, adapted and tested before being integrated into the project.
+↓
 
-No autonomous coding agents (e.g. Claude Code, Cursor Agent) are used.
+Clean
+
+↓
+
+Inspect prices
+
+↓
+
+Build features
+
+↓
+
+Inspect features
+
+↓
+
+Generate alpha
+
+↓
+
+Evaluate signal
+
+↓
+
+Control false discoveries
+
+↓
+
+Portfolio construction
+
+↓
+
+Backtest
+
+↓
+
+Performance attribution
+```
+
+---
+
+# Notebooks
+
+Notebooks are used only for
+
+- exploration
+- plotting
+- debugging
+- hypothesis generation
+
+Reusable code should never stay inside notebooks.
+
+---
+
+# Helper imports
+
+Every notebook starts by importing `setup.py`.
+
+The setup script
+
+- adds the project root to `sys.path`
+- imports the most common libraries
+- sets plotting defaults
+- imports commonly used helper functions
+
+This keeps notebooks concise while allowing reusable code to live outside the notebook itself.
+
+---
+
+# Current Progress
+
+- ✔ Data download
+- ✔ Data cleaning
+- ✔ Price inspection
+- ⬜ Feature engineering
+- ⬜ Alpha library
+- ⬜ Portfolio construction
+- ⬜ FDR framework
+- ⬜ Random Forest models
+- ⬜ Cross-validation
