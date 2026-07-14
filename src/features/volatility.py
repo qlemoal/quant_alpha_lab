@@ -7,7 +7,7 @@ def add_volatility(lf, window=20):
         exprs = []
         for w in window:
             exprs.append(
-                c('close')
+                c('logret')
                 .rolling_std(w)
                 .over('ticker')
                 .alias(f'std{w}')
@@ -17,7 +17,7 @@ def add_volatility(lf, window=20):
     elif isinstance(window, int):
         return lf.with_columns(
                     (
-                        c('close')
+                        c('logret')
                         .rolling_std(window)
                         .over('ticker')
                         .alias(f'std{window}')
