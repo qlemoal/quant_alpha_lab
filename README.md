@@ -245,6 +245,32 @@ Robustness analysis
 
 ---
 
+# Known limitations
+
+## Survivorship bias
+
+The ticker universe is built from **today's** S&P 500 constituents, applied
+retroactively across the full historical period. Concretely:
+
+- companies removed from the index since (bankruptcy, acquisition, delisting)
+  are absent from the dataset entirely
+- companies added to the index more recently are included with history that
+  predates their actual index membership
+
+As a result, every metric derived from this dataset — returns, Sharpe ratios,
+hit rates, factor exposures — is biased upward relative to what an investor
+could have realistically captured at the time, since the universe only
+contains firms that survived to today's index composition.
+
+This is a deliberate scope decision for this project, not an oversight:
+point-in-time constituent history requires a paid data vendor (e.g. CRSP,
+Compustat) that isn't accessible outside an institutional setting. It's
+documented here so results are interpreted with that caveat in mind. A
+free, approximate point-in-time constituent list is on the roadmap as a
+partial mitigation.
+
+---
+
 # Development philosophy
 
 The repository is intentionally written manually.

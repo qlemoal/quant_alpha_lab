@@ -7,6 +7,7 @@ from src.features.momentum import *
 from src.features.volatility import *
 from src.features.liquidity import *
 from src.features.adv import *
+from src.features.beta import *
 
 
 print('--> Start')
@@ -26,13 +27,15 @@ print('    Building features')
 
 lf = add_log_returns(lf)
 
-lf = add_momentum(lf, window=[5, 10, 20, 60, 120, 252])
+lf = add_beta(lf, window=20)
 
-lf = add_volatility(lf, window=[5, 10, 20, 60, 120, 252])
+# lf = add_momentum(lf, window=[5, 10, 20, 60, 120, 252])
 
-lf = add_dollar_volume(lf)
+# lf = add_volatility(lf, window=[5, 10, 20, 60, 120, 252])
 
-lf = add_log_adv(lf, window=[5, 10, 20, 60, 120, 252])
+# lf = add_dollar_volume(lf)
+
+# lf = add_log_adv(lf, window=[5, 10, 20, 60, 120, 252])
 
 
 # Do not drop nulls as we would not remove whole rows that could have useful 
