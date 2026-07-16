@@ -22,6 +22,9 @@ def _market_var(lf, window):
     Note: if computed that in add_beta directly, we would end up with different 
         values for the market variance since each ticker has different dates (IPO, listing, missing days, ...).
     Note: you need to sort the lf after using .unique() because that messes up the order.
+    Note: the choice was made to add a column with the market returns, mean, variance, etc. I could 
+        have added the market as an extra ticker, so only rows, without duplicating the values for each ticker,
+        but I would have needed to filter it out for all consecutive stats, correlations, etc. 
     '''
     return (
         lf
@@ -36,6 +39,7 @@ def _market_var(lf, window):
 
 
 def add_beta(lf, window=60):
+    
     if 'mkt_logret' not in lf.collect_schema().names():
         lf = add_market_return(lf)
 

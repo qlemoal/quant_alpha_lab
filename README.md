@@ -269,6 +269,48 @@ documented here so results are interpreted with that caveat in mind. A
 free, approximate point-in-time constituent list is on the roadmap as a
 partial mitigation.
 
+## Data provenance and corporate actions
+
+Price data comes from Yahoo Finance via `yfinance`, an unofficial API rather
+than a licensed vendor. Two consequences worth knowing:
+
+- `Adj Close` values are not point-in-time stable — Yahoo retroactively
+  restates historical adjusted prices whenever a new corporate action
+  (split, dividend) occurs, so re-downloading the same history today vs.
+  a year ago can produce slightly different values for the same date.
+- there's no guarantee of the same accuracy, completeness, or update
+  timeliness as a licensed vendor (e.g. CRSP, Bloomberg), so occasional
+  gaps or restatements in the raw data are possible and not separately
+  validated here.
+
+## No transaction costs or market impact (yet)
+
+The pipeline currently has no cost model: no bid-ask spread, commissions,
+slippage, or market impact. Any Sharpe ratio or return figure produced
+before this is added should be read as a pre-cost, idealized upper bound,
+not a realistic backtest result.
+
+## Single asset class, single frequency
+
+The project currently covers US equities only, at daily bar frequency.
+No intraday data, no other asset classes (rates, FX, credit), and no
+fundamental/earnings data — all features so far are derived purely from
+price and volume.
+
+## Market proxy for beta
+
+beta.py uses the equal-weighted cross-sectional mean return of the
+universe as a market proxy, not a real capitalization-weighted benchmark
+(e.g. SPY). This is a simplification, and will diverge from a "true"
+market beta, especially since the universe itself is survivorship-biased
+(see above).
+
+## Test coverage
+
+`tests/` is currently scaffolded but not implemented. Correctness of the
+feature pipeline currently relies on manual inspection notebooks
+(`inspect_*.ipynb`) rather than automated regression tests.
+
 ---
 
 # Development philosophy

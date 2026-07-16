@@ -27,15 +27,15 @@ print('    Building features')
 
 lf = add_log_returns(lf)
 
-lf = add_beta(lf, window=20)
+lf = add_beta(lf, window=[60, 252])
 
-# lf = add_momentum(lf, window=[5, 10, 20, 60, 120, 252])
+lf = add_momentum(lf, window=[5, 10, 20, 60, 120, 252])
 
-# lf = add_volatility(lf, window=[5, 10, 20, 60, 120, 252])
+lf = add_volatility(lf, window=[5, 10, 20, 60, 120, 252])
 
-# lf = add_dollar_volume(lf)
+lf = add_dollar_volume(lf)
 
-# lf = add_log_adv(lf, window=[5, 10, 20, 60, 120, 252])
+lf = add_log_adv(lf, window=[5, 10, 20, 60, 120, 252])
 
 
 # Do not drop nulls as we would not remove whole rows that could have useful 
