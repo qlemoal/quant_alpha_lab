@@ -158,7 +158,7 @@ Every important transformation should be inspected visually before moving to the
 │
 ├── src/
 │
-│   Reusable Python code.
+│   Reusable Python code, mainly called in scripts.
 │
 │   features/
 │       Feature engineering.
@@ -182,7 +182,7 @@ Every important transformation should be inspected visually before moving to the
 │
 │   SQL queries used by DuckDB.
 │
-│   Keeping SQL separate from Python improves readability for complex queries.
+│   Empty for now, but in the future, it will be more readable to keep SQL separate from Python.
 │
 ├── tests/
 │
@@ -242,6 +242,24 @@ Performance attribution
 
 Robustness analysis
 ```
+
+---
+
+# Development philosophy
+
+The repository is intentionally written manually.
+
+The goal is to understand every design decision rather than maximizing coding speed.
+
+Large language models are used only for
+
+- discussion
+- technical guidance
+- debugging
+- software engineering advice
+- code review
+
+Every implementation decision is understood before being added to the project.
 
 ---
 
@@ -307,27 +325,10 @@ market beta, especially since the universe itself is survivorship-biased
 
 ## Test coverage
 
-`tests/` is currently scaffolded but not implemented. Correctness of the
+`tests/` is currently present but not implemented. Correctness of the
 feature pipeline currently relies on manual inspection notebooks
-(`inspect_*.ipynb`) rather than automated regression tests.
-
----
-
-# Development philosophy
-
-The repository is intentionally written manually.
-
-The goal is to understand every design decision rather than maximizing coding speed.
-
-Large language models are used only for
-
-- discussion
-- technical guidance
-- debugging
-- software engineering advice
-- code review
-
-Every implementation decision is understood before being added to the project.
+(`inspect_*.ipynb`) rather than automated regression tests. More 
+systematic tests will come in the future.
 
 ---
 
@@ -336,7 +337,7 @@ Every implementation decision is understood before being added to the project.
 - ✔ Download historical prices
 - ✔ Clean price data
 - ✔ Price inspection
-- ⬜ Feature engineering
+- ✔ Feature engineering
 - ⬜ Signal library
 - ⬜ Portfolio construction
 - ⬜ Evaluation framework
