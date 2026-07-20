@@ -2,6 +2,9 @@ import polars as pl
 from polars import col as c
 
 
+def test_func():
+    print('The test works')
+
 def add_market_return(lf):
     '''
     Cross-sectional equal-weighted market return per date,
