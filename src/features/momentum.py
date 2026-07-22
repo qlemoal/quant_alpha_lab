@@ -12,7 +12,7 @@ def add_momentum(lf, window=20):
                 .over('ticker')
                 .alias(f'mom{w}')
             )
-        return lf.with_columns(exprs)
+        return lf.with_columns(exprs).sort('ticker', 'date')
     
     elif isinstance(window, int):
         return lf.with_columns(
@@ -22,5 +22,5 @@ def add_momentum(lf, window=20):
                         .over('ticker')
                         .alias(f'mom{window}')
                     )
-                )
+                ).sort('ticker', 'date')
     

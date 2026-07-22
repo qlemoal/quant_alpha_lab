@@ -43,6 +43,8 @@ lf = add_log_adv(lf, window=[5, 10, 20, 60, 120, 252])
 # lf = lf.drop_nulls(
 #     ['logret', 'ret5', 'ret20', 'ret60', 'std5', 'std20', 'std60', 'adv5', 'adv20', 'adv60']
 # )
+#
+# We sort the lf after each feature we add because we see issues arising sometimes.
 
 print('    Saving features to ', OUTPUT)
 

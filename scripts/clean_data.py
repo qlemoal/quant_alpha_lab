@@ -36,7 +36,7 @@ FROM
 WHERE
     "Adj Close" > 0
 AND 
-    Volume >= 0
+    Volume > 0
 ''')
 
 

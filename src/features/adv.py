@@ -1,3 +1,4 @@
+import polars as pl
 from polars import col as c
 
 
@@ -12,7 +13,7 @@ def add_adv(lf, window=20):
                 .over('ticker')
                 .alias(f'adv{w}')
             )
-        return lf.with_columns(exprs)
+        return lf.with_columns(exprs).sort(['ticker', 'date'])
     
     elif isinstance(window, int):
 
@@ -37,7 +38,9 @@ def add_log_adv(lf, window=20):
                 .log()
                 .alias(f'log_adv{w}')
             )
-        return lf.with_columns(exprs)
+        return lf.with_columns(
+                    exprs
+                ).sort('ticker', 'date')
     
     elif isinstance(window, int):
 
@@ -49,4 +52,4 @@ def add_log_adv(lf, window=20):
                         .log()
                         .alias(f'log_adv{window}')
                     )
-                )
+                ).sort('ticker', 'date')

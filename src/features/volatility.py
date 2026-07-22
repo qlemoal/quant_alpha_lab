@@ -12,7 +12,7 @@ def add_volatility(lf, window=20):
                 .over('ticker')
                 .alias(f'std{w}')
             )
-        return lf.with_columns(exprs)
+        return lf.with_columns(exprs).sort('ticker', 'date')
     
     elif isinstance(window, int):
         return lf.with_columns(
@@ -22,4 +22,4 @@ def add_volatility(lf, window=20):
                         .over('ticker')
                         .alias(f'std{window}')
                     )
-                )
+                ).sort('ticker', 'date')

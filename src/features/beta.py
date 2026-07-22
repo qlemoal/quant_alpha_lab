@@ -16,7 +16,7 @@ def add_market_return(lf):
         .agg( c('logret').mean().alias('mkt_logret') )
         .sort('date')
     )
-    return lf.join(mkt, on='date', how='left')
+    return lf.join(mkt, on='date', how='left').sort('ticker', 'date')
 
 
 def _market_var(lf, window):
@@ -48,12 +48,12 @@ def add_beta(lf, window=60):
 
     def _add_single(lf, w):
         mkt_var = _market_var(lf, w)
-        lf = lf.join(mkt_var, on='date', how='left')
+        lf = lf.join(mkt_var, on='date', how='left').sort('ticker', 'date')
 
         cov = pl.rolling_cov(c('logret'), c('mkt_logret'), window_size=w).over('ticker')
         beta = (cov / c(f'mkt_var{w}')).alias(f'beta{w}')
 
-        return lf.with_columns(beta).drop(f'mkt_var{w}')
+        return lf.with_columns(beta).drop(f'mkt_var{w}').sort('ticker', 'date')
 
     if isinstance(window, list):
         for w in window:
