@@ -9,11 +9,23 @@ def add_market_return(lf):
     '''
     Cross-sectional equal-weighted market return per date,
     joined back onto every row of the ticker panel.
+    Update: Added a fitler to have at least 100 tickers to compute the market returns.
+        Since I am computing the market erturns using today's constituents of the SP500, 
+        there is much less around 2000, bringing in a huge bias. That will be fixed later on.
     '''
     mkt = (
         lf
         .group_by('date')
-        .agg( c('logret').mean().alias('mkt_logret') )
+        .agg( 
+            c('logret').mean().alias('mkt_logret') ,
+            c('logret').count().alias('n_tickers') 
+        )
+        .with_columns(
+            pl.when(c('n_tickers') >= 100)
+            .then(c('mkt_logret'))
+            .otherwise(None)
+            .alias('mkt_logret')
+        )
         .sort('date')
     )
     return lf.join(mkt, on='date', how='left').sort('ticker', 'date')
