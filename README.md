@@ -297,6 +297,9 @@ As a result, every metric derived from this dataset — returns, Sharpe ratios, 
 
 This is a deliberate scope decision for this project, not an oversight: point-in-time constituent history requires a paid data vendor (e.g. CRSP, Compustat) that isn't accessible outside an institutional setting. A free, approximate point-in-time constituent list is on the roadmap as a partial mitigation.
 
+Additionally, because the universe itself is thin in the earliest years (many current constituents lack history back to 2000), the market proxy is
+unstable and noisy in that period, which produces spurious extreme beta values pre-~2003. A minimum-ticker-count guard is applied to null out beta during the thinnest periods; replacing the proxy with a real benchmark index (S&P 500 / SPY) is the planned permanent fix.
+
 ## Data provenance and corporate actions
 
 Price data comes from Yahoo Finance via `yfinance`, an unofficial API rather than a licensed vendor. Two consequences worth knowing:
