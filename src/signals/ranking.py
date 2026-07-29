@@ -3,7 +3,7 @@ from polars import col as c
 
 
 
-def feature_to_signal(lf: pl.LazyFrame, feature:str, descending=True):
+def rank_into_minus1_1(lf: pl.LazyFrame, feature:str, descending=True):
     '''
     Rank feature at each date across tickers --> normalise into (0,1) --> transform into (-1, 1).
     Use descending=False if lower feature is better.
