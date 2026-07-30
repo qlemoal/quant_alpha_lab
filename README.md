@@ -8,11 +8,11 @@ Not trying to find one profitable strategy. Trying to build reusable infrastruct
 
 # About
 
-PhD in Mathematics (Quantitative Finance). Looking for a Quantitative Researcher role, ideally in Switzerland.
+PhD in Mathematics (Quantitative Finance chair) from EPFL. Looking for a Quantitative Researcher role in Switzerland.
 
 This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See "Known Limitations" below, it's not decoration.
 
-Contact: qs.lemoal@gmail.com / [LinkedIn](https://arc.net/l/quote/agygsqpa)
+Contact: qs.lemoal@gmail.com / [LinkedIn](https://www.linkedin.com/in/qlemoal/)
 
 ---
 
