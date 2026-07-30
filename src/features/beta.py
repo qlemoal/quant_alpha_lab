@@ -60,12 +60,12 @@ def add_beta(lf, window=60):
 
     def _add_single(lf, w):
         mkt_var = _market_var(lf, w)
-        lf = lf.join(mkt_var, on='date', how='left').sort('ticker', 'date')
+        lf = lf.join(mkt_var, on='date', how='left').sort(['ticker', 'date'])
 
         cov = pl.rolling_cov(c('logret'), c('mkt_logret'), window_size=w).over('ticker')
         beta = (cov / c(f'mkt_var{w}')).alias(f'beta{w}')
 
-        return lf.with_columns(beta).drop(f'mkt_var{w}').sort('ticker', 'date')
+        return lf.with_columns(beta).drop(f'mkt_var{w}').sort(['ticker', 'date'])
 
     if isinstance(window, list):
         for w in window:

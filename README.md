@@ -1,121 +1,69 @@
 # Alpha Research Framework
 
-A modular quantitative research framework built from scratch to reproduce the workflow used by professional systematic investment firms.
+A quant research framework built from scratch, modeled on the workflow used by systematic investment firms.
 
-The purpose of this repository is **not** to build a single profitable strategy, but to build reusable infrastructure capable of supporting many different alpha ideas — data ingestion, feature engineering, signal generation, statistical evaluation, portfolio construction, and backtesting, all under one consistent framework.
-
-The project emphasizes:
-
-- reproducibility
-- modularity
-- computational efficiency
-- statistical rigor
-- realistic quantitative research workflows, including the limitations that come with them
+Not trying to find one profitable strategy. Trying to build reusable infrastructure: data, features, signals, evaluation, portfolio construction, backtesting, all under one framework. New idea = implement the signal, everything else already exists.
 
 ---
 
 # About
 
-I hold a PhD in Mathematics (Quantitative Finance) and am currently looking for a Quantitative Researcher role, ideally in Switzerland. This repository is both a personal research sandbox and a demonstration of how I structure, validate, and reason about a research codebase end to end.
+PhD in Mathematics (Quantitative Finance). Looking for a Quantitative Researcher role, ideally in Switzerland.
 
-I've tried to be as transparent as possible about what's genuinely finished, what's a simplification, and what's still missing — a "Known Limitations" section is included below deliberately, rather than presenting the framework as more complete than it is.
+This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See "Known Limitations" below, it's not decoration.
 
-*(Contact: qs.lemoal@gmail.com / [LinkedIn](https://www.linkedin.com/in/qlemoal/))*
+Contact: qs.lemoal@gmail.com / [LinkedIn](https://arc.net/l/quote/agygsqpa)
 
 ---
 
 # Objectives
 
-The long-term objective is to reproduce the complete research pipeline used by quantitative researchers:
+Full pipeline:
 
-- downloading raw market data
-- data cleaning and validation
-- feature engineering
-- alpha generation
-- signal evaluation
-- false discovery control (FDR)
-- portfolio construction
-- backtesting
-- robustness analysis
-- comparison of multiple signals under a common framework
-
-The guiding principle is that every new research idea should only require implementing the **signal itself**. Everything else — data plumbing, evaluation, portfolio construction, backtesting — should already exist and be reusable.
+- download raw market data
+- clean and validate it
+- engineer features
+- generate alpha signals
+- evaluate them properly
+- control false discoveries (FDR)
+- build a portfolio
+- backtest it
+- check robustness
+- compare multiple signals in the same framework
 
 ---
 
-# Technologies
+# Stack
 
-## DuckDB + SQL
+**DuckDB + SQL:**
+For anything touching large datasets: imports, joins, filtering, aggregations, quality checks. Works directly on parquet, no need to load everything into memory.
 
-Used whenever operations involve large datasets.
+**Polars:**
+For features and signals. Lazy evaluation, fast rolling computations, low memory footprint. Stays lazy until the final `collect()`.
 
-Typical tasks:
+**Pandas:**
+Only once data is small. Plotting, exploration, quick debugging.
 
-- imports
-- joins
-- filtering
-- aggregations
-- quality checks
-
-DuckDB works directly on parquet files and avoids loading unnecessary data into memory.
-
----
-
-## Polars
-
-Used for feature engineering and signal construction.
-
-Reasons:
-
-- lazy evaluation
-- automatic parallelization
-- very fast rolling computations
-- memory efficiency
-
-The objective is to keep transformations lazy until the final `collect()`.
-
----
-
-## Pandas
-
-Only used once the dataset has become sufficiently small.
-
-Typical uses:
-
-- plotting
-- exploratory analysis
-- debugging
-
----
-
-## Matplotlib
-
-Used for visual sanity checks.
-
-Every important transformation is inspected visually before moving to the next stage — see `notebooks/inspect_*.ipynb`.
+**Matplotlib:**
+Visual checks. Every transformation gets eyeballed before moving to the next stage, see `notebooks/inspect_*.ipynb`.
 
 ---
 
 # Setup
 
-This project is installed as an editable local package via `pyproject.toml`, so `src/` can be imported from anywhere (notebooks, scripts, tests) without manual `sys.path` manipulation.
-
 ```bash
-# clone the repo
-git clone https://github.com/<your-username>/trading_strategies_01.git
-cd trading_strategies_01
+git clone https://github.com/<your-username>/quant_alpha_lab.git
+cd quant_alpha_lab
 
-# create and activate a virtual environment
 python -m venv .venv
 source .venv/bin/activate
 
-# install the project in editable mode
 pip install -e .
 ```
 
-After this, `import src.features.beta` (etc.) works from any notebook or script, as long as its kernel/interpreter points at this environment.
+`pip install -e .` installs the project as an editable package, so `import src.features.beta` works from any notebook or script, no manual path hacking.
 
-A frozen, fully pinned environment snapshot is also available in `requirements.txt` for exact reproducibility of results.
+`requirements.txt` is a frozen, pinned snapshot for exact reproducibility. `pyproject.toml` lists the actual direct dependencies.
 
 ---
 
@@ -123,93 +71,42 @@ A frozen, fully pinned environment snapshot is also available in `requirements.t
 
 ```
 .
-├── pyproject.toml
-│   Project metadata, dependencies, and editable install configuration.
+├── pyproject.toml          project metadata, dependencies, editable install
+├── requirements.txt        frozen environment snapshot
 │
-├── requirements.txt
-│   Frozen environment snapshot for exact reproducibility.
+├── docs/
+│   methodology.md           evaluation, correlation cleaning, signal construction
+│   tips_and_tricks.md       small practical stuff worth remembering
 │
 ├── config/
-│   Project-wide configuration.
+│   paths.py                 centralized filesystem paths
+│   constants.py             trading days, rolling windows, thresholds
+│   settings.py              global settings
 │
-│   paths.py
-│       Centralized filesystem paths.
+├── data/                    git-ignored
+│   raw/                     original downloads (prices, fundamentals, macro, sectors)
+│   processed/                clean, research-ready data
+│   intermediate/             scratch data
+│   exports/                  figures, reports
 │
-│   constants.py
-│       Research constants
-│       (trading days, rolling windows, thresholds...)
+├── notebooks/                exploration, plotting, debugging, hypothesis generation only
 │
-│   settings.py
-│       Global project settings.
+├── scripts/                  executable pipeline scripts
+│   download_data.py
+│   clean_data.py             ETL: extract raw CSVs, transform, load prices.parquet
+│   build_features.py
 │
-├── data/                        (git-ignored)
+├── src/                      reusable, importable code
+│   features/                 feature engineering, one file per family
+│   signals/                  turning features into tradeable signals
+│   portfolio/                position sizing, transaction costs
+│   evaluation/               IC, Sharpe, FDR, diagnostics
+│   risk/                     correlation matrix cleaning, factor diagnostics
+│   models/                   ML models
+│   utils/                    plotting helpers etc
 │
-│   raw/
-│       Original downloaded datasets.
-│
-│       prices/
-│       fundamentals/
-│       macro/
-│       sectors/
-│
-│   processed/
-│       Clean datasets ready for research.
-│
-│   intermediate/
-│       Temporary datasets created during processing.
-│
-│   exports/
-│       figures/
-│       reports/
-│
-├── notebooks/
-│
-│   Used only for
-│       - exploration
-│       - plotting
-│       - debugging
-│       - hypothesis generation
-│
-├── scripts/
-│
-│   Executable pipeline scripts.
-│
-│       download_data.py
-│       clean_data.py
-│       build_features.py
-│
-├── src/
-│
-│   Reusable, importable Python code.
-│
-│   features/
-│       Feature engineering — one file per feature family.
-│
-│   signals/
-│       Alpha signal construction.
-│
-│   portfolio/
-│       Portfolio construction and cost modeling.
-│
-│   evaluation/
-│       IC, Sharpe, diagnostics, FDR.
-│
-│   models/
-│       Machine learning models.
-│
-│   utils/
-│       Shared helper functions (plotting, etc.)
-│
-├── sql/
-│
-│   SQL queries used by DuckDB.
-│
-│   Keeping SQL separate from Python improves readability for complex queries.
-│
-├── tests/
-│
-│   Unit tests (pytest).
-│
+├── sql/                      DuckDB queries, kept separate for readability
+├── tests/                    pytest unit tests
 └── README.md
 ```
 
@@ -218,150 +115,89 @@ A frozen, fully pinned environment snapshot is also available in `requirements.t
 # Workflow
 
 ```
-Download data
-
-↓
-
-Clean data
-
-↓
-
-Inspect prices
-
-↓
-
-Build features
-
-↓
-
-Inspect features
-
-↓
-
-Generate alpha signal
-
-↓
-
-Evaluate predictive power
-
-↓
-
-Control false discoveries
-
-↓
-
-Portfolio construction (incl. transaction costs)
-
-↓
-
-Backtest
-
-↓
-
-Performance attribution
-
-↓
-
-Robustness analysis
+Download data -> Clean data -> Inspect prices -> Build features -> Inspect features
+-> Generate signal -> Evaluate predictive power -> Control false discoveries
+-> Portfolio construction (incl. costs) -> Backtest -> Attribution -> Robustness
 ```
 
 ---
 
 # Implemented features
 
-All features live in `src/features/`, are built with Polars, operate lazily, and are grouped by ticker (`.over('ticker')`) on data explicitly sorted by `['ticker', 'date']`.
+`src/features/`, all Polars, all grouped by ticker (`.over('ticker')`), all computed on data sorted by `['ticker', 'date']`.
 
-| Feature | File | Description |
+| Feature | File | What it is |
 |---|---|---|
-| `logret` | `returns.py` | Daily log return: `log(close).diff()` per ticker. |
-| `mom{w}` | `momentum.py` | Percentage price change over a trailing `w`-day window. |
-| `std{w}` | `volatility.py` | Rolling standard deviation over a trailing `w`-day window. |
-| `adv{w}` | `adv.py` | Average dollar volume over a trailing `w`-day window. |
-| `beta{w}` | `beta.py` | Rolling market beta over a trailing `w`-day window, via `Cov(r_i, r_mkt) / Var(r_mkt)`, using the cross-sectional equal-weighted return as the market proxy. |
-| `seasonality.py` | *(in progress)* | Calendar-effect features. |
+| `logret` | `returns.py` | daily log return |
+| `mom{w}` | `momentum.py` | % price change over trailing `w` days |
+| `std{w}` | `volatility.py` | rolling std over trailing `w` days |
+| `log_adv{w}` | `adv.py` | average (log-) dollar volume over trailing `w` days |
+| `beta{w}` | `beta.py` | rolling market beta, `Cov(r_i, r_mkt) / Var(r_mkt)` |
+| `seasonality.py` | not started | calendar effects |
+
+Full methodology behind evaluation, signal construction, and correlation cleaning: see [`docs/methodology.md`](docs/methodology.md).
 
 ---
 
 # Known limitations
 
-Documented deliberately, so results are interpreted correctly rather than assumed to be production-grade.
-
 ## Survivorship bias
 
-The ticker universe is built from **today's** S&P 500 constituents, applied retroactively across the full historical period. Concretely:
+The universe is today's S&P 500 constituents, applied retroactively. Delisted/removed companies are missing entirely. Recently added companies have history predating their actual index membership. Every return, Sharpe ratio, and factor exposure in this repo is biased upward as a result.
 
-- companies removed from the index since (bankruptcy, acquisition, delisting) are absent from the dataset entirely
-- companies added to the index more recently are included with history that predates their actual index membership
+Not an oversight, a scope decision: true point-in-time constituent history needs a paid vendor (CRSP, Compustat) I don't have access to outside an institutional setting. A free approximate point-in-time list is on the roadmap.
 
-As a result, every metric derived from this dataset — returns, Sharpe ratios, hit rates, factor exposures — is biased upward relative to what an investor could have realistically captured at the time, since the universe only contains firms that survived to today's index composition.
+**This bias also corrupts the market proxy used for beta.** `beta.py` currently derives "market return" as the equal-weighted average across this same biased, thin-in-early-years universe. In the early 2000s, few of today's constituents have history yet, so the market proxy is built from a small, unstable sample, which makes its variance swing around and produces spuriously extreme beta values pre-2003. Two fixes: a minimum-ticker-count guard to null out beta until the universe is wide enough (quick, implemented as a stopgap), and replacing the proxy with a real benchmark index (S&P 500 / SPY) entirely (the actual fix, planned).
 
-This is a deliberate scope decision for this project, not an oversight: point-in-time constituent history requires a paid data vendor (e.g. CRSP, Compustat) that isn't accessible outside an institutional setting. A free, approximate point-in-time constituent list is on the roadmap as a partial mitigation.
+## Data provenance
 
-Additionally, because the universe itself is thin in the earliest years (many current constituents lack history back to 2000), the market proxy is
-unstable and noisy in that period, which produces spurious extreme beta values pre-~2003. A minimum-ticker-count guard is applied to null out beta during the thinnest periods; replacing the proxy with a real benchmark index (S&P 500 / SPY) is the planned permanent fix.
+Prices come from `yfinance`, unofficial, not a licensed feed. `Adj Close` gets retroactively restated by Yahoo whenever a new corporate action happens, so re-downloading the same history later can give slightly different values for the same date. No guarantee on completeness or timeliness compared to a real vendor.
 
-## Data provenance and corporate actions
+## No transaction costs yet
 
-Price data comes from Yahoo Finance via `yfinance`, an unofficial API rather than a licensed vendor. Two consequences worth knowing:
-
-- `Adj Close` values are not point-in-time stable — Yahoo retroactively restates historical adjusted prices whenever a new corporate action (split, dividend) occurs, so re-downloading the same history today vs. a year ago can produce slightly different values for the same date.
-- there's no guarantee of the same accuracy, completeness, or update timeliness as a licensed vendor (e.g. CRSP, Bloomberg), so occasional gaps or restatements in the raw data are possible and not separately validated here.
-
-## No transaction costs (yet)
-
-The pipeline currently has no cost model — no bid-ask spread, commissions, slippage, or market impact. Any Sharpe ratio or return figure produced before this is added should be read as a pre-cost, idealized upper bound, not a realistic backtest result. A cost model (spread + commission + square-root market impact, using `adv` as the participation-rate basis) is planned in `src/portfolio/costs.py` once portfolio construction is in place.
+No spread, commission, or slippage modeled. Any return or Sharpe figure right now is a pre-cost upper bound, not realistic. Planned in `src/portfolio/costs.py`: spread + commission + square-root market impact, using `adv` as the participation-rate basis, once portfolio construction exists.
 
 ## Single asset class, single frequency
 
-The project currently covers US equities only, at daily bar frequency. No intraday data, no other asset classes (rates, FX, credit), and no fundamental/earnings data — all features so far are derived purely from price and volume.
-
-## Market proxy for beta
-
-`beta.py` uses the equal-weighted cross-sectional mean return of the universe as a market proxy, not a real capitalization-weighted benchmark (e.g. SPY). This is a simplification, and will diverge from a "true" market beta, especially since the universe itself is survivorship-biased (see above).
+US equities, daily bars only. No intraday, no other asset classes, no fundamentals. Everything so far comes from price and volume alone.
 
 ## Test coverage
 
-`tests/` is scaffolded but not yet fully populated. Correctness of the feature pipeline currently relies on manual inspection notebooks (`inspect_*.ipynb`) as well as targeted unit tests as they're added — automated regression coverage across the full feature library is a work in progress.
-
----
-
-# Development philosophy
-
-The repository is intentionally written manually. The goal is to understand every design decision rather than maximizing coding speed.
-
-Large language models are used for:
-
-- discussion and technical guidance
-- debugging
-- software engineering advice
-- code review
-
-Every implementation decision is understood before being added to the project — LLM-suggested code is read, questioned, and verified (including against a second implementation, e.g. pandas, where correctness isn't obvious) before it's kept.
+`tests/` exists but isn't fully populated yet. Correctness currently leans on the `inspect_*.ipynb` notebooks plus targeted unit tests as they get added.
 
 ---
 
 # Current progress
 
-- ✔ Download historical prices
-- ✔ Clean price data
-- ✔ Price inspection
-- ✔ Feature engineering — returns, momentum, volatility, ADV, beta implemented and validated; seasonality not started
-- 🔶 Signal library
-- ⬜ Portfolio construction
-- ⬜ Transaction cost modeling
-- ⬜ Evaluation framework
-- ⬜ FDR
-- ⬜ Machine learning models
-- ⬜ Robustness analysis
+- [x] Download historical prices
+- [x] Clean price data
+- [x] Price inspection
+- [X] Feature engineering, returns/momentum/volatility/ADV done and validated, beta in progress, seasonality not started
+- [~] Signal library
+- [ ] Portfolio construction
+- [ ] Transaction cost modeling
+- [ ] Evaluation framework
+- [ ] FDR
+- [ ] ML models
+- [ ] Robustness analysis
 
 ---
 
-# Roadmap
+# TODO
 
-- [ ] Finish `beta.py` and `seasonality.py`
-- [ ] Populate `tests/` with unit tests for each feature (synthetic data, hand-computed expected values)
-- [ ] Build `src/signals/` — first alpha signal on top of the current feature set
-- [ ] Build `src/evaluation/` — Information Coefficient, FDR-controlled significance testing
-- [ ] Build `src/portfolio/` — position sizing, transaction cost model
-- [ ] Build a full backtest loop with performance attribution
-- [ ] Approximate point-in-time constituent list, to partially address survivorship bias
+- [ ] fix market proxy, add `seasonality.py`
+- [ ] Fill `tests/` with real unit tests
+- [ ] `src/signals/`, first alpha signal on top of current features
+- [ ] `src/evaluation/`, Rank IC, FDR
+- [ ] `src/portfolio/`, position sizing, transaction costs
+- [ ] `src/risk/covariance_cleaning.py`, RMT denoising, absorption ratio
+- [ ] Full backtest loop with attribution
+- [ ] Approximate point-in-time constituent list
+
+---
+
+# Development philosophy
+
+Written manually, on purpose. Point is understanding every decision, not maximizing coding speed.
+
+LLMs get used for discussion, debugging, and code review, not for writing implementation decisions I don't understand. Anything an LLM suggests gets read, questioned, and checked (often against a second implementation) before it stays in the codebase.

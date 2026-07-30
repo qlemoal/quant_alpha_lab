@@ -13,5 +13,6 @@ src/features/momentum.py
 src/features/returns.py
 src/features/seasonality.py
 src/features/volatility.py
+src/utils/helpers.py
 src/utils/my_plotting.py
 tests/test_beta.py

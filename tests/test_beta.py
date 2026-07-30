@@ -6,11 +6,15 @@ from polars import col as c
 from src.features.beta import add_beta
 
 # def test_add_beta_window2():
-df = pl.DataFrame({
-    'ticker': ['A', 'A', 'A', 'B', 'B', 'B'],
-    'date': [1, 2, 3, 1, 2, 3],
-    'logret': [0.02, 0.04, -0.02, 0.00, 0.02, 0.02],
+
+
+df = pl.LazyFrame({
+    'ticker': ['A', 'A', 'A', 'B', 'B', 'B', 'C', 'C', 'C'],
+    'date': [1, 2, 3, 1, 2, 3, 1, 2, 3],
+    'logret': [0.02, 0.04, -0.02, 0.00, 0.01, 0.01, 1, 1, 1],
+    'logret2': [0.02, 0.04, -0.02, 0.00, 0.01, 0.01, 1, 1, 1],
 })
+
 
 result = add_beta(df.lazy().sort(['ticker', 'date']), window=[2, 3]).collect()
 
