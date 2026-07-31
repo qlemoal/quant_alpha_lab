@@ -21,15 +21,33 @@ def zscore(lf:pl.LazyFrame, colname:str|list) -> pl.LazyFrame:
     return lf.with_columns(exprs).sort(['ticker', 'date'])
 
 
+def decile_bucket(lf:pl.LazyFrame, colname:str|list, n_buckets=10) -> pl.LazyFrame:
+    colname = as_list(colname)
+
+    exprs = [
+        (
+            c(cn)
+            .qcut(n_buckets, labels=[str(ii) for ii in range(n_buckets)])
+            .over('date')
+            .cast(pl.Int32)
+            .alias(cn + '_decile')
+        )
+        for cn in colname
+    ]
+    return lf.with_columns(exprs).sort(['ticker', 'date'])
+
+
+
+
 df = pl.LazyFrame({
     'ticker': ['A', 'A', 'A', 'B', 'B', 'B', 'C', 'C', 'C'],
     'date': [1, 2, 3, 1, 2, 3, 1, 2, 3],
-    'logret': [0.02, 0.04, -0.02, 0.00, 0.01, 0.01, 1, 1, 1],
+    'logret': [-0.9, -0.91, -0.9, 0.00, -0.01, 0.01, 1, 0.9, 1.1],
     'logret2': [0.02, 0.04, -0.02, 0.00, 0.01, 0.01, 1, 1, 1],
-})
+}).sort(['date', 'ticker'])
 
-res = df.select(
-    c('logret').qcut(2).over('date')
-).collect()
+print(df.collect())
 
-print(res)
+print(
+    decile_bucket(df, 'logret', n_buckets=2).collect()
+)
