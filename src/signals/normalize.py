@@ -5,23 +5,35 @@ from src.utils.helpers import as_list
 
 
 
-def zscore(lf:pl.LazyFrame, colname:str|list) -> pl.LazyFrame:
+
+def zscore_expr(colname:str) -> pl.LazyFrame:
+    '''
+    Expr version of z_score, to chain computations together without touching the frame.
+    '''
+    return ( (c(colname) - c(colname).mean().over('date')) / c(colname).std().over('date') )
+
+
+def z_score(lf:pl.LazyFrame, colname:str|list):
     '''
     Normalizes a column cross-sectionally, i.e., over dates.
     If colname is a list, then it normalizes all columns in the list, using the helper function as_list.
     Preserves relative magnitude, sensitive to outliers unless paired with winsorize() or apply_tanh() afterwards.
     '''
     colname = as_list(colname)
+    return lf.with_columns([
+                                zscore_expr(lf, cn).alias(f'{cn}_z') 
+                                for cn in colname
+                            ]).sort(['ticker', 'date'])
 
-    exprs = []
-    for cn in colname:
-        mean = c(cn).mean().over('date')
-        std = c(cn).std().over('date')
-        exprs.append(((c(cn) - mean) / std).alias(cn + '_z'))
-    return lf.with_columns(exprs).sort(['ticker', 'date'])
 
 
 def decile_bucket(lf:pl.LazyFrame, colname:str|list, n_buckets=10) -> pl.LazyFrame:
+    '''
+    Categorizes data in colname into n_buckets.
+    It should then be coupled into a long-short position in the top and bottom deciles.
+
+    n_buckets: number of categories to sort the data into. 10 buckets corresponds to sorting into deciles.
+    '''
     colname = as_list(colname)
 
     exprs = [
@@ -37,17 +49,3 @@ def decile_bucket(lf:pl.LazyFrame, colname:str|list, n_buckets=10) -> pl.LazyFra
     return lf.with_columns(exprs).sort(['ticker', 'date'])
 
 
-
-
-df = pl.LazyFrame({
-    'ticker': ['A', 'A', 'A', 'B', 'B', 'B', 'C', 'C', 'C'],
-    'date': [1, 2, 3, 1, 2, 3, 1, 2, 3],
-    'logret': [-0.9, -0.91, -0.9, 0.00, -0.01, 0.01, 1, 0.9, 1.1],
-    'logret2': [0.02, 0.04, -0.02, 0.00, 0.01, 0.01, 1, 1, 1],
-}).sort(['date', 'ticker'])
-
-print(df.collect())
-
-print(
-    decile_bucket(df, 'logret', n_buckets=2).collect()
-)

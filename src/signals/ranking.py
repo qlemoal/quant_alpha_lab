@@ -4,27 +4,42 @@ from polars import col as c
 from src.utils.helpers import as_list
 
 
-def rank_into_minus1_1(lf: pl.LazyFrame, feature:str|list, descending=True) -> pl.LazyFrame:
+def rank_scaled_expr(feature:str, descending=True) -> pl.LazyFrame:
+    '''
+    Expr version of rank_into_minus1_1, to chain expressions without touching the frame. 
+    '''
+    return (2 * ( (c(feature)
+                 .rank(descending=descending)
+                 .over('date') - 1) / (pl.len().over('date')-1)
+                ) - 1)
+
+
+def rank_scaled(lf: pl.LazyFrame, feature:str|list, descending=True) -> pl.LazyFrame:
     '''
     Rank feature at each date across tickers --> normalise into (0,1) --> transform into (-1, 1).
     Use descending=False if lower feature is better.
     Using helper function as_list, to make a string a list of strings.
     '''
     feature = as_list(feature)
-
-    exprs = []
-    for feat in feature:
-        rank = ( c(feat)
-                .rank(descending=descending)
-                .over('date') )
-        n = pl.len().over('date')
-        exprs.append(
-            (2 * ((rank - 1) / (n-1)) - 1).alias(feat + '_rank')
-        )
-    return lf.with_columns(exprs).sort(['ticker', 'date'])
+    
+    return lf.with_columns( [
+                                rank_scaled_expr(lf, feat, descending=descending).alias(f'{feat}_rank')
+                                for feat in feature
+                            ] ).sort(['ticker', 'date'])
 
 
+    
 
+
+def rank_expr(feature:str, descending=True) -> pl.LazyFrame:
+    '''
+    Expr version of rank, to chain expressions without touching the frame. 
+    '''
+    return ( 
+            c(feature)
+            .rank(descending=descending)
+            .over('date') 
+            )
 
 def rank(lf: pl.LazyFrame, feature:str|list, descending=True) -> pl.LazyFrame:
     '''
@@ -32,15 +47,8 @@ def rank(lf: pl.LazyFrame, feature:str|list, descending=True) -> pl.LazyFrame:
     Use descending=False if lower feature is better.
     '''
     feature = as_list(feature)
-    
-    exprs = []
-    for feat in feature:
-        exprs.append(( 
-                        c(feat)
-                        .rank(descending=descending)
-                        .over('date') 
-                        ).alias(feat + '_rank')
-                    )
-    return lf.with_columns(exprs).sort(['ticker', 'date'])
-
+    return lf.with_columns( [ 
+                                rank_expr(lf, feat, descending=descending).alias(f'{feat}_rank') 
+                                for feat in feature 
+                            ] ).sort(['ticker', 'date'])
 
