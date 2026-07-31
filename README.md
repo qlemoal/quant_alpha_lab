@@ -52,7 +52,7 @@ Visual checks. Every transformation gets eyeballed before moving to the next sta
 # Setup
 
 ```bash
-git clone https://github.com/<your-username>/quant_alpha_lab.git
+git clone https://github.com/qlemoal/quant_alpha_lab.git
 cd quant_alpha_lab
 
 python -m venv .venv
