@@ -1,6 +1,6 @@
 # Alpha Research Framework
 
-A quant research framework built from scratch, modeled on the workflow used by systematic investment firms.
+Hi! This is a quant research framework built from scratch, modeled on the workflow used by systematic investment firms.
 
 Not trying to find one profitable strategy. Trying to build reusable infrastructure: data, features, signals, evaluation, portfolio construction, backtesting, all under one framework. New idea = implement the signal, everything else already exists.
 
