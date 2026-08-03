@@ -5,6 +5,8 @@ from polars import col as c
 def test_func():
     print('The test works')
 
+
+
 def add_market_return(lf):
     '''
     Cross-sectional equal-weighted market return per date,
@@ -60,12 +62,11 @@ def add_beta(lf, window=60):
 
     def _add_single(lf, w):
         mkt_var = _market_var(lf, w)
-        lf = lf.join(mkt_var, on='date', how='left').sort(['ticker', 'date'])
-
+        lf = lf.sort(['ticker', 'date']).join(mkt_var, on='date', how='left')
         cov = pl.rolling_cov(c('logret'), c('mkt_logret'), window_size=w).over('ticker')
         beta = (cov / c(f'mkt_var{w}')).alias(f'beta{w}')
 
-        return lf.with_columns(beta).drop(f'mkt_var{w}').sort(['ticker', 'date'])
+        return lf.sort(['ticker', 'date']).with_columns(beta).drop(f'mkt_var{w}')
 
     if isinstance(window, list):
         for w in window:

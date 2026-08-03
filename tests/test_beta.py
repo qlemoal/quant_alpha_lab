@@ -1,5 +1,3 @@
-# tests/test_beta.py
-import setup
 import polars as pl
 import pytest
 from polars import col as c

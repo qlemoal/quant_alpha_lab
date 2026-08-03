@@ -1,16 +1,18 @@
 import polars as pl
 from polars import col as c
 
-from src.utils.helpers import as_list
+from src.utils.helpers import as_list, add_expr
 
 
 
 
-def zscore_expr(colname:str) -> pl.LazyFrame:
+
+
+def zscore_expr(expr:pl.Expr) -> pl.Expr:
     '''
     Expr version of z_score, to chain computations together without touching the frame.
     '''
-    return ( (c(colname) - c(colname).mean().over('date')) / c(colname).std().over('date') )
+    return ( (expr - expr.mean().over('date')) / expr.std().over('date') )
 
 
 def z_score(lf:pl.LazyFrame, colname:str|list):
@@ -19,33 +21,7 @@ def z_score(lf:pl.LazyFrame, colname:str|list):
     If colname is a list, then it normalizes all columns in the list, using the helper function as_list.
     Preserves relative magnitude, sensitive to outliers unless paired with winsorize() or apply_tanh() afterwards.
     '''
-    colname = as_list(colname)
-    return lf.with_columns([
-                                zscore_expr(lf, cn).alias(f'{cn}_z') 
-                                for cn in colname
-                            ]).sort(['ticker', 'date'])
+    return add_expr(lf, zscore_expr, colname, suffix='_z')
 
-
-
-def decile_bucket(lf:pl.LazyFrame, colname:str|list, n_buckets=10) -> pl.LazyFrame:
-    '''
-    Categorizes data in colname into n_buckets.
-    It should then be coupled into a long-short position in the top and bottom deciles.
-
-    n_buckets: number of categories to sort the data into. 10 buckets corresponds to sorting into deciles.
-    '''
-    colname = as_list(colname)
-
-    exprs = [
-        (
-            c(cn)
-            .qcut(n_buckets, labels=[str(ii) for ii in range(n_buckets)])
-            .over('date')
-            .cast(pl.Int32)
-            .alias(cn + '_decile')
-        )
-        for cn in colname
-    ]
-    return lf.with_columns(exprs).sort(['ticker', 'date'])
 
 

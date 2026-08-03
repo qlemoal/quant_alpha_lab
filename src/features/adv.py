@@ -13,11 +13,11 @@ def add_adv(lf, window=20):
                 .over('ticker')
                 .alias(f'adv{w}')
             )
-        return lf.with_columns(exprs).sort(['ticker', 'date'])
+        return lf.sort(['ticker', 'date']).with_columns(exprs)
     
     elif isinstance(window, int):
 
-        return lf.with_columns(
+        return lf.sort(['ticker', 'date']).with_columns(
                     (
                         c('dollar_volume')
                         .rolling_mean(window)
@@ -25,6 +25,9 @@ def add_adv(lf, window=20):
                         .alias(f'adv{window}')
                     )
                 )
+
+
+
     
 def add_log_adv(lf, window=20):
 
@@ -38,13 +41,13 @@ def add_log_adv(lf, window=20):
                 .log()
                 .alias(f'log_adv{w}')
             )
-        return lf.with_columns(
+        return lf.sort(['ticker', 'date']).with_columns(
                     exprs
-                ).sort('ticker', 'date')
+                )
     
     elif isinstance(window, int):
 
-        return lf.with_columns(
+        return lf.sort(['ticker', 'date']).with_columns(
                     (
                         c('dollar_volume')
                         .rolling_mean(window)
@@ -52,4 +55,4 @@ def add_log_adv(lf, window=20):
                         .log()
                         .alias(f'log_adv{window}')
                     )
-                ).sort('ticker', 'date')
+                )

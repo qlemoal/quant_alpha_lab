@@ -27,6 +27,8 @@ print('    Building features')
 
 lf = add_log_returns(lf)
 
+lf = add_fwd_returns(lf)
+
 lf = add_beta(lf, window=[60, 252])  #  Maybe one window is usually enough, but I choose two for comparison
 
 lf = add_momentum(lf, window=[5, 10, 20, 60, 120, 252])

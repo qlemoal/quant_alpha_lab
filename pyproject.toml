@@ -9,6 +9,8 @@ requires-python = '>=3.11'
 dependencies=[ 
     # generated via 'pipreqs . --print', then hand-pasted here
     # delete the dependencies if you want to "pip install -e ." to create a package from the project.
+    # You may run: python -c "import tomllib; tomllib.load(open('pyproject.toml', 'rb'))" 
+    #     to make sure this file is well written before running pip install -e .
     "matplotlib==3.11.1",
     "numpy==2.5.1",
     "pandas==3.0.5",
