@@ -116,7 +116,7 @@ pip install -e .
 
 ```
 Download data -> Clean data -> Inspect prices -> Build features -> Inspect features
--> Generate signal -> Evaluate predictive power -> Control false discoveries
+-> Generate signal -> Inspect signals -> Evaluate predictive power -> Control false discoveries
 -> Portfolio construction (incl. costs) -> Backtest -> Attribution -> Robustness
 ```
 
@@ -172,8 +172,8 @@ US equities, daily bars only. No intraday, no other asset classes, no fundamenta
 - [x] Download historical prices
 - [x] Clean price data
 - [x] Price inspection
-- [X] Feature engineering, returns/momentum/volatility/ADV done and validated, beta in progress, seasonality not started
-- [~] Signal library
+- [X] Feature engineering, returns/momentum/volatility/ADV/beta done and validated, seasonality not started
+- [~] Signal library done, tested through test_transforms.py, inspect_signals.ipynb to do
 - [ ] Portfolio construction
 - [ ] Transaction cost modeling
 - [ ] Evaluation framework
