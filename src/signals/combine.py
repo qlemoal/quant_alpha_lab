@@ -34,11 +34,11 @@ def make_signal(lf, cols, method='zscore_tanh', **kwargs):
         base = c(col)
 
         if method == 'zscore_tanh':
-            e = tanh_expr( zscore_expr(base), kwargs.get('scale', 1.0) )
+            e = tanh_expr( zscore_expr(base, kwargs.get('descending', False)), kwargs.get('scale', 1.0) )
         elif method == 'zscore':
-            e =  zscore_expr(base)
+            e =  zscore_expr(base, kwargs.get('descending', False))
         elif method == 'zscore_clip':
-            e = clip_expr( zscore_expr(base), kwargs.get('low', -3.0), kwargs.get('high', 3.0) )
+            e = clip_expr( zscore_expr(base, kwargs.get('descending', False)), kwargs.get('low', -3.0), kwargs.get('high', 3.0) )
         elif method == 'rank':
             e = rank_scaled_expr( base, kwargs.get('descending', False) )
         elif method == 'decile':
