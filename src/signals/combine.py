@@ -35,6 +35,8 @@ def make_signal(lf, cols, method='zscore_tanh', **kwargs):
 
         if method == 'zscore_tanh':
             e = tanh_expr( zscore_expr(base), kwargs.get('scale', 1.0) )
+        elif method == 'zscore':
+            e =  zscore_expr(base)
         elif method == 'zscore_clip':
             e = clip_expr( zscore_expr(base), kwargs.get('low', -3.0), kwargs.get('high', 3.0) )
         elif method == 'rank':

@@ -51,18 +51,21 @@ def rank(lf: pl.LazyFrame, feature:str|list, descending=False) -> pl.LazyFrame:
 def decile_bucket_expr(expr:pl.Expr, n_buckets=10) -> pl.Expr:
     deciles = (
         ( expr
-         .qcut(n_buckets, labels=[str(ii) for ii in range(n_buckets)])
+         .qcut(n_buckets, 
+               labels=[str(ii) for ii in range(n_buckets)],
+               allow_duplicates=True)
          .over('date')
-         .cast(pl.Utf8)  # You apparently need to cast as categorical first in polars. Plus labels only accept strings in qcut
+         .cast(pl.Utf8)  # You apparently need to cast from categorical to string first in polars. Plus labels only accept strings in qcut
          .cast(pl.Float64) ) 
         / (n_buckets - 1) * 2 - 1
         )
     return (
-        pl.when(deciles == 1)
-        .then(1)
-        .when(deciles == -1)
-        .then(-1)
-        .otherwise(0)
+        pl.when(expr.is_not_null())
+        .then(
+            pl.when(deciles == 1).then(1)
+            .when(deciles == -1).then(-1)
+            .otherwise(0)
+        ).otherwise(None)
     )
 
 def decile_bucket(lf:pl.LazyFrame, colname:str|list, n_buckets=10) -> pl.LazyFrame:

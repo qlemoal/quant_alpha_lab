@@ -12,7 +12,13 @@ def zscore_expr(expr:pl.Expr) -> pl.Expr:
     '''
     Expr version of z_score, to chain computations together without touching the frame.
     '''
-    return ( (expr - expr.mean().over('date')) / expr.std().over('date') )
+    mean = (expr - expr.mean().over('date'))
+    var = expr.std().over('date') 
+    return (
+        pl.when(var > 0)
+        .then(mean / var)
+        .otherwise(None)
+    )
 
 
 def z_score(lf:pl.LazyFrame, colname:str|list):
