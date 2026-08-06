@@ -5,7 +5,7 @@
 import numpy as np
 import polars as pl
 from polars import col as c
-
+from src.utils.my_plotting import *
 
 
 
@@ -85,17 +85,26 @@ def compare_methods(lf, feature_col, methods, **kwargs):
 
 
 
-
+#  Tests
 
 from src.signals.combine import make_signal
+from evaluation.IC.signal_diagnostics import one_pager
 import matplotlib.pyplot as plt
 
+feature = 'mom120'
+method = 'zscore_tanh'
+
 lf = pl.scan_parquet('data/processed/features.parquet')
-lf = make_signal(lf, 'mom20', method='zscore_tanh', descending=False, scale=1)
-ic_lf = compute_ic(lf, 'mom20_zscore_tanh', forward_return_col='fwdret', method='spearman')
+lf = make_signal(lf, feature, method=method, descending=False, scale=1)
+ic_lf = compute_ic(lf, f'{feature}_{method}', forward_return_col='fwdret', method='spearman')
 
-# ic_lf.collect().to_pandas().set_index('date').plot()
+one_pager(lf, signal_col=f'{feature}_{method}', n_sample_tickers=5)
+
+f, ax = new_fig(fs=(12, 6))
+ic_lf.collect().to_pandas().set_index('date').plot(ax=ax)
+finish_fig(ax, yl='IC', title=f'{feature}_{method} IC evolution')
+
 print(summarize_ic(ic_lf, ic_col='ic'))
-print( compare_methods(lf, feature_col='mom20', methods=['zscore_tanh', 'zscore_clip', 'rank', 'decile'], descending=False, high=1, low=-1, scale=1000) )
 
-plt.show()
+print( compare_methods(lf, feature_col='mom120', methods=['zscore_tanh', 'zscore_clip', 'rank', 'decile'], descending=False, high=1, low=-1, scale=1000) )
+

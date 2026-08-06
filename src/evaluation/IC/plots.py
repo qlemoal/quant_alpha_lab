@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import polars as pl
 from polars import col as c
 
-from src.evaluation.ic import compute_ic
+from evaluation.IC.IC import compute_ic
 
 
 def plot_ic_time_series(ic_dict, ax=None):
@@ -82,25 +82,13 @@ def plot_decile_spread(lf, signal_col, fwd_ret_col='fwd_ret', n_buckets=10, ax=N
     return ax
 
 
-def pivot_wide(df, value_col, index='date', on='ticker'):
-    """
-    Long (ticker, date, value) panel -> wide (date rows, ticker columns).
-    Requires an already-collected DataFrame, pivot is eager-only in
-    Polars. Useful for a per-ticker time series plot, or a ticker x
-    ticker correlation matrix of a signal.
-    """
-    if isinstance(df, pl.LazyFrame):
-        df = df.collect()
-    return df.pivot(index=index, on=on, values=value_col, aggregate_function='first')
-
 
 def build_ic_dict(lf, feature_col, methods, fwd_ret_col='fwd_ret', **kwargs):
     """
-    Convenience wrapper: build a signal under each method, compute its
-    IC time series, return {method_name: ic_df}, ready to feed straight
-    into any of the plot_* functions above.
+    Convenience wrapper: build a signal under each method, compute its IC time series, 
+    return {method_name: ic_df}, ready to feed straight into any of the plot_* functions above.
     """
-    from src.signals.transform import make_signal
+    from src.signals.transforms import make_signal
 
     ic_dict = {}
     for method in methods:
