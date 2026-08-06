@@ -9,38 +9,37 @@ from polars import col as c
 
 
 
-def compute_ic(lf, signal_col, forward_return_col='fwd_ret', method='spearman'):
+def compute_ic(lf:pl.LazyFrame, signal_col, forward_return_col='fwdret', method='spearman'):
     '''
-    Cross-sectional Information Coefficient, per date.
+    Cross-sectional information coefficient, per date.
 
-    For each date, correlates that date's signal values against forward
-    returns across all tickers. Returns one row per date. 'spearman' is
-    the default (Rank IC) since it only depends on ranking, not raw
-    magnitude, less sensitive to a handful of extreme return days than
-    Pearson would be.
+    For each date, correlation btw today's signal against tomorrow's returns across all tickers. 
+        Returns one row per date. 
+        'spearman' is the default (Rank IC) since it only depends on ranking, not raw magnitude, 
+        less sensitive to a handful of extreme return days than Pearson would be.
     '''
     return (
         lf
         .drop_nulls([signal_col, forward_return_col])
         .group_by('date')
-        .agg(pl.corr(signal_col, forward_return_col, method=method).alias('ic'))
+        .agg(
+                pl.corr(signal_col, forward_return_col, method=method).alias('ic')
+            )
         .sort('date')
     )
 
 
-def summarize_ic(ic_lf, ic_col='ic'):
-    """
+def summarize_ic(ic_lf:pl.LazyFrame|pl.DataFrame, ic_col='ic'):
+    '''
     Standard IC summary stats from a per-date IC series:
         mean       -- average predictive power
         std        -- how much that power varies day to day
-        ir         -- information ratio, mean / std. Risk-adjusted signal quality,
-                      the main number to compare across different signals/methods.
-        t_stat      -- mean / (std / sqrt(n)). Rough significance check, treats
-                      daily ICs as independent, which they likely aren't given
-                      overlapping-window features, so read as indicative, not exact.
-        hit_rate    -- fraction of days with IC > 0
-        n_days      -- number of dates with a non-null IC
-    """
+        ir         -- information ratio, mean / std. Risk-adjusted signal quality, the main number to compare across different signals/methods.
+        t_stat     -- mean / (std / sqrt(n)). Rough significance check, treats daily ICs as independent, 
+                        which they likely aren't given overlapping-window features, so read as indicative, not exact.
+        hit_rate   -- fraction of days with IC > 0
+        n_days     -- number of dates with a non-null IC
+    '''
     ic = ic_lf.collect() if isinstance(ic_lf, pl.LazyFrame) else ic_lf
     vals = ic[ic_col].drop_nulls()
 
@@ -61,22 +60,20 @@ def summarize_ic(ic_lf, ic_col='ic'):
     }
 
 
-def compare_methods(lf, feature_col, methods, forward_return_col='fwd_ret', group='date', **kwargs):
-    """
-    Build a signal from `feature_col` under each method in `methods`
-    (via src.signals.transform.make_signal), compute its IC time series,
-    and return a summary table, one row per method, for quick comparison.
+def compare_methods(lf, feature_col, methods, **kwargs):
+    '''
+    Build a signal from 'feature_col' under each method in 'methods' (via src.signals.transform.make_signal), compute its IC time series,
+        and return a summary table, one row per method, for quick comparison.
 
-    methods: list of method names, e.g. ['zscore_tanh', 'rank', 'decile_buckets']
-    """
-    from src.signals.transforms import make_signal
+    methods: list of method names, e.g. ['zscore_tanh', 'zscore_clip', 'rank', 'decile']
+    '''
 
     rows = []
     for method in methods:
         signal_lf = make_signal(lf, feature_col, method=method, **kwargs)
         signal_col = f'{feature_col}_{method}'
 
-        ic_lf = compute_ic(signal_lf, signal_col, forward_return_col, group)
+        ic_lf = compute_ic(signal_lf, signal_col, forward_return_col='fwdret')
         stats = summarize_ic(ic_lf)
         stats['method'] = method
         rows.append(stats)
@@ -85,3 +82,20 @@ def compare_methods(lf, feature_col, methods, forward_return_col='fwd_ret', grou
         ['method', 'mean', 'std', 'ir', 't_stat', 'hit_rate', 'n_days']
     )
 
+
+
+
+
+
+from src.signals.combine import make_signal
+import matplotlib.pyplot as plt
+
+lf = pl.scan_parquet('data/processed/features.parquet')
+lf = make_signal(lf, 'mom20', method='zscore_tanh', descending=False, scale=1)
+ic_lf = compute_ic(lf, 'mom20_zscore_tanh', forward_return_col='fwdret', method='spearman')
+
+# ic_lf.collect().to_pandas().set_index('date').plot()
+print(summarize_ic(ic_lf, ic_col='ic'))
+print( compare_methods(lf, feature_col='mom20', methods=['zscore_tanh', 'zscore_clip', 'rank', 'decile'], descending=False, high=1, low=-1, scale=1000) )
+
+plt.show()
