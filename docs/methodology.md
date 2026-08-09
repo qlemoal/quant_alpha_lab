@@ -37,6 +37,20 @@ None of these are mutually exclusive across the project, different features can 
 
 ---
 
+## Evaluating a new signal, the fixed checklist
+
+Run in this order, every time, before a signal is trusted for anything downstream:
+
+1. Build it with `make_signal()`.
+2. `signal_plots.one_pager()`, visual check: coverage, per-date mean/std, ticker x date heatmap, sample ticker lines. Catches structural bugs before anything else does.
+3. `report.signal_report()`, numeric check: IC mean/std/IR, Newey-West corrected t-stat, hit rate, stability, naive long-short paper Sharpe.
+4. `ic.metrics.ic_decay()`, how far out the predictive power actually holds, informs a sensible rebalance frequency.
+5. `report.compare_reports()` against other candidates, side by side.
+6. FDR across everything tested this round, not yet built, this is the next real piece of infrastructure.
+7. Survivors move to the signal combiner.
+
+---
+
 ## Cleaning the correlation matrix
 
 Planned: `src/risk/covariance_cleaning.py`.

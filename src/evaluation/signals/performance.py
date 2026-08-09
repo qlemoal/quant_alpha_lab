@@ -1,15 +1,16 @@
+#  Performance metrics of a signal
+
 import numpy as np
 import polars as pl
 from polars import col as c
 
-def compute_turnover(lf, signal_col):
-    """
-    Average day-over-day absolute change in signal value, per ticker,
-    aggregated across the cross-section for each date. A cheap proxy
-    for how much trading a signal implies once turned into portfolio
-    weights, higher turnover means more transaction cost exposure once
-    src/portfolio/costs.py exists.
-    """
+def compute_statbility(lf, signal_col):
+    '''
+    Average day-over-day absolute change in signal value, per ticker, aggregated across the cross-section for each date. 
+        A cheap proxy for how much trading a signal implies once turned into portfolio weights, 
+        higher turnover means more transaction cost exposure once src/portfolio/costs.py exists.
+    '''
+
     return (
         lf.sort(['ticker', 'date'])
         .with_columns(

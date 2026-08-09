@@ -2,13 +2,13 @@
 
 Hi! This is a quant research framework built from scratch, modeled on the workflow used by systematic investment firms.
 
-Not trying to find one profitable strategy. Trying to build reusable infrastructure: data, features, signals, evaluation, portfolio construction, backtesting, all under one framework. New idea = implement the signal, everything else already exists.
+I'm not trying to find one profitable strategy. I'm trying to build reusable infrastructure: data, features, signals, evaluation, portfolio construction, backtesting, all under one framework. New idea = implement the signal, everything else already exists.
 
 ---
 
 # About
 
-PhD in Mathematics (Quantitative Finance chair) from EPFL. Looking for a Quantitative Researcher role in Switzerland.
+PhD in Mathematics (Quantitative Finance chair) from EPFL, I'm looking for a Quantitative Researcher role in Switzerland.
 
 This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See "Known Limitations" below, it's not decoration.
 
@@ -80,7 +80,7 @@ pip install -e .
 │
 ├── config/
 │   paths.py                 centralized filesystem paths
-│   constants.py             trading days, rolling windows, thresholds
+│   constants.py             trading days, rolling windows, thresholds, feature/label column rules
 │   settings.py              global settings
 │
 ├── data/                    git-ignored
@@ -95,18 +95,22 @@ pip install -e .
 │   download_data.py
 │   clean_data.py             ETL: extract raw CSVs, transform, load prices.parquet
 │   build_features.py
+│   inspect_signal.py         standalone diagnostic runner, no notebook needed
 │
 ├── src/                      reusable, importable code
 │   features/                 feature engineering, one file per family
-│   signals/                  turning features into tradeable signals
-│   portfolio/                position sizing, transaction costs
-│   evaluation/               IC, Sharpe, FDR, diagnostics
-│   risk/                     correlation matrix cleaning, factor diagnostics
-│   models/                   ML models
-│   utils/                    plotting helpers etc
+│   signals/                  transform.py, turning features into tradeable signals
+│   evaluation/
+│       signals/              IC, significance, stability, one-call report and plots
+│       portfolio/            not started, real turnover, drawdown, cost-adjusted returns
+│       models/               not started, log loss, Brier score, calibration
+│   portfolio/                not started, position sizing, transaction costs
+│   risk/                     correlation matrix cleaning, factor diagnostics (stubbed)
+│   models/                   not started, ML models
+│   utils/                    panel reshaping, plotting helpers
 │
 ├── sql/                      DuckDB queries, kept separate for readability
-├── tests/                    pytest unit tests
+├── tests/                    pytest unit tests, conftest.py holds the edge-case panel fixtures
 └── README.md
 ```
 
@@ -115,7 +119,8 @@ pip install -e .
 # Workflow
 
 ```
-Download data -> Clean data -> Inspect prices -> Build features -> Inspect features
+-> Download data -> ETL data -> Inspect data 
+-> Build features -> Inspect features 
 -> Generate signal -> Inspect signals -> Evaluate predictive power -> Control false discoveries
 -> Portfolio construction (incl. costs) -> Backtest -> Attribution -> Robustness
 ```
@@ -139,14 +144,33 @@ Full methodology behind evaluation, signal construction, and correlation cleanin
 
 ---
 
+# Signals and evaluation
+ 
+`src/signals/transform.py` turns a feature into a tradeable signal, cross-sectionally, per date. Four construction methods: `zscore_tanh`, `zscore_clip`, `rank`, `decile`. Which one fits a given feature depends on how much its raw magnitude is trusted, see `docs/methodology.md`.
+ 
+`src/evaluation/signals/` scores a signal once it exists:
+ 
+| File | What it gives you |
+|---|---|
+| `ic/core.py` | Rank IC per date, summary stats (mean, IR, hit rate) |
+| `ic/metrics.py` | Newey-West corrected significance, IC decay across forward horizons |
+| `ic/plots.py` | IC time series, cumulative IC, IC distribution, decile spread, comparing several methods at once |
+| `performance.py` | signal stability (day-over-day change), naive long-short paper Sharpe |
+| `report.py` | one call, numeric-only health check, no plots |
+| `signal_plots.py` | one call, visual health check, coverage/moments/heatmap/sample tickers |
+ 
+Every new signal gets both a `report.signal_report()` call and a `signal_plots.one_pager()` call before it's trusted for anything further, this is checked, not assumed, `tests/` has a deliberately awkward set of edge-case panels (`conftest.py`) every new function gets run against.
+ 
+---
+
 # Known limitations
 
 ## Survivorship bias
 
 The universe is today's S&P 500 constituents, applied retroactively. Delisted/removed companies are missing entirely. Recently added companies have history predating their actual index membership. Every return, Sharpe ratio, and factor exposure in this repo is biased upward as a result.
-
+ 
 Not an oversight, a scope decision: true point-in-time constituent history needs a paid vendor (CRSP, Compustat) I don't have access to outside an institutional setting. A free approximate point-in-time list is on the roadmap.
-
+ 
 **This bias also corrupts the market proxy used for beta.** `beta.py` currently derives "market return" as the equal-weighted average across this same biased, thin-in-early-years universe. In the early 2000s, few of today's constituents have history yet, so the market proxy is built from a small, unstable sample, which makes its variance swing around and produces spuriously extreme beta values pre-2003. Two fixes: a minimum-ticker-count guard to null out beta until the universe is wide enough (quick, implemented as a stopgap), and replacing the proxy with a real benchmark index (S&P 500 / SPY) entirely (the actual fix, planned).
 
 ## Data provenance
@@ -172,25 +196,28 @@ US equities, daily bars only. No intraday, no other asset classes, no fundamenta
 - [x] Download historical prices
 - [x] Clean price data
 - [x] Price inspection
-- [X] Feature engineering, returns/momentum/volatility/ADV/beta done and validated, seasonality not started
-- [~] Signal library done, tested through test_transforms.py, inspect_signals.ipynb to do
+- [~] Feature engineering, returns/momentum/volatility/ADV done and validated, beta implemented (market proxy has a known thin-history issue, see limitations), seasonality not started
+- [x] Signal construction, four methods, tested against edge-case panels
+- [x] Signal evaluation, Rank IC, Newey-West significance, IC decay, stability, paper Sharpe, numeric and visual one-call checks
+- [ ] FDR across multiple candidate signals (next)
+- [ ] Elastic Net signal combiner
 - [ ] Portfolio construction
 - [ ] Transaction cost modeling
-- [ ] Evaluation framework
-- [ ] FDR
-- [ ] ML models
+- [ ] RMT correlation cleaning
+- [ ] GBM comparison model
 - [ ] Robustness analysis
 
 ---
 
-# TODO
-
-- [ ] fix market proxy, add `seasonality.py`
-- [ ] Fill `tests/` with real unit tests
-- [ ] `src/signals/`, first alpha signal on top of current features
-- [ ] `src/evaluation/`, Rank IC, FDR
+# Roadmap
+ 
+- [ ] FDR across candidate signals, `src/evaluation/signals/fdr.py`
+- [ ] Fix beta's market proxy (real benchmark index instead of the biased equal-weighted universe average)
+- [ ] `seasonality.py`
+- [ ] Elastic Net combiner across FDR-surviving signals
 - [ ] `src/portfolio/`, position sizing, transaction costs
 - [ ] `src/risk/covariance_cleaning.py`, RMT denoising, absorption ratio
+- [ ] GBM comparison model, purged/embargoed walk-forward CV
 - [ ] Full backtest loop with attribution
 - [ ] Approximate point-in-time constituent list
 

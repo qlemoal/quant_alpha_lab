@@ -1,8 +1,12 @@
+'''
+Single numeric aggregator, with statistics, from perfoamrnce.py and IC folder stats (similarly to signal_plots.py for plots)
+'''
+
 import polars as pl
 
 from src.evaluation.ic.core import compute_ic, summarize_ic
 from src.evaluation.ic.metrics import newey_west_ic_tstat
-from src.evaluation.performance import compute_turnover, quantile_spread_returns, sharpe_ratio
+from evaluation.signals.performance import compute_turnover, quantile_spread_returns, sharpe_ratio
 
 
 def signal_report(lf, signal_col, fwd_ret_col='fwd_ret', group='date'):

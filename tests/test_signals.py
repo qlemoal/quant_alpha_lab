@@ -1,6 +1,6 @@
 '''
 Test signals on all the defined panels in conftest, to see if every method in make_signal is actually working before evaluating signals.
-Run this file using pytest "tests/test_signals.py -v"
+Run this file using "pytest tests/test_signals.py -v"
 '''
 
 
