@@ -21,3 +21,5 @@ data/processed/
 *.csv
 
 *.DS_Store
+
+*.egg-info/

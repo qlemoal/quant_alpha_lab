@@ -1,3 +1,6 @@
+#  pre-IC signal sanity visuals, coverage/moments/heatmap/sample lines.
+
+
 import matplotlib.pyplot as plt
 import polars as pl
 from polars import col as c
@@ -5,13 +8,17 @@ from polars import col as c
 from src.utils.panels import pivot_wide
 
 
-def _sample_ticker_lines(ax, wide_df, n=6):
+def _sample_ticker_lines(ax, wide_df, n=4, last_n_dates=750):
+    '''
+    Fewer tickers, recent window only, small multiples would be even better for n > ~4, but this keeps it to one axis for the one-pager
+    '''
     tickers = [col for col in wide_df.columns if col != 'date'][:n]
+    recent = wide_df.tail(last_n_dates) if last_n_dates else wide_df
     for t in tickers:
-        ax.plot(wide_df['date'], wide_df[t], alpha=0.7, lw=1, label=t)
+        ax.plot(recent['date'], recent[t], alpha=0.8, lw=1, label=t)
     ax.axhline(0, color='grey', lw=0.5)
-    ax.legend(fontsize=7, ncol=2)
-    ax.set_title('sample ticker signals')
+    ax.legend(fontsize=7)
+    ax.set_title(f'sample ticker signals (last {last_n_dates} dates)' if last_n_dates else 'sample ticker signals')
 
 
 def _coverage(ax, lf, signal_col):

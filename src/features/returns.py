@@ -12,7 +12,7 @@ def add_log_returns(lf):
 
 
 
-def add_fwd_returns(lf):
+def add_fwd_returns(lf, window=1):
     return lf.sort(['ticker', 'date']).with_columns(
-                fwdret = c('logret').shift(-1).over('ticker').alias('fwdret')
+                fwdret = c('logret').shift(-window).over('ticker').alias('fwdret')
             )

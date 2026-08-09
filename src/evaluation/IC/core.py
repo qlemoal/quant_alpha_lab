@@ -1,3 +1,5 @@
+# Basic building blocks of IC statistics
+
 # The IC observations have finite variance, so by CLT the average becomes approximately Gaussian ===> we can use t-stat on the IC.
 # However there is serial dependence so we might turn to: Newey-West t-stat, block bootstrap, White Reality Check, SPA tests
 
@@ -6,6 +8,7 @@ import numpy as np
 import polars as pl
 from polars import col as c
 from src.utils.my_plotting import *
+from src.signals.combine import make_signal
 
 
 
@@ -82,29 +85,4 @@ def compare_methods(lf, feature_col, methods, **kwargs):
         ['method', 'mean', 'std', 'ir', 't_stat', 'hit_rate', 'n_days']
     )
 
-
-
-
-#  Tests
-
-from src.signals.combine import make_signal
-from evaluation.IC.signal_diagnostics import one_pager
-import matplotlib.pyplot as plt
-
-feature = 'mom120'
-method = 'zscore_tanh'
-
-lf = pl.scan_parquet('data/processed/features.parquet')
-lf = make_signal(lf, feature, method=method, descending=False, scale=1)
-ic_lf = compute_ic(lf, f'{feature}_{method}', forward_return_col='fwdret', method='spearman')
-
-one_pager(lf, signal_col=f'{feature}_{method}', n_sample_tickers=5)
-
-f, ax = new_fig(fs=(12, 6))
-ic_lf.collect().to_pandas().set_index('date').plot(ax=ax)
-finish_fig(ax, yl='IC', title=f'{feature}_{method} IC evolution')
-
-print(summarize_ic(ic_lf, ic_col='ic'))
-
-print( compare_methods(lf, feature_col='mom120', methods=['zscore_tanh', 'zscore_clip', 'rank', 'decile'], descending=False, high=1, low=-1, scale=1000) )
 

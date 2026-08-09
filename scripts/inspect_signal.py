@@ -1,15 +1,15 @@
-import matplotlib.pyplot as plt
-from polars import col as c
-import pandas as pd
+#  Several plots in one page, to inspect a unique signal's behaviour.
+
+
 import polars as pl
 from src.signals.combine import make_signal
-from src.evaluation.IC.signal_diagnostics import one_pager
-
+from evaluation.signal_plots import one_pager
 
 
 
 
 feature = 'mom252'
+descending = False  # True if a high feature translates to short
 signal_method = 'zscore_tanh'
 n_random_tickers = 10
 

@@ -1,3 +1,13 @@
+# For a new signal, we should check the following list:
+# - Build the signal via make_signal().
+# - signal_plots.one_pager() — visual sanity check, catches structural bugs (coverage gaps, heatmap stripes) before anything downstream is trusted.
+# - report.signal_report() — numeric health check: IC mean/std/IR, Newey-West-corrected t-stat, hit rate, turnover, naive long-short Sharpe.
+# - If it clears both, ic.metrics.ic_decay() to see how far out the predictive power actually holds, informs rebalance frequency.
+# - report.compare_reports() across every candidate signal you're considering, one table, side by side.
+# - FDR across all candidates tested this round, not yet built, this is genuinely the next real piece of infrastructure, distinct from everything above.
+# - Survivors move into the Elastic Net combiner / portfolio construction stage.
+
+
 import polars as pl
 from polars import col as c
 from src.utils.helpers import as_list
