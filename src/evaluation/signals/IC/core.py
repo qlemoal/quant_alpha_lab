@@ -12,7 +12,7 @@ from src.signals.combine import make_signal
 
 
 
-def compute_ic(lf:pl.LazyFrame, signal_col, forward_return_col='fwdret', method='spearman'):
+def compute_ic(lf:pl.LazyFrame, signal_col, forward_return_col='fwdret', method='spearman') -> pl.LazyFrame:
     '''
     Cross-sectional information coefficient, per date.
 
@@ -32,9 +32,9 @@ def compute_ic(lf:pl.LazyFrame, signal_col, forward_return_col='fwdret', method=
     )
 
 
-def summarize_ic(ic_lf:pl.LazyFrame|pl.DataFrame, ic_col='ic'):
+def summarize_ic(ic_lf:pl.LazyFrame|pl.DataFrame, ic_col='ic') -> dict:
     '''
-    Standard IC summary stats from a per-date IC series:
+    Returns dict of IC stats from a per-date IC series:
         mean       -- average predictive power
         std        -- how much that power varies day to day
         ir         -- information ratio, mean / std. Risk-adjusted signal quality, the main number to compare across different signals/methods.
@@ -84,5 +84,4 @@ def compare_methods(lf, feature_col, methods, **kwargs):
     return pl.DataFrame(rows).select(
         ['method', 'mean', 'std', 'ir', 't_stat', 'hit_rate', 'n_days']
     )
-
 

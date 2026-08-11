@@ -15,4 +15,6 @@ src/features/seasonality.py
 src/features/volatility.py
 src/utils/helpers.py
 src/utils/my_plotting.py
+src/utils/panels.py
 tests/test_beta.py
+tests/test_signals.py

@@ -48,7 +48,7 @@ def rank(lf: pl.LazyFrame, feature:str|list, descending=False) -> pl.LazyFrame:
 
 
 
-def decile_bucket_expr(expr:pl.Expr, n_buckets=10, descending=False) -> pl.Expr:
+def decile_expr(expr:pl.Expr, n_buckets=10, descending=False) -> pl.Expr:
     if descending==True: inversion = -1 
     else: inversion = 1  
     deciles = (
@@ -70,7 +70,7 @@ def decile_bucket_expr(expr:pl.Expr, n_buckets=10, descending=False) -> pl.Expr:
         ).otherwise(None)
     )
 
-def decile_bucket(lf:pl.LazyFrame, colname:str|list, n_buckets=10, descending=False) -> pl.LazyFrame:
+def decile(lf:pl.LazyFrame, colname:str|list, n_buckets=10, descending=False) -> pl.LazyFrame:
     '''
     Categorizes data in colname into n_buckets.
     It should then be coupled into a long-short position in the top and bottom deciles.
@@ -78,4 +78,4 @@ def decile_bucket(lf:pl.LazyFrame, colname:str|list, n_buckets=10, descending=Fa
     n_buckets: number of categories to sort the data into. 10 buckets corresponds to sorting into deciles.
     '''
 
-    return add_expr(lf, decile_bucket_expr, colname, suffix='_decile', n_buckets=n_buckets, descending=descending)
+    return add_expr(lf, decile_expr, colname, suffix='_decile', n_buckets=n_buckets, descending=descending)

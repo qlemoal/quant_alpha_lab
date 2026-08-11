@@ -196,7 +196,7 @@ US equities, daily bars only. No intraday, no other asset classes, no fundamenta
 - [x] Download historical prices
 - [x] Clean price data
 - [x] Price inspection
-- [~] Feature engineering, returns/momentum/volatility/ADV done and validated, beta implemented (market proxy has a known thin-history issue, see limitations), seasonality not started
+- [X] Feature engineering, returns/momentum/volatility/ADV done and validated, beta implemented (market proxy has a known thin-history issue, see limitations), seasonality not started
 - [x] Signal construction, four methods, tested against edge-case panels
 - [x] Signal evaluation, Rank IC, Newey-West significance, IC decay, stability, paper Sharpe, numeric and visual one-call checks
 - [ ] FDR across multiple candidate signals (next)

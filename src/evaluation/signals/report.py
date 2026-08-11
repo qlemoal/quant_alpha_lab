@@ -4,13 +4,13 @@ Single numeric aggregator, with statistics, from perfoamrnce.py and IC folder st
 
 import polars as pl
 
-from src.evaluation.ic.core import compute_ic, summarize_ic
-from src.evaluation.ic.metrics import newey_west_ic_tstat
-from evaluation.signals.performance import compute_turnover, quantile_spread_returns, sharpe_ratio
+from src.evaluation.signals.IC.core import compute_ic, summarize_ic
+from src.evaluation.signals.IC.metrics import newey_west_ic_tstat
+from src.evaluation.signals.performance import compute_stability, decile_longshort_returns, sharpe_ratio
 
 
-def signal_report(lf, signal_col, fwd_ret_col='fwd_ret', group='date'):
-    """
+def signal_report(lf, signal_col, fwdret_col='fwdret'):
+    '''
     Single-call, numeric-only health check for a signal. No plots.
     Meant to run immediately after defining any new signal, before
     deciding whether it's worth a closer look via signal_diagnostics
@@ -25,18 +25,18 @@ def signal_report(lf, signal_col, fwd_ret_col='fwd_ret', group='date'):
         avg_turnover                 -- mean day-over-day |signal change|
         long_short_sharpe            -- naive top-vs-bottom-decile paper Sharpe,
                                          pre-cost, directional sanity check only
-    """
-    ic_lf = compute_ic(lf, signal_col, fwd_ret_col, group)
+    '''
+    ic_lf = compute_ic(lf, signal_col, forward_return_col=fwdret_col)
     ic_collected = ic_lf.collect()
     ic_series = ic_collected['ic'].to_list()
 
     basic = summarize_ic(ic_collected)
     nw = newey_west_ic_tstat(ic_series)
 
-    turnover_df = compute_turnover(lf, signal_col).collect()
+    turnover_df = compute_stability(lf, signal_col).collect()
     avg_turnover = turnover_df['turnover'].mean()
 
-    spread_df = quantile_spread_returns(lf, signal_col, fwd_ret_col, group=group).collect()
+    spread_df = decile_longshort_returns(lf, signal_col, fwdret_col).collect()
     ls_sharpe = sharpe_ratio(spread_df['spread_ret'].to_list())
 
     return {
@@ -53,10 +53,21 @@ def signal_report(lf, signal_col, fwd_ret_col='fwd_ret', group='date'):
     }
 
 
-def compare_reports(lf, signal_cols, fwd_ret_col='fwd_ret', group='date'):
-    """
-    signal_report() for several signals at once, one row per signal,
+def compare_reports(lf, signal_cols, fwdret_col='fwdret'):
+    '''
+    signal_report() for several signals at once, one row per signal, 
     for a quick systematic side-by-side without opening a notebook.
-    """
-    rows = [signal_report(lf, col, fwd_ret_col, group) for col in signal_cols]
+    '''
+    rows = [signal_report(lf, col, fwdret_col) for col in signal_cols]
     return pl.DataFrame(rows)
+
+
+
+from src.signals.combine import make_signal
+with pl.Config(tbl_cols=-1):  # that's to print the whole report instead of truncating some columns
+
+    lf = pl.scan_parquet('data/processed/features.parquet')
+    lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom120', 'mom252'], method='decile')
+    # lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom252'], method='zscore_tanh')
+    # print(signal_report(lf, signal_col='mom20_decile'))
+    print(compare_reports(lf, signal_cols=['mom5_decile', 'mom10_decile', 'mom20_decile', 'mom60_decile', 'mom120_decile', 'mom252_decile'], fwdret_col='fwdret'))
