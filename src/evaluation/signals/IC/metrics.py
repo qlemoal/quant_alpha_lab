@@ -4,14 +4,16 @@
 #      instead of using the standard rule of thumb.
 
 import numpy as np
+import pandas as pd
 import polars as pl
+from polars import col as c
 
 from src.signals.combine import make_signal
 from src.features.returns import add_fwdret_horizon
 from src.evaluation.signals.IC.core import compute_ic, summarize_ic
 
 
-def newey_west_ic_tstat(ic_values, max_lag=None):
+def newey_west_ic_tstat(s_ic:pd.Series, max_lag=None) -> dict:
     '''
     Newey-West (HAC, heteroskedastic autocorrelated consistent) corrected t-stat for the mean of a daily IC series.
         HAC is for the covariance matrix,  See https://en.wikipedia.org/wiki/Newey%E2%80%93West_estimator 
@@ -31,9 +33,11 @@ def newey_west_ic_tstat(ic_values, max_lag=None):
         - Use the SE to get the t-stat
 
     max_lag defaults to the standard Newey-West (1994) rule of thumb, 4 * (n/100)^(2/9), if not given explicitly.
+
+    IMPORTANT: Feed in only the values, not the date!!! 
+        Temporary fix: forcing to be a pandas Series, which will be forced to be 1 dimensional. I then get the values of it to remove the dates.
     '''
-    if isinstance(ic_values, pl.LazyFrame): ic_values = ic_values.collect()
-    x = np.asarray(ic_values, dtype=float)
+    x = s_ic.values
     x = x[~np.isnan(x)]
     n = len(x)
     if n < 2:
@@ -48,16 +52,38 @@ def newey_west_ic_tstat(ic_values, max_lag=None):
     gamma0 = np.sum(demeaned ** 2) / n
 
     var = gamma0
+    gammas = []
     for k in range(1, max_lag + 1):
         w = 1 - k / (max_lag + 1)
         gamma_k = np.sum(demeaned[k:] * demeaned[:-k]) / n
+        gammas.append(gamma_k)
         var += 2 * w * gamma_k
 
     se = np.sqrt(var / n) if var > 0 else None
     t_stat = mean / se if se else None
 
-    return {'mean': mean, 'se': se, 't_stat': t_stat, 'max_lag': max_lag}
+    return {'mean': mean, 'se': se, 't_stat': t_stat, 'max_lag': max_lag, 'n':n, 'gamma0':gamma0, 'gammas':gammas, 'deameaned':demeaned, 'x':x}
 
+
+
+
+from datetime import date
+
+lf = pl.scan_parquet('data/processed/features.parquet')
+lf = make_signal(lf, ['mom5', 'mom10'], method='decile')
+
+lf = lf.filter(
+    pl.col('ticker').is_in(['MSFT', 'AAPL', 'A']),
+    pl.col('date') < date(2001, 1, 1)
+)
+
+s_ic = compute_ic(lf, 'mom20', forward_return_col='fwdret').collect().to_pandas().set_index('date')
+r = newey_west_ic_tstat(s_ic)
+print(r['x'])
+print('tstat:', r['t_stat'], 'n', r['n'], 'max_lag', r['max_lag'], 'gamma0', r['gamma0'], 'gammas', r['gammas'])
+print(len(s_ic), s_ic[:10])
+# print(summarize_ic(ic_values))
+# print(newey_west_ic_tstat(ic_values))
 
 
 
@@ -68,7 +94,7 @@ def ic_decay(lf, signal_col, horizons=(1, 5, 10, 20)):
         directly informs what rebalance frequency makes sense: 
         a signal that only shows IC at horizon 1 wants daily rebalancing (expensive),
         one that holds up to horizon 20 can rebalance far less often.
-    Note: Now Newey-West compensation for autocorrelation is used here. TODO?
+    Note: No Newey-West compensation for autocorrelation is used here. TODO?
     '''
 
     rows = []

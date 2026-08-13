@@ -63,11 +63,12 @@ def compare_reports(lf, signal_cols, fwdret_col='fwdret'):
 
 
 
-from src.signals.combine import make_signal
-with pl.Config(tbl_cols=-1):  # that's to print the whole report instead of truncating some columns
+if __name__=='__main__':
+    from src.signals.combine import make_signal
+    with pl.Config(tbl_cols=-1):  # that's to print the whole report instead of truncating some columns
 
-    lf = pl.scan_parquet('data/processed/features.parquet')
-    lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom120', 'mom252'], method='decile')
-    # lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom252'], method='zscore_tanh')
-    # print(signal_report(lf, signal_col='mom20_decile'))
-    print(compare_reports(lf, signal_cols=['mom5_decile', 'mom10_decile', 'mom20_decile', 'mom60_decile', 'mom120_decile', 'mom252_decile'], fwdret_col='fwdret'))
+        lf = pl.scan_parquet('data/processed/features.parquet')
+        lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom120', 'mom252'], method='decile')
+        # lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom252'], method='zscore_tanh')
+        # print(signal_report(lf, signal_col='mom20_decile'))
+        print(compare_reports(lf, signal_cols=['mom5_decile', 'mom10_decile', 'mom20_decile', 'mom60_decile', 'mom120_decile', 'mom252_decile'], fwdret_col='fwdret'))
