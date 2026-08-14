@@ -163,6 +163,23 @@ Every new signal gets both a `report.signal_report()` call and a `signal_plots.o
  
 ---
 
+
+# Design philosophy: no free parameters, by construction
+
+A recurring principle across this repo: prefer methods with no parameter to hand-pick over methods that need one, even when the tunable version is more powerful. A parameter chosen by checking what it does to the results, however innocently, is a parameter chosen to fit this specific dataset, and that's a direct path to overfitting the research process itself, not just a model. 
+
+This shows up in several independent decisions, e.g.:
+
+- **Rank IC over raw-return backtests.** A single backtest's Sharpe ratio is trivial to overfit by adjusting almost anything about it. Rank correlation against forward returns is harder to game by construction.
+- **Rank transform preferred over zscore-tanh for untrusted features.** No clip bound, no tanh scale to pick, ordinal position only.
+- **Louvain over k-means for clustering.** k-means needs k chosen in advance, a free parameter with no principled answer from the data itself. Louvain finds the number of communities by maximizing modularity, nothing to feed it beforehand.
+- **Newey-West's lag length uses the standard 1994 rule of thumb**, not a value searched over to produce a preferred t-stat.
+- **FDR: Storey's q-value over a fixed BH/BY alpha**, wherever it's usable. BH and BY both require declaring a significance level up front, a small number written by a human, and a different number will validate a different, cherry-pickable set of signals. Storey's pi0 is estimated from the p-value distribution itself. See docs/methodology.md for the mechanics.
+
+The distinction that matters isn't "no parameters anywhere," some numbers are unavoidable (a significance convention, a kernel bandwidth rule). It's whether a parameter was fixed by a defensible convention before looking at results, or picked, however implicitly, because it produced a result that looked good. Every parameter in this repo should be defensible as the former. If it can't be, it's a bug in my research process, not just in the code.
+
+---
+
 # Known limitations
 
 ## Survivorship bias

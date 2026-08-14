@@ -71,6 +71,79 @@ def benjamini_yekutieli(pvalues: list[float], alpha: float = 0.05) -> list[bool]
 
 
 
+#  Non-parametric method now with Storey's q-values:
+
+from scipy.interpolate import UnivariateSpline
+
+
+def estimate_pi0(pvalues, lambdas=None):
+    '''
+    Storey & Tibshirani (2003) automatic pi0 estimate: the proportion of
+        candidates that are genuinely null, estimated from the data itself,
+        no alpha or lambda chosen by hand for this specific batch. Under the
+        null, p-values are uniform, so as lambda -> 1, #{p_i > lambda} /
+        (m*(1-lambda)) converges to pi0. A cubic spline is fit across a fixed
+        lambda grid (the grid itself is a standard, dataset-independent
+        convention, not tuned) and evaluated at the right edge, smoothing
+        across the whole grid instead of trusting one noisy single-lambda
+        estimate.
+    '''
+    p = np.asarray(pvalues, dtype=float)
+    p = p[~np.isnan(p)]
+    n = len(p)
+
+    if n < 20:
+        # too few candidates for a stable spline fit, assume the worst case
+        # (all null) rather than trust a noisy estimate
+        return 1.0
+
+    if lambdas is None:
+        lambdas = np.arange(0.05, 0.96, 0.05)
+
+    pi0_hat = np.array([np.mean(p > lam) / (1 - lam) for lam in lambdas])
+    spline = UnivariateSpline(lambdas, pi0_hat, k=3, s=len(lambdas))
+    pi0 = float(spline(lambdas[-1]))
+
+    return float(np.clip(pi0, 0.0, 1.0))
+
+
+def qvalues(pvalues):
+    '''
+    Storey q-values: for each candidate, the minimum FDR at which it would be
+        called significant. No alpha, no per-signal cutoff decision baked in
+        here, pi0 comes from the data (estimate_pi0), everything after that
+        is a fixed, order-preserving transform of the p-values. Reported as
+        a continuous number per signal rather than a survives/doesn't-survive
+        boolean, on purpose, any cutoff is a separate downstream decision
+        (e.g. feeding the Elastic Net combiner a continuous confidence
+        weight instead of a hard pass/fail), not baked into the test itself.
+    '''
+    p = np.asarray(pvalues, dtype=float)
+    m = len(p)
+    valid = ~np.isnan(p)
+
+    q = np.full(m, np.nan)
+    if valid.sum() == 0:
+        return q.tolist()
+
+    p_valid = p[valid]
+    n = len(p_valid)
+    pi0 = estimate_pi0(p_valid)
+
+    order = np.argsort(p_valid)
+    p_sorted = p_valid[order]
+
+    q_sorted = np.empty(n)
+    q_sorted[-1] = pi0 * p_sorted[-1]
+    for i in range(n - 2, -1, -1):
+        q_sorted[i] = min(pi0 * n * p_sorted[i] / (i + 1), q_sorted[i + 1])
+
+    q_valid = np.empty(n)
+    q_valid[order] = q_sorted
+    q[valid] = q_valid
+    return q.tolist()
+
+
 #  Aggregate
 
 def fdr_report(signal_names, pvalues, alpha=0.05):
