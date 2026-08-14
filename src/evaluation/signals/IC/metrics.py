@@ -7,13 +7,14 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from polars import col as c
+from scipy.stats import norm
 
 from src.signals.combine import make_signal
 from src.features.returns import add_fwdret_horizon
 from src.evaluation.signals.IC.core import compute_ic, summarize_ic
 
 
-def newey_west_ic_tstat(s_ic:pd.Series, max_lag=None) -> dict:
+def newey_west_ic_tstat(ic_values:pl.LazyFrame|pl.DataFrame|list, max_lag=None) -> dict:
     '''
     Newey-West (HAC, heteroskedastic autocorrelated consistent) corrected t-stat for the mean of a daily IC series.
         HAC is for the covariance matrix,  See https://en.wikipedia.org/wiki/Newey%E2%80%93West_estimator 
@@ -37,7 +38,9 @@ def newey_west_ic_tstat(s_ic:pd.Series, max_lag=None) -> dict:
     IMPORTANT: Feed in only the values, not the date!!! 
         Temporary fix: forcing to be a pandas Series, which will be forced to be 1 dimensional. I then get the values of it to remove the dates.
     '''
-    x = s_ic.values
+    x = np.asarray(ic_values, dtype=float)
+    if x.ndim != 1:
+        raise ValueError(f'newey_west_ic_tstat expects 1D IC values, as a list, pl.LazyFrame or pl.DataFrame, but got shape {x.shape}')
     x = x[~np.isnan(x)]
     n = len(x)
     if n < 2:
@@ -62,28 +65,24 @@ def newey_west_ic_tstat(s_ic:pd.Series, max_lag=None) -> dict:
     se = np.sqrt(var / n) if var > 0 else None
     t_stat = mean / se if se else None
 
-    return {'mean': mean, 'se': se, 't_stat': t_stat, 'max_lag': max_lag, 'n':n, 'gamma0':gamma0, 'gammas':gammas, 'deameaned':demeaned, 'x':x}
+    return {'mean': mean, 'se': se, 't_stat': t_stat, 'max_lag': max_lag}#, 'n':n, 'gamma0':gamma0, 'gammas':gammas, 'deameaned':demeaned, 'x':x}
 
 
 
 
-from datetime import date
 
-lf = pl.scan_parquet('data/processed/features.parquet')
-lf = make_signal(lf, ['mom5', 'mom10'], method='decile')
-
-lf = lf.filter(
-    pl.col('ticker').is_in(['MSFT', 'AAPL', 'A']),
-    pl.col('date') < date(2001, 1, 1)
-)
-
-s_ic = compute_ic(lf, 'mom20', forward_return_col='fwdret').collect().to_pandas().set_index('date')
-r = newey_west_ic_tstat(s_ic)
-print(r['x'])
-print('tstat:', r['t_stat'], 'n', r['n'], 'max_lag', r['max_lag'], 'gamma0', r['gamma0'], 'gammas', r['gammas'])
-print(len(s_ic), s_ic[:10])
-# print(summarize_ic(ic_values))
-# print(newey_west_ic_tstat(ic_values))
+def ic_pvalue_nw(nw_result:dict) -> float | None:
+    '''
+    Two-sided p-value from a Newey-West-corrected t-stat, via the normal
+        approximation (the NW t-stat is asymptotically normal, not exactly
+        Student-t, unlike the naive t-stat which assumes a known small-sample
+        distribution). Takes the dict returned by newey_west_ic_tstat directly,
+        so the two functions stay paired.
+    '''
+    t = nw_result.get('t_stat')
+    if t is None:
+        return None
+    return 2 * (1 - norm.cdf(abs(t)))
 
 
 
@@ -107,3 +106,14 @@ def ic_decay(lf, signal_col, horizons=(1, 5, 10, 20)):
 
     return pl.DataFrame(rows).select(['horizon', 'mean', 'std', 'ir', 'hit_rate', 'n_days'])
 
+
+
+if __name__=='__main__':
+    from src.signals.combine import make_signal
+    with pl.Config(tbl_cols=-1):  # that's to print the whole report instead of truncating some columns
+
+        lf = pl.scan_parquet('data/processed/features.parquet')
+        lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom120', 'mom252'], method='decile')
+        # lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom252'], method='zscore_tanh')
+        # print(signal_report(lf, signal_col='mom20_decile'))
+        print(ic_decay(lf, 'mom252'))

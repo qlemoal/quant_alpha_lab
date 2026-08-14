@@ -10,7 +10,7 @@ I'm not trying to find one profitable strategy. I'm trying to build reusable inf
 
 PhD in Mathematics (Quantitative Finance chair) from EPFL, I'm looking for a Quantitative Researcher role in Switzerland.
 
-This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See "Known Limitations" below, it's not decoration.
+This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See "Known Limitations" below, before trusting any number above it.
 
 Contact: qs.lemoal@gmail.com / [LinkedIn](https://www.linkedin.com/in/qlemoal/)
 
@@ -36,7 +36,7 @@ Full pipeline:
 # Stack
 
 **DuckDB + SQL:**
-For anything touching large datasets: imports, joins, filtering, aggregations, quality checks. Works directly on parquet, no need to load everything into memory.
+For anything touching large datasets: imports, joins, filtering, aggregations, quality checks. Works directly on parquet, no need to lowad everything into memory.
 
 **Polars:**
 For features and signals. Lazy evaluation, fast rolling computations, low memory footprint. Stays lazy until the final `collect()`.
@@ -176,6 +176,8 @@ Not an oversight, a scope decision: true point-in-time constituent history needs
 ## Data provenance
 
 Prices come from `yfinance`, unofficial, not a licensed feed. `Adj Close` gets retroactively restated by Yahoo whenever a new corporate action happens, so re-downloading the same history later can give slightly different values for the same date. No guarantee on completeness or timeliness compared to a real vendor.
+
+Also worth flagging alongside price reversal: `Adj Close` gets retroactively restated whenever a new corporate action happens, so re-downloaded history can carry slightly different daily values than the original download. That's a second, harder-to-rule-out source of artificial day-to-day return noise, no clean way to separate it from genuine short-term reversal without a licensed feed to compare against.
 
 ## No transaction costs yet
 

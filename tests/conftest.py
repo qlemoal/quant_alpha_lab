@@ -111,3 +111,48 @@ def panel_with_ties():
         'date':   [1, 1, 1, 1, 1, 1],
         'feat':   [1.0, 1.0, 1.0, 2.0, 2.0, 3.0],
     })
+
+
+
+
+##  TEST OF P-VALUES
+
+@pytest.fixture
+def pvals_all_significant():
+    '''Everything genuinely significant, should survive both BH and BY.'''
+    return [0.0001, 0.0005, 0.001, 0.002, 0.003]
+
+@pytest.fixture
+def pvals_all_null():
+    '''Nothing significant, nothing should survive either method.'''
+    return [0.4, 0.5, 0.6, 0.7, 0.9]
+
+@pytest.fixture
+def pvals_single_candidate():
+    '''m=1, BH and BY should agree exactly (harmonic number H_1 = 1).'''
+    return [0.01]
+
+@pytest.fixture
+def pvals_identical():
+    '''All tests share the same p-value, exercises tie-handling in sort/threshold comparison.'''
+    return [0.03, 0.03, 0.03, 0.03]
+
+@pytest.fixture
+def pvals_at_threshold_boundary():
+    '''Values sitting close to typical BH/BY thresholds at alpha=0.05, m=5, worth checking against hand-computed thresholds.'''
+    return [0.008, 0.019, 0.031, 0.044, 0.09]
+
+@pytest.fixture
+def pvals_mixed_with_nan():
+    '''One candidate's t-stat failed to compute (e.g. degenerate variance), should not corrupt sorting/threshold logic for the rest.'''
+    return [0.001, 0.02, float('nan'), 0.15, 0.4]
+
+@pytest.fixture
+def pvals_empty():
+    '''No candidates tested this round, degenerate but should not crash.'''
+    return []
+
+@pytest.fixture
+def pvals_bh_by_disagree():
+    '''Engineered so BH survives more than BY, illustrates why reporting both matters instead of picking one.'''
+    return [0.004, 0.009, 0.014, 0.02, 0.03, 0.05, 0.08, 0.12, 0.2, 0.3]

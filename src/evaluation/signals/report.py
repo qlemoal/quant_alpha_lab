@@ -5,7 +5,7 @@ Single numeric aggregator, with statistics, from perfoamrnce.py and IC folder st
 import polars as pl
 
 from src.evaluation.signals.IC.core import compute_ic, summarize_ic
-from src.evaluation.signals.IC.metrics import newey_west_ic_tstat
+from src.evaluation.signals.IC.metrics import newey_west_ic_tstat, ic_pvalue_nw
 from src.evaluation.signals.performance import compute_stability, decile_longshort_returns, sharpe_ratio
 
 
@@ -28,10 +28,11 @@ def signal_report(lf, signal_col, fwdret_col='fwdret'):
     '''
     ic_lf = compute_ic(lf, signal_col, forward_return_col=fwdret_col)
     ic_collected = ic_lf.collect()
-    ic_series = ic_collected['ic'].to_list()
+    ic_series = ic_collected.select(pl.col('ic')).to_series()
 
     basic = summarize_ic(ic_collected)
     nw = newey_west_ic_tstat(ic_series)
+    pval = ic_pvalue_nw(nw)
 
     turnover_df = compute_stability(lf, signal_col).collect()
     avg_turnover = turnover_df['turnover'].mean()
@@ -46,6 +47,7 @@ def signal_report(lf, signal_col, fwdret_col='fwdret'):
         'ic_ir': basic['ir'],
         'ic_tstat_naive': basic['t_stat'],
         'ic_tstat_nw': nw['t_stat'],
+        'ic_pvalue_nw': pval,
         'hit_rate': basic['hit_rate'],
         'n_days': basic['n_days'],
         'avg_turnover': avg_turnover,
