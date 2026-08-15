@@ -30,6 +30,7 @@ h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.18
+iniconfig==2.3.0
 ipykernel==7.3.0
 ipython==8.12.3
 ipywidgets==8.1.8
@@ -80,6 +81,7 @@ pickleshare==0.7.5
 pillow==12.3.0
 pipreqs==0.5.0
 platformdirs==4.11.0
+pluggy==1.6.0
 polars==1.43.1
 polars-runtime-32==1.43.1
 prometheus_client==0.26.0
@@ -88,14 +90,17 @@ protobuf==7.35.1
 psutil==7.2.2
 ptyprocess==0.7.0
 pure_eval==0.2.3
+pyarrow==25.0.0
 pycparser==3.0
 Pygments==2.20.0
 pyparsing==3.3.2
+pytest==9.1.1
 python-dateutil==2.9.0.post0
 python-json-logger==4.1.0
 pytz==2026.3.post1
 PyYAML==6.0.3
 pyzmq==27.1.0
+-e git+ssh://git@github.com/qlemoal/quant_alpha_lab.git@69041c7b0e3d7ad1ebf075e8e19c17b3331d0453#egg=quant_alpha_lab
 referencing==0.37.0
 requests==2.34.2
 rfc3339-validator==0.1.4

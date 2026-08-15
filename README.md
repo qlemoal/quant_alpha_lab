@@ -10,7 +10,7 @@ I'm not trying to find one profitable strategy. I'm trying to build reusable inf
 
 PhD in Mathematics (Quantitative Finance chair) from EPFL, I'm looking for a Quantitative Researcher role in Switzerland.
 
-This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See "Known Limitations" below, before trusting any number above it.
+This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See "Known Limitations" below before trusting any number above it.
 
 Contact: qs.lemoal@gmail.com / [LinkedIn](https://www.linkedin.com/in/qlemoal/)
 
