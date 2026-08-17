@@ -17,7 +17,7 @@ from src.evaluation.signals.IC.core import compute_ic, summarize_ic
 def newey_west_ic_tstat(ic_values:pl.LazyFrame|pl.DataFrame|list, max_lag=None) -> dict:
     '''
     Newey-West (HAC, heteroskedastic autocorrelated consistent) corrected t-stat for the mean of a daily IC series.
-        HAC is for the covariance matrix,  See https://en.wikipedia.org/wiki/Newey%E2%80%93West_estimator 
+        HAC is for the covariance matrix,   See https://en.wikipedia.org/wiki/Newey%E2%80%93West_estimator 
 
         The naive t-stat in summarize_ic() assumes independent daily observations, 
         which overlapping-window features violate (mom20's 20-day window means consecutive days' IC values are correlated). 
@@ -116,4 +116,4 @@ if __name__=='__main__':
         lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom120', 'mom252'], method='decile')
         # lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom252'], method='zscore_tanh')
         # print(signal_report(lf, signal_col='mom20_decile'))
-        print(ic_decay(lf, 'mom252'))
+        print(ic_decay(lf, 'mom60'))

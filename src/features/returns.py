@@ -28,5 +28,5 @@ def add_fwdret_horizon(lf:pl.LazyFrame, horizon=1) -> pl.LazyFrame:
     TODO: take the sum of log-returns until horizon days ahead ?
     '''
     return lf.sort(['ticker', 'date']).with_columns(
-        c('logret').shift(-horizon).over('ticker').alias(f'fwd_ret_{horizon}')
+        c('logret').rolling_sum(horizon).over('ticker').shift(-horizon).alias(f'fwd_ret_{horizon}')
     )

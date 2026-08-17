@@ -145,19 +145,49 @@ def qvalues(pvalues):
 
 
 #  Aggregate
+#  With BH/BY and q-values to compare. We choose later on which one we trust.
 
-def fdr_report(signal_names, pvalues, alpha=0.05):
+def FDR_report(signal_names, pvalues, alpha=0.05):
     p = np.asarray(pvalues, dtype=float)
     valid = ~np.isnan(p)
-    # NaN entries stay False: excluded from m for everyone else, and never survive themselves, don't let an uncomputable signal ride along.
 
     survives_bh = np.zeros(len(p), dtype=bool)
     survives_by = np.zeros(len(p), dtype=bool)
+    q = np.full(len(p), np.nan)
+
     if valid.sum() > 0:
         survives_bh[valid] = benjamini_hochberg(p[valid].tolist(), alpha)
         survives_by[valid] = benjamini_yekutieli(p[valid].tolist(), alpha)
+        q[valid] = qvalues(p[valid].tolist())
 
     return pl.DataFrame({
         'signal': signal_names, 'pvalue': pvalues,
         'survives_bh': survives_bh, 'survives_by': survives_by,
+        'qvalue': q,
     }).sort('pvalue', nulls_last=True)
+
+
+
+
+
+
+
+
+
+if __name__=='__main__':
+    from src.signals.combine import make_signal
+    from src.evaluation.signals.IC.core import compute_ic
+    from src.evaluation.signals.IC.metrics import newey_west_ic_tstat, ic_pvalue_nw
+
+    with pl.Config(tbl_cols=-1):  # that's to print the tables instead of truncating some columns
+
+        lf = pl.scan_parquet('data/processed/features.parquet')
+        lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom120', 'mom252'], method='decile')
+
+        ic_lf = compute_ic(lf, 'mom252', forward_return_col='fwdret')
+        ic_collected = ic_lf.collect()
+        ic_series = ic_collected.select(pl.col('ic')).to_series()
+    
+        nw = newey_west_ic_tstat(ic_series)
+        pval = ic_pvalue_nw(nw)
+        print(FDR_report('mom252', pval, alpha=0.2))
