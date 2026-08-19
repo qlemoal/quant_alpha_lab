@@ -4,7 +4,6 @@
 #      instead of using the standard rule of thumb.
 
 import numpy as np
-import pandas as pd
 import polars as pl
 from polars import col as c
 from scipy.stats import norm
@@ -52,10 +51,10 @@ def newey_west_ic_tstat(ic_values:pl.LazyFrame|pl.DataFrame|list, max_lag=None) 
 
     mean = x.mean()
     demeaned = x - mean
-    gamma0 = np.sum(demeaned ** 2) / n
+    gamma0 = np.sum(demeaned ** 2) / n  # This is just the variance of the IC series. We will then increase or decrease dpending on the auto-correlation, weighted by the Bartlett weights.
 
     var = gamma0
-    gammas = []
+    gammas = [] # Those will be the auto-correlation at different lags
     for k in range(1, max_lag + 1):
         w = 1 - k / (max_lag + 1)
         gamma_k = np.sum(demeaned[k:] * demeaned[:-k]) / n
@@ -105,6 +104,11 @@ def ic_decay(lf, signal_col, horizons=(1, 5, 10, 20)):
         rows.append(stats)
 
     return pl.DataFrame(rows).select(['horizon', 'mean', 'std', 'ir', 'hit_rate', 'n_days'])
+
+
+
+
+
 
 
 

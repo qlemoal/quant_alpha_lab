@@ -83,4 +83,5 @@ def one_pager(lf, signal_col, n_sample_tickers=6, fs=(16, 10)):
 
     f.suptitle(signal_col)
     f.tight_layout()
-    return f
+    plt.show()
+    return f, axes

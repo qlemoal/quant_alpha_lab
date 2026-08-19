@@ -1,8 +1,10 @@
 from collections.abc import Iterable
+import polars as pl
 from polars import col as c
 
+
 def as_list(x):
-    if isinstance(x, str):
+    if isinstance(x, (str, float, int)):
         return [x]
     elif isinstance(x, Iterable):
         return list(x)
@@ -18,3 +20,4 @@ def add_expr(lf, expr_func, colname, suffix=None, **kwargs):
             for cn in colname
         ]
     )
+

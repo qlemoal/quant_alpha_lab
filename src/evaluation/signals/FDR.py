@@ -2,6 +2,19 @@
 False discovery rate control across multiple candidate signals tested in the same round. 
     Testing many signals (or many parameter variants of one signal) at a fixed 5% threshold produces false positives by construction, 
     this corrects for that.
+
+Not used here: White's RC / Hansen's SPA test one specific hypothesis, "is the single best strategy out of many genuinely better than a benchmark," 
+    using a bootstrap over the return series to build the null distribution for the max statistic across candidates. 
+    That's family-wise error control on the best performer, not FDR across the whole candidate set. Not a direct swap for what I do here.
+
+The genuinely relevant extension of that idea is bootstrap-based dependence estimation instead of an assumed dependence structure. 
+BY assumes worst-case arbitrary dependence, conservative but blind to what your signals' actual correlation looks like. 
+Romano & Wolf's stepdown bootstrap generalizes White/Hansen to reject more than just the single best while still controlling FWER, 
+    using the empirical joint distribution from resampling instead of an assumption. 
+Closer still to my exact problem: Barras, Scaillet & Wermers (2010, Journal of Finance, "False Discoveries in Mutual Fund Performance") 
+    combine bootstrap resampling with Storey's FDR framework specifically to separate genuine outperformance from luck across many candidate funds, 
+    same structural problem as many candidate signals. Worth flagging as the natural v2 once I'm testing actual portfolio-level return series (post-combiner), 
+    not the raw per-signal IC stage, it needs resampling machinery I don't have yet. Not worth building now.
 '''
 
 import numpy as np
@@ -13,6 +26,9 @@ def benjamini_hochberg(pvalues: list[float], alpha: float = 0.05) -> list[bool]:
     BH (1995) step-up procedure. Valid under independence or positive regression dependence (PRDS) among test statistics. 
         Standard first choice, but candidate signals built off the same overlapping return panel are not independent, 
         so treat BH as an upper bound on how many signals survive, not the final word, see benjamini_yekutieli below.
+    About alpha: we fix alpha beforehand, once and for all. My current choice is 0.2, because of the very low signal-to-noise environment, 
+        consistent with Harvey-Liu's broader point that finance needs looser thresholds than physical sciences.
+        If alpha is too low, no signal will be ever selected. But choosing q-values and Elastic Net in the portfolio construction is a good alternative.
 
     Returns a list of booleans, same order/length as pvalues, True = survives.
     '''
@@ -117,6 +133,9 @@ def qvalues(pvalues):
         boolean, on purpose, any cutoff is a separate downstream decision
         (e.g. feeding the Elastic Net combiner a continuous confidence
         weight instead of a hard pass/fail), not baked into the test itself.
+
+    Note: it still outputs for each p-value the FDR expected if the threshold for accepting was set at that p-value...
+            But we can use an Elastic Net on the output q-values to construct our portfolio. 
     '''
     p = np.asarray(pvalues, dtype=float)
     m = len(p)
@@ -144,10 +163,12 @@ def qvalues(pvalues):
     return q.tolist()
 
 
+
+
 #  Aggregate
 #  With BH/BY and q-values to compare. We choose later on which one we trust.
 
-def FDR_report(signal_names, pvalues, alpha=0.05):
+def FDR_report(signal_names, tstats, pvalues, alpha=0.05):
     p = np.asarray(pvalues, dtype=float)
     valid = ~np.isnan(p)
 
@@ -161,7 +182,7 @@ def FDR_report(signal_names, pvalues, alpha=0.05):
         q[valid] = qvalues(p[valid].tolist())
 
     return pl.DataFrame({
-        'signal': signal_names, 'pvalue': pvalues,
+        'signal': signal_names, 'tstat':tstats, 'pvalue': pvalues,
         'survives_bh': survives_bh, 'survives_by': survives_by,
         'qvalue': q,
     }).sort('pvalue', nulls_last=True)
@@ -172,22 +193,23 @@ def FDR_report(signal_names, pvalues, alpha=0.05):
 
 
 
-
-
-if __name__=='__main__':
+if __name__ == '__main__':
+    from scipy.stats import norm
     from src.signals.combine import make_signal
-    from src.evaluation.signals.IC.core import compute_ic
-    from src.evaluation.signals.IC.metrics import newey_west_ic_tstat, ic_pvalue_nw
+    from src.evaluation.signals.report import compare_reports
+    from src.utils.stats import compute_pval_from_tstat
+    lf = pl.scan_parquet('data/processed/features.parquet').sort(['ticker', 'date'])
 
-    with pl.Config(tbl_cols=-1):  # that's to print the tables instead of truncating some columns
-
-        lf = pl.scan_parquet('data/processed/features.parquet')
-        lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom120', 'mom252'], method='decile')
-
-        ic_lf = compute_ic(lf, 'mom252', forward_return_col='fwdret')
-        ic_collected = ic_lf.collect()
-        ic_series = ic_collected.select(pl.col('ic')).to_series()
+    FEATURES = ['mom5', 'mom10', 'mom20', 'mom60', 'mom120', 'mom252']
     
-        nw = newey_west_ic_tstat(ic_series)
-        pval = ic_pvalue_nw(nw)
-        print(FDR_report('mom252', pval, alpha=0.2))
+    signal_cols = []
+    for feat in FEATURES:
+        lf = make_signal(lf, feat, method='decile')
+        signal_cols.append(f'{feat}_decile')
+
+    reports = compare_reports(lf, signal_cols, fwdret_col='fwdret')
+
+    pvals = compute_pval_from_tstat(reports['ic_tstat_nw'].to_list())
+
+    result = FDR_report(reports['signal'].to_list(), reports['ic_tstat_nw'].to_list(), pvals, alpha=0.2)
+    print(result)

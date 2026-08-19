@@ -5,7 +5,38 @@ Created autocorrelation outside evaluation folder because we can apply it to any
 
 import polars as pl
 from polars import col as c
+from src.utils.helpers import as_list
 
+
+
+def get_recent_coverage(lf, col, n_days=365):
+    '''
+    Get the fraction of non-null days in the last n_days of the column col in lf.
+    '''
+    recent_cutoff = (
+        lf.select(
+            c('date').max()
+        ).collect().item() - pl.duration(days=n_days)
+        )
+    return (
+        lf.filter(c('date') >= recent_cutoff)
+        .select(c(col).is_not_null().mean())
+        .collect()
+        .item()
+    )
+
+
+def compute_pval_from_tstat(t_stats):
+    '''
+    t_stats can be a list of t-stats or a unique t-stat
+    '''
+    from scipy.stats import norm
+
+    t_stats = as_list(t_stats)
+    if len(t_stats) == 1:
+        return  2 * (1 - norm.cdf(abs(t_stats[0]))) if t_stats[0] is not None else float('nan')
+    else: 
+        return [2 * (1 - norm.cdf(abs(tstat))) if t_stats[0] is not None else float('nan') for tstat in t_stats]
 
 
 

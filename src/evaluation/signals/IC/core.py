@@ -63,7 +63,7 @@ def summarize_ic(ic_lf:pl.LazyFrame|pl.DataFrame, ic_col='ic') -> dict:
     }
 
 
-def compare_methods(lf, feature_col, methods, **kwargs):
+def compare_methods_ic(lf, feature_col, methods, **kwargs):
     '''
     Build a signal from 'feature_col' under each method in 'methods' (via src.signals.transform.make_signal), compute its IC time series,
         and return a summary table, one row per method, for quick comparison.

@@ -1,21 +1,46 @@
-#  Several plots in one page, to inspect a unique signal's behaviour.
+
+
+
+#  Standalone diagnostic runner: edit MODE/FEATURES/METHOD below, then run
+#  "python scripts/inspect_signal.py". Top-of-file parameters, not a CLI,
+#  same pattern as the rest of scripts/, on purpose.
+
 
 
 import polars as pl
+from setup import *
 from src.signals.combine import make_signal
-from evaluation.signal_plots import one_pager
+from src.evaluation.signals.signal_plots import one_pager
+from src.evaluation.signals.report import compare_reports
 
 
 
 
-feature = 'mom252'
-descending = False  # True if a high feature translates to short
-signal_method = 'zscore_tanh'
-n_random_tickers = 10
+
+
+MODE = 'single'                          # 'single' or 'compare'
+FEATURES = ['mom20']#, 'mom60', 'mom252']   # single mode uses FEATURES[0] only
+METHOD = 'zscore_tanh'
+DESCENDING = False
+
+
+INPUT = 'data/processed/features.parquet'
 
 if __name__ == '__main__':
-    INPUT = 'data/processed/features.parquet'
     lf = pl.scan_parquet(INPUT).sort(['ticker', 'date'])
-    lf = make_signal(lf, feature, method=signal_method, descending=False, scale=1)
-    
-    one_pager(lf, signal_col=f'{feature}_{signal_method}', n_sample_tickers=5)
+
+    if MODE == 'single':
+        feature = FEATURES[0]
+        lf = make_signal(lf, feature, method=METHOD, descending=DESCENDING)
+        one_pager(lf, signal_col=f'{feature}_{METHOD}', n_sample_tickers=5)
+
+    elif MODE == 'compare':
+        signal_cols = []
+        for feat in FEATURES:
+            lf = make_signal(lf, feat, method=METHOD, descending=DESCENDING)
+            signal_cols.append(f'{feat}_{METHOD}')
+        with pl.Config(tbl_cols=-1):  # that's to print the whole report instead of truncating some columns
+            print(compare_reports(lf, signal_cols, fwdret_col='fwdret'))
+
+    else:
+        raise ValueError(f'unrecognized MODE: {MODE!r}, expected "single" or "compare"')

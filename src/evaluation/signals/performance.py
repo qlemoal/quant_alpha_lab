@@ -10,6 +10,23 @@ from src.utils.helpers import as_list
 from src.utils.my_plotting import *
 
 
+
+
+def max_drawdown(returns):
+    '''
+    Max peak-to-trough drawdown of the cumulative long-short paper return
+        series. Same pre-cost caveat as long_short_sharpe, directional
+        sanity check only, not a real risk figure.
+    '''
+    r = np.asarray(returns, dtype=float)
+    r = r[~np.isnan(r)]
+    if len(r) == 0:
+        return None
+    cum = np.cumsum(r)
+    running_max = np.maximum.accumulate(cum)
+    return float((cum - running_max).min())
+
+
 def compute_stability(lf:pl.LazyFrame, signal_col:str) -> pl.LazyFrame:
     '''
     ~ Turnover
