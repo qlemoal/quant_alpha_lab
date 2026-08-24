@@ -217,6 +217,10 @@ We added the `next_fold` argument to the function, to choose when to start the n
 either directly after the last `test_set` using `consecutive` argument, or give an `int` to 
 set the number of dates between one `train_set` and the next. 
 
+Recent literature (Arian et al. 2024) states plain walk-forward remains the industry standard for realistic simulation, 
+combinatorial purged CV is better at mitigating overfitting specifically when you're doing model/hyperparameter search 
+across many trials (relevant later for elastic net alpha/l1_ratio and the GBM comparison, not for basic signal evaluation now)
+
 ---
 
 ## 2. Turning a feature into a signal

@@ -6,8 +6,8 @@ import polars as pl
 from polars import col as c
 import time
 
-from src.evaluation.signals.IC.core import compute_ic, summarize_ic
-from src.evaluation.signals.IC.metrics import newey_west_ic_tstat, ic_pvalue_nw, ic_decay
+from src.evaluation.signals.ic.core import compute_ic, summarize_ic
+from src.evaluation.signals.ic.metrics import newey_west_ic_tstat, ic_pvalue_nw, ic_decay
 from src.evaluation.signals.performance import max_drawdown, compute_stability, decile_longshort_returns, sharpe_ratio
 from src.utils.stats import autocorrelation, get_recent_coverage, compute_pval_from_tstat
 

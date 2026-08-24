@@ -29,6 +29,9 @@ def rolling_purged_embargoed_splits(dates, train_window, horizon, test_window, e
         from the most recent date so the newest fold uses the latest data
         available, any leftover history that doesn't fill a full cycle gets
         dropped at the oldest end, not the newest.
+        Reference for purge and embargo
+        both: López de Prado (2018), Advances in Financial Machine
+        Learning, Ch. 7.
 
     train_window: length of the training block. Rolling-window CV convention
         (see docs/methodology.md), rolling rather than expanding specifically
@@ -42,10 +45,9 @@ def rolling_purged_embargoed_splits(dates, train_window, horizon, test_window, e
         recent) fold's train block resumes. Dampens correlation between
         different folds' out-of-sample results when aggregating across
         folds, doesn't make any single fold more causally valid, purge
-        alone already guarantees that. Reference for purge and embargo
-        both: López de Prado (2018), Advances in Financial Machine
-        Learning, Ch. 7.
-
+        alone already guarantees that. 
+        We set it by default to config.constants.ROLLING_WINDOWS['short'], 
+        a too big embargo will make the number of folds too small.
     next_fold = 'consecutive' or an int. 
         If consecutive, no data is used by multiple sets.
         If an int, next train_set starts after next_fold dates after the previous.

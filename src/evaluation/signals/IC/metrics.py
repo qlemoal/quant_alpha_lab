@@ -10,7 +10,7 @@ from scipy.stats import norm
 
 from src.signals.combine import make_signal
 from src.features.returns import add_fwdret_horizon
-from src.evaluation.signals.IC.core import compute_ic, summarize_ic
+from src.evaluation.signals.ic.core import compute_ic, summarize_ic
 
 
 def newey_west_ic_tstat(ic_values:pl.LazyFrame|pl.DataFrame|list, max_lag=None) -> dict:

@@ -107,6 +107,7 @@ pip install -e .
 │   portfolio/                not started, position sizing, transaction costs
 │   risk/                     correlation matrix cleaning, factor diagnostics (stubbed)
 │   models/                   not started, ML models
+│   validation/               taylor-made rolling CV with purge and embargo
 │   utils/                    panel reshaping, plotting helpers
 │
 ├── sql/                      DuckDB queries, kept separate for readability
@@ -146,7 +147,7 @@ Full methodology behind evaluation, signal construction, and correlation cleanin
 
 # Signals and evaluation
  
-`src/signals/transform.py` turns a feature into a tradeable signal, cross-sectionally, per date. Four construction methods: `zscore_tanh`, `zscore_clip`, `rank`, `decile`. Which one fits a given feature depends on how much its raw magnitude is trusted, see `docs/methodology.md`.
+`src/signals/transforms.py` turns a feature into a tradeable signal, cross-sectionally, per date. Four construction methods: `zscore_tanh`, `zscore_clip`, `rank`, `decile`, decided using make_signal from `src/signals/combine.py`. Which one fits a given feature depends on how much its raw magnitude is trusted, see `docs/methodology.md`.
  
 `src/evaluation/signals/` scores a signal once it exists:
  

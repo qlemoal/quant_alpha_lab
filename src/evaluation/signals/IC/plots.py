@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import polars as pl
 from polars import col as c
 
-from evaluation.signals.IC.core import compute_ic
+from evaluation.signals.ic.core import compute_ic
 
 
 def plot_ic_time_series(ic_dict, ax=None):

@@ -10,5 +10,6 @@ ROLLING_WINDOWS = {
     'long' : 252,
 }
 
+
 LONG_THRESHOLD = 0.8
 SHORT_THRESHOLD = -0.8
