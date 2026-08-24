@@ -158,16 +158,29 @@ need. This is preferred going forward per this project's no-free-parameters
 principle (see README, "Design philosophy"): BH/BY require a human-chosen
 `alpha` to produce any output at all; q-values don't.
 
-`fdr_report()` reports `survives_bh`, `survives_by`, and `qvalue` together
-for every candidate, undecided on which drives the eventual combiner, kept
-visible rather than silently picking one. `n < 20` candidates return
-`pi0 = 1.0` unconditionally (a spline fit across a 20-point p-value sample
-is too noisy to trust; falling back to the conservative BH-equivalent
-assumption is safer than a spurious low-`pi0` estimate from too little
-data). A `NaN` p-value (a candidate whose t-stat failed to compute) is
-excluded from `m` for everyone else and never survives itself, fails
-closed rather than either corrupting the correction for valid candidates or
-silently passing.
+*Reading a q-value, concretely.* Test 10 candidate signals, sorted
+p-values `0.001, 0.004, 0.006, 0.01, 0.02, 0.03, 0.05, 0.08, 0.10, 0.5`, and
+suppose the data suggests about half this batch is genuinely null
+(`pi0 = 0.5`). The resulting q-values: `0.005, 0.01, 0.01, 0.0125, 0.02,
+0.025, 0.036, 0.05, 0.056, 0.25`.
+
+Read the 3rd one: q=0.01 means "if I declared the 3 smallest p-values
+significant, I'd expect 1% of that set of 3 to be false discoveries." Not
+"this single signal has a 1% chance of being false", that's not what any
+p-value-derived number means, it's a statement about the batch you get if
+you drew the line at this candidate's rank.
+
+Notice p and q move in different directions relative to each other: the
+smallest p-value (0.001) gets a *larger* q (0.005), penalized for having
+been tested alongside 9 other candidates. The largest p-value (0.5) gets a
+*smaller* q (0.25) than its own p, because `pi0=0.5` means the procedure
+isn't assuming, the way BH's threshold implicitly does, that every last
+candidate might be null.
+
+Which number to trust when reporting one figure per signal: the q-value.
+A p-value in isolation says nothing about how many other candidates were
+tested alongside it, quoting it alone silently implies it's the only test
+run, which it never is here. The q-value carries that context built in.
 
 ### 1.5 IC decay across forward-return horizons
 
