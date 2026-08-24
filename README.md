@@ -218,7 +218,8 @@ US equities, daily bars only. No intraday, no other asset classes, no fundamenta
 - [X] Feature engineering, returns/momentum/volatility/ADV done and validated, beta implemented (market proxy has a known thin-history issue, see limitations), seasonality not started
 - [x] Signal construction, four methods, tested against edge-case panels
 - [x] Signal evaluation, Rank IC, Newey-West significance, IC decay, stability, paper Sharpe, numeric and visual one-call checks
-- [ ] FDR across multiple candidate signals (next)
+- [X] FDR across multiple candidate signals
+- [X] Rolling cross-validation, with purge and embargo buffer dates
 - [ ] Elastic Net signal combiner
 - [ ] Portfolio construction
 - [ ] Transaction cost modeling
@@ -230,7 +231,6 @@ US equities, daily bars only. No intraday, no other asset classes, no fundamenta
 
 # Roadmap
  
-- [ ] FDR across candidate signals, `src/evaluation/signals/fdr.py`
 - [ ] Fix beta's market proxy (real benchmark index instead of the biased equal-weighted universe average)
 - [ ] `seasonality.py`
 - [ ] Elastic Net combiner across FDR-surviving signals

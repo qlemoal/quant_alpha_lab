@@ -207,8 +207,15 @@ information technically inside the test window). Embargo adds a small gap
 after the test period before the next fold's training starts, since return
 autocorrelation can leak information across a hard boundary even after
 purging alone. Reference: López de Prado, *Advances in Financial Machine
-Learning*. Not yet implemented, needed once the GBM comparison model exists
-and cross-validation choices actually matter.
+Learning*.
+
+We start constructing the folds from the latest date available, and go backwards from there. 
+That is to take full advantage of the "freshest" data, especially with the survivorship bias
+currently present, responsible for less data at the start of our dataset. 
+
+We added the `next_fold` argument to the function, to choose when to start the next fold, 
+either directly after the last `test_set` using `consecutive` argument, or give an `int` to 
+set the number of dates between one `train_set` and the next. 
 
 ---
 
@@ -321,3 +328,7 @@ downstream:
 6. `fdr.py`'s `fdr_report()` across everything tested this round: BH, BY,
    and q-value reported together, no single verdict picked automatically.
 7. Survivors move to the signal combiner.
+
+(EDIT)
+Use `scripts/inspect_signal.py` to compare signals or inspect a unique signal.
+TODO: Add FDR report in `inspect_signal.py` when comparing signals, and IC_decay?
