@@ -182,6 +182,8 @@ A p-value in isolation says nothing about how many other candidates were
 tested alongside it, quoting it alone silently implies it's the only test
 run, which it never is here. The q-value carries that context built in.
 
+**FDR choice: continuous prior, not a hard gate.** `fdr_report()` computes BH, BY, and q-value side by side, but none of `survives_bh` / `survives_by` is used as a hard filter into the signal combiner. Two reasons. First, a hard cutoff at any `alpha` throws away graded information, a candidate just above and just below the line are treated as categorically different despite being nearly identical in strength. Second, using a cutoff would introduce a second free parameter beyond `alpha` itself, which q-value would need (some chosen q-threshold), reproducing exactly the "picked because it looks right" problem this project's FDR module was built to avoid. Instead, the q-value feeds into the combiner as a continuous weight, letting the combiner's own regularization (see Section 5, Elastic Net) do the actual inclusion/exclusion, informed by evidence strength rather than a binary pass/fail upstream of it.
+
 ### 1.5 IC decay across forward-return horizons
 
 `ic_decay()`, Rank IC of a signal against forward returns at several
@@ -336,3 +338,48 @@ downstream:
 (EDIT)
 Use `scripts/inspect_signal.py` to compare signals or inspect a unique signal.
 TODO: Add FDR report in `inspect_signal.py` when comparing signals, and IC_decay?
+
+
+
+
+## References
+
+Blondel, V. D., Guillaume, J.-L., Lambiotte, R., & Lefebvre, E. (2008).
+Fast unfolding of communities in large networks. Journal of Statistical
+Mechanics: Theory and Experiment, 2008(10), P10008.
+
+Harvey, C. R., Liu, Y., & Zhu, H. (2016). ...and the cross-section of
+expected returns. Review of Financial Studies, 29(1), 5-68.
+
+Jegadeesh, N. (1990). Evidence of predictable behavior of security
+returns. Journal of Finance, 45(3), 881-898.
+
+Jegadeesh, N., & Titman, S. (1993). Returns to buying winners and selling
+losers: Implications for stock market efficiency. Journal of Finance,
+48(1), 65-91.
+
+Kritzman, M., & Li, Y. (2010). Skulls, financial turbulence, and risk
+management. Financial Analysts Journal, 66(5), 30-41.
+
+Laloux, L., Cizeau, P., Bouchaud, J.-P., & Potters, M. (1999). Noise
+dressing of financial correlation matrices. Physical Review Letters,
+83(7), 1467.
+
+López de Prado, M. (2018). Advances in Financial Machine Learning. Wiley.
+
+Newey, W. K., & West, K. D. (1987). A simple, positive semi-definite,
+heteroskedasticity and autocorrelation consistent covariance matrix.
+Econometrica, 55(3), 703-708.
+
+Newey, W. K., & West, K. D. (1994). Automatic lag selection in covariance
+matrix estimation. Review of Economic Studies, 61(4), 631-653.
+
+Storey, J. D. (2002). A direct approach to false discovery rates. Journal
+of the Royal Statistical Society: Series B, 64(3), 479-498.
+
+Zou, H. (2006). The adaptive lasso and its oracle properties. Journal of
+the American Statistical Association, 101(476), 1418-1429.
+
+Zou, H., & Hastie, T. (2005). Regularization and variable selection via
+the elastic net. Journal of the Royal Statistical Society: Series B,
+67(2), 301-320.

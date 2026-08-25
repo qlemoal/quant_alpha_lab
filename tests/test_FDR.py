@@ -7,7 +7,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from src.evaluation.signals.FDR import fdr_report
+from src.evaluation.signals.fdr import fdr_report
 
 
 
