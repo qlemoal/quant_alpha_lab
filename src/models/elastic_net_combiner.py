@@ -1,18 +1,12 @@
 '''
-src/models/elastic_net_combiner.py
-
-REFERENCE / TEACHING VERSION, not meant to be merged as-is. Written to be
-read, argued with, and rewritten by hand, consistent with how this project
-works. Every design decision below is flagged as such in a comment, several
-are genuine judgment calls with more than one valid answer, not settled by
-this file.
-
 GOAL: combine several already-evaluated candidate signals (the survivors of
 signal_report() + fdr.fdr_report()) into a single score via Elastic Net
 regression against forward returns, with alpha/l1_ratio chosen through this
-project's own leakage-safe walk-forward CV (src/validation/splits.py), not
-sklearn's default random k-fold, which would silently reintroduce exactly
+project's own leakage-safe walk-forward CV (src/validation/splits.py),
+not sklearn's default random k-fold, which would silently reintroduce exactly
 the leakage the CV module exists to prevent.
+
+*EDIT: I WILL MAKE A BETTER VERSION USING COMBINATORIAL PURGED CV INSTEAD* 
 
 References:
     Zou, H. & Hastie, T. (2005). Regularization and variable selection via
@@ -27,8 +21,7 @@ References:
         never zeros anything, no sparsity, harder to say which signals
         survived combination. Elastic Net's L1+L2 mix is the standard
         answer to exactly this setup.
-    Zou, H. (2006). The adaptive lasso and its oracle properties. JASA,
-        101(476), 1418-1429.
+    Zou, H. (2006). The adaptive lasso and its oracle properties. JASA, 101(476), 1418-1429.
         Theoretical grounding for the per-feature penalty-weighting trick
         used in apply_q_value_weighting() below.
     Lopez de Prado, M. (2018). Advances in Financial Machine Learning.
@@ -40,7 +33,7 @@ import polars as pl
 from polars import col as c
 from sklearn.linear_model import ElasticNet, ElasticNetCV
 
-from src.validation.splits import rolling_purged_embargoed_splits, Fold
+from validation.walk_forward_cv import rolling_purged_embargoed_splits, Fold
 
 
 # =============================================================================
