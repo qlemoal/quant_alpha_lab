@@ -223,6 +223,12 @@ Recent literature (Arian et al. 2024) states plain walk-forward remains the indu
 combinatorial purged CV is better at mitigating overfitting specifically when you're doing model/hyperparameter search 
 across many trials (relevant later for elastic net alpha/l1_ratio and the GBM comparison, not for basic signal evaluation now)
 
+### 1.7 True purged-embargoed K-fold and CPCV 
+
+Distinct from the walk-forward scheme above, not a replacement for it. Walk-forward keeps train strictly before test, realistic for simulating actual deployment, but only produces a handful of folds given the history available. True K-fold allows train to include data from both sides of a test block chronologically, which means embargo becomes necessary for a single fold's own validity here (not just for cross-fold independence, as in the walk-forward case, see splits.py's docstring), following López de Prado (2018), ch. 7. CPCV (purged_embargoed_kfold_splits with n_test_groups > 1) extends this combinatorially, evaluating every combination of held-out groups. Full AFML path reconstruction (ch. 12) is not implemented, not needed for the specific statistic used here (see below).
+
+**About Probability of Backtest Overfitting:** probability_of_backtest_overfitting() implements the CSCV algorithm from Bailey, Borwein, López de Prado & Zhu (2017, Journal of Computational Finance 20(4), 39-69): given a performance matrix across several candidate strategies/configurations, repeatedly split into in-sample/out-of-sample halves, check whether the in-sample winner still ranks above the OOS median, PBO is the fraction of splits where it doesn't. Requires at least two real candidates to compare, not used to evaluate a single model in isolation. First planned use: comparing Elastic Net combiner configurations against each other, and later against the GBM alternative.
+
 ---
 
 ## 2. Turning a feature into a signal
