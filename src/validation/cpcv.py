@@ -1,18 +1,22 @@
 '''
 Added after wakl_forward_cv.py because realised it is much more used in practice,
-and will yield much more accurate results statistcally.
+and will yield more accurate results statistcally.
 
 Two related but distinct pieces, kept separate on purpose (see the section
 headers below for why they're not the same function):
 
 1. purged_embargoed_kfold_splits() / cpcv_splits()
    The actual leakage-safe TRAIN/TEST row-index generator for TRUE K-fold
-   and Combinatorial Purged CV. Unlike src/validation/splits.py's
+   and Combinatorial Purged CV. Unlike src/validation/walk_forward_cv.py's
    walk-forward scheme, train blocks here can sit BOTH before and after a
    given test block chronologically, which is what makes true k-fold
    different from walk-forward, and why embargo becomes a within-fold
    necessity here (protecting THIS fold's own validity), not just a
    cross-fold aggregation nicety like it was in the walk-forward file.
+   Combinatorial purged CV will take all combinations of K blocks among N
+   as test sets. The whole rest will be the train set every time (accounting
+   for purge and embargo). We then have multiple OOS estimates of any stat for
+   each time block. We can then aggregate as we wish, e.g. using PBO.
 
 2. probability_of_backtest_overfitting()
    The CSCV/PBO statistic from Bailey, Borwein, Lopez de Prado & Zhu
@@ -24,6 +28,9 @@ headers below for why they're not the same function):
    running several candidate configs through splits built with (1) (or
    with the walk-forward splits, either works), then hand the resulting
    matrix to this function.
+   The idea is to get the OOS rank of the best in-sample performing strat, 
+   for each train-test split. We then average the ranks and possibly transform 
+   into logits to get the PBO.
 
 NOT IMPLEMENTED HERE: AFML's full CPCV "path reconstruction" (stitching
 per-combination OOS slices into phi = C(N,k)*k/N complete alternate
@@ -35,7 +42,7 @@ Worth building later specifically if you want smooth full-history OOS
 equity curves for a report figure, not needed for the PBO number itself.
 
 References:
-    Lopez de Prado, M. (2018). Advances in Financial Machine Learning.
+    Lopez de Prado, M. (2018). Advances in Financial Machine Learning. 
         Wiley, Ch. 7 (purged k-fold), Ch. 12 (CPCV, full path version).
     Bailey, D. H., Borwein, J. M., Lopez de Prado, M., & Zhu, Q. J.
         (2017). The probability of backtest overfitting. Journal of
@@ -50,132 +57,139 @@ from collections import namedtuple
 import numpy as np
 
 
+
+
 # =============================================================================
 # SECTION 1: true purged-embargoed K-fold / CPCV split generator
 # =============================================================================
 
-Group = namedtuple('Group', ['start_idx', 'end_idx'])  # inclusive date-index bounds
 
 
-def contiguous_groups(n_dates: int, n_groups: int) -> list[Group]:
+BlockTuple = namedtuple('Block', ['start_idx', 'end_idx'])  # inclusive date-index bounds of train/test blocks
+
+def get_raw_train_test_blocks(n_dates: int, n_blocks: int) -> list[BlockTuple]:
     '''
-    Partition n_dates indices into n_groups contiguous, roughly-equal
-    blocks. Sizes differ by at most 1 date when n_dates doesn't divide
-    evenly, remainder distributed to the earliest groups, an arbitrary
-    but harmless convention (doesn't affect which dates end up adjacent
-    to which group boundary, which is the only thing purge/embargo cares
-    about).
+    Partition n_dates indices into n_blocks of roughly-equal size. 
+    Sizes differ by at most 1 date when n_dates doesn't divide evenly, remainder distributed to the earliest groups.
+
+    returns: a list of namedtuples with the start and end indices, representing the train/test groups.
     '''
-    base, remainder = divmod(n_dates, n_groups)
-    groups = []
+
+    base, remainder = divmod(n_dates, n_blocks)
+    blocks = []
     start = 0
-    for i in range(n_groups):
-        size = base + (1 if i < remainder else 0)
-        groups.append(Group(start, start + size - 1))
+
+    for i in range(n_blocks):
+        size = base + (1 if i < remainder else 0)  # add 1 to the first blocks to account for the remainder
+        blocks.append(BlockTuple(start, start + size - 1))  # don't we need to give a name to each namedtuple ? -> No the name is Block
         start += size
-    return groups
+    return blocks
 
 
-def _merge_into_runs(group_ids: tuple[int, ...]) -> list[tuple[int, int]]:
+
+
+def _merge_blocks(block_ids: tuple[int, ...]) -> list[tuple[int, int]]:
     '''
-    A combination's chosen test-group ids might include adjacent groups
-    (e.g. groups 2 and 3 both selected as test in the same combination).
-    Internal boundaries between two adjacent TEST groups don't need
-    purge/embargo, both sides are held out anyway, only the OUTER edge of
-    a contiguous run of test groups touches actual train data and needs
-    protecting. Merging into runs first avoids purging/embargoing twice
-    at an internal boundary that doesn't need it at all.
+    Certain combinations of K test blocks in N total blocks have some consecutive
+        test blocks. In this case we do not need to remove the purge and embargo windows 
+        for all test sets. 
+    _merge_blocks identifies the start and end of consecutive test blocks.
+
+    block_ids: IDs of test blocks
+
+    returns: list of 2-tuples giving the start and end of consecutive blocks (the same index twice if a block is alone)
     '''
-    sorted_ids = sorted(group_ids)
+
+    sorted_ids = sorted(block_ids)
     runs = []
     run_start = run_end = sorted_ids[0]
-    for gid in sorted_ids[1:]:
-        if gid == run_end + 1:
-            run_end = gid
+
+    for block_id in sorted_ids[1:]:
+        if block_id == run_end + 1:
+            run_end = block_id
         else:
             runs.append((run_start, run_end))
-            run_start = run_end = gid
+            run_start = run_end = block_id
     runs.append((run_start, run_end))
     return runs
 
 
-def purged_embargoed_kfold_splits(
-    n_dates: int,
-    n_groups: int,
-    n_test_groups: int,
-    horizon: int,
-    embargo: int,
-):
+
+
+def cpcv(n_dates: int, n_blocks: int, n_test_blocks: int, purge_w: int, embargo_w: int):
     '''
-    Generates every C(n_groups, n_test_groups) combination of test groups.
+    Generates every C(n_groups, n_test_groups) combination of test groups, 
+        accounting for purge and embargo windows around consecutive test blocks.
     For each combination:
         test_idx  = every date index inside a selected test group.
         train_idx = every date index inside a non-selected group, MINUS
-            a purge slice of length `horizon` immediately before each
+            a purge slice of length `purge_w` immediately before each
             contiguous run of selected test groups (labels there could
             extend forward into the test run), MINUS an embargo slice of
-            length `embargo` immediately after each run (serial
+            length `embargo_w` immediately after each run (serial
             correlation proximity to the test run, see module docstring
             and the Section 1 note above on why this now matters for a
             SINGLE fold's validity, unlike in walk-forward).
 
-    n_test_groups=1 is exactly "true purged-embargoed k-fold CV" (one
-    ask in this conversation). n_test_groups>1 is CPCV proper, more
-    combinations, and importantly, WIDER test blocks per combination
-    (k contiguous-ish groups' worth), which is the actual lever CPCV
-    uses to get more effective train/test evaluations without shrinking
-    any individual test window down to something too short to be
-    meaningful.
+    n_test_groups=1 is exactly "true purged-embargoed k-fold CV", not combinatorial. 
+    n_test_groups>1 is CPCV, more combinations, and importantly, WIDER test blocks per combination
+        (k contiguous-ish groups' worth), which is the actual lever CPCV
+        uses to get more effective train/test evaluations without shrinking
+        any individual test window down to something too short to be meaningful.
 
-    Yields (train_idx, test_idx, test_group_ids) as numpy int arrays plus
-    the raw tuple of which groups were held out, useful for building the
-    T x N performance matrix Section 2 wants (T = one row per group- or
-    combination-level result).
+    Yields (train_idx, test_idx, test_group_ids) as numpy int arrays, 
+        plus the raw tuple of which groups were held out, useful for building the
+        T x N performance matrix for PBO later on.
+        (T = one row per group- or combination-level result).
     '''
-    groups = contiguous_groups(n_dates, n_groups)
-    all_ids = list(range(n_groups))
 
-    for test_ids in combinations(all_ids, n_test_groups):
-        test_idx_parts = [np.arange(groups[g].start_idx, groups[g].end_idx + 1) for g in test_ids]
+    raw_blocks = get_raw_train_test_blocks(n_dates, n_blocks)  # a list of namedtuples with start_idx and end_idx 
+    all_ids = list(range(n_blocks))
+
+    for test_ids in combinations(all_ids, n_test_blocks):  # generate all combinations of n_test_blocks items of all_ids 
+        test_idx_parts = [np.arange(raw_blocks[id].start_idx, raw_blocks[id].end_idx + 1) for id in test_ids]  # the full test set indices
         test_idx = np.concatenate(test_idx_parts)
 
         excluded = set()  # date indices to remove from train beyond the test groups themselves
-        for run_start, run_end in _merge_into_runs(test_ids):
-            run_start_date = groups[run_start].start_idx
-            run_end_date = groups[run_end].end_idx
+        for run_start, run_end in _merge_blocks(test_ids):
+            run_start_date = raw_blocks[run_start].start_idx
+            run_end_date = raw_blocks[run_end].end_idx
 
-            purge_lo = max(0, run_start_date - horizon)
+            purge_lo = max(0, run_start_date - purge_w)  # purge cannot be before we the first block
             excluded.update(range(purge_lo, run_start_date))
 
-            embargo_hi = min(n_dates - 1, run_end_date + embargo)
+            embargo_hi = min(n_dates - 1, run_end_date + embargo_w)  #  embargo cannot be after the last block
             excluded.update(range(run_end_date + 1, embargo_hi + 1))
 
+        # we remove the purge and embargo windows from the train sets, not test sets.
         train_idx = np.array([
-            i for i in range(n_dates)
-            if i not in set(test_idx.tolist()) and i not in excluded
-        ])
+            i for i in range(n_dates) if i not in set(test_idx.tolist()) and i not in excluded
+        ])  
 
         yield train_idx, test_idx, test_ids
+
+
+
+
 
 
 # =============================================================================
 # SECTION 2: PBO via CSCV (Bailey, Borwein, Lopez de Prado & Zhu, 2017)
 # =============================================================================
 
-def probability_of_backtest_overfitting(
-    performance_matrix: np.ndarray,
-    n_splits: int,
-    metric: str = 'sharpe',
-) -> dict:
+def probability_of_backtest_overfitting(performance_matrix: np.ndarray, n_splits: int, metric: str = 'sharpe') -> dict:
     '''
-    performance_matrix: shape (T, N). T = sub-periods (NOT necessarily
-        the same object as n_groups in Section 1, though you can build
-        them the same way, one row per contiguous time block). N =
-        candidate strategies/configs you are choosing between (different
+    PBO is computed by comparing the bset performing strat in sample to its rank OOS.
+        The OOS rank is put in (0,1) and transformed into logits.
+
+    performance_matrix: shape (T, N). 
+        T = sub-periods (NOT necessarily the same object as number of blocks previously, though you can build
+        them the same way, one row per contiguous time block). 
+        N = candidate strategies/configs you are choosing between (different
         alpha/l1_ratio settings, different signal sets, Elastic Net vs
         GBM later, etc). Each entry is that candidate's realized return
-        (or whatever the base series is) during that sub-period. This
-        function does not care how the matrix was produced, it operates
+        (or whatever the base series is) during that sub-period. 
+    This function does not care how the matrix was produced, it operates
         purely on the T x N array, per Bailey et al.'s original CSCV
         formulation, no reference back to dates/features/purge/embargo
         at this stage, that all already happened when the matrix was
@@ -249,21 +263,3 @@ def probability_of_backtest_overfitting(
     pbo = float(np.mean(logits <= 0))
 
     return {'pbo': pbo, 'logits': logits, 'n_combinations': len(logits)}
-
-
-if __name__ == '__main__':
-    # Sketch only, wire in real per-config OOS performance once there are
-    # at least two real candidate combiner configs to compare, see the
-    # conversation note on why the PBO number isn't meaningful yet with
-    # only one combiner design.
-    #
-    # from src.validation.splits import ...  # or purged_embargoed_kfold_splits above
-    #
-    # performance_matrix = np.column_stack([
-    #     candidate_a_sub_period_returns,
-    #     candidate_b_sub_period_returns,
-    #     ...
-    # ])
-    # result = probability_of_backtest_overfitting(performance_matrix, n_splits=16)
-    # print(result['pbo'])
-    pass

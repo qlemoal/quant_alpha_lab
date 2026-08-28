@@ -77,6 +77,7 @@ pip install -e .
 ├── docs/
 │   methodology.md           evaluation, correlation cleaning, signal construction
 │   tips_and_tricks.md       small practical stuff worth remembering
+│   findings.md              date appended as I try things
 │
 ├── config/
 │   paths.py                 centralized filesystem paths
@@ -93,24 +94,24 @@ pip install -e .
 │
 ├── scripts/                  executable pipeline scripts
 │   download_data.py
-│   clean_data.py             ETL: extract raw CSVs, transform, load prices.parquet
+│   etl_prices.py             ETL: extract raw CSVs, transform, load prices.parquet
 │   build_features.py
 │   inspect_signal.py         standalone diagnostic runner, no notebook needed
 │
 ├── src/                      reusable, importable code
 │   features/                 feature engineering, one file per family
-│   signals/                  transform.py, turning features into tradeable signals
+│   signals/                  transforms, rankings, normalizations or clippings, and make_signal, turning features into tradeable signals
 │   evaluation/
 │       signals/              IC, significance, stability, one-call report and plots
 │       portfolio/            not started, real turnover, drawdown, cost-adjusted returns
 │       models/               not started, log loss, Brier score, calibration
 │   portfolio/                not started, position sizing, transaction costs
 │   risk/                     correlation matrix cleaning, factor diagnostics (stubbed)
-│   models/                   not started, ML models
+│   models/                   elastic_net_combiner.py
 │   validation/               taylor-made rolling CV with purge and embargo
-│   utils/                    panel reshaping, plotting helpers
+│   utils/                    panel reshaping, plotting helpers, general statistics
 │
-├── sql/                      DuckDB queries, kept separate for readability
+├── sql/                      where DuckDB queries will be kept separate for readability (TODO)
 ├── tests/                    pytest unit tests, conftest.py holds the edge-case panel fixtures
 └── README.md
 ```

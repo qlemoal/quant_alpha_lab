@@ -8,7 +8,6 @@
 
 
 import polars as pl
-from setup import *
 from src.signals.combine import make_signal
 from src.evaluation.signals.signal_plots import one_pager
 from src.evaluation.signals.report import compare_reports
@@ -19,7 +18,7 @@ from src.evaluation.signals.report import compare_reports
 
 
 MODE = 'single'                          # 'single' or 'compare'
-FEATURES = ['mom20']#, 'mom60', 'mom252']   # single mode uses FEATURES[0] only
+FEATURES = ['mom20', 'mom60', 'mom252']   # single mode uses FEATURES[0] only
 METHOD = 'zscore_tanh'
 DESCENDING = False
 
