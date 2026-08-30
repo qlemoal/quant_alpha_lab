@@ -168,7 +168,7 @@ def qvalues(pvalues):
 #  Aggregate
 #  With BH/BY and q-values to compare. We choose later on which one we trust.
 
-def FDR_report(signal_names, tstats, pvalues, alpha=0.05):
+def fdr_report(signal_names, tstats, pvalues, alpha=0.05, sort_pvalues=True):
     p = np.asarray(pvalues, dtype=float)
     valid = ~np.isnan(p)
 
@@ -181,11 +181,18 @@ def FDR_report(signal_names, tstats, pvalues, alpha=0.05):
         survives_by[valid] = benjamini_yekutieli(p[valid].tolist(), alpha)
         q[valid] = qvalues(p[valid].tolist())
 
-    return pl.DataFrame({
-        'signal': signal_names, 'tstat':tstats, 'pvalue': pvalues,
-        'survives_bh': survives_bh, 'survives_by': survives_by,
-        'qvalue': q,
-    }).sort('pvalue', nulls_last=True)
+    if sort_pvalues:
+        return pl.DataFrame({
+            'signal': signal_names, 'tstat':tstats, 'pvalue': pvalues,
+            'survives_bh': survives_bh, 'survives_by': survives_by,
+            'qvalue': q,
+        }).sort('pvalue', nulls_last=True)
+    else:
+        return pl.DataFrame({
+                    'signal': signal_names, 'tstat':tstats, 'pvalue': pvalues,
+                    'survives_bh': survives_bh, 'survives_by': survives_by,
+                    'qvalue': q,
+                })
 
 
 
@@ -194,7 +201,6 @@ def FDR_report(signal_names, tstats, pvalues, alpha=0.05):
 
 
 if __name__ == '__main__':
-    from scipy.stats import norm
     from src.signals.combine import make_signal
     from src.evaluation.signals.report import compare_reports
     from src.utils.stats import compute_pval_from_tstat
@@ -211,5 +217,5 @@ if __name__ == '__main__':
 
     pvals = compute_pval_from_tstat(reports['ic_tstat_nw'].to_list())
 
-    result = FDR_report(reports['signal'].to_list(), reports['ic_tstat_nw'].to_list(), pvals, alpha=0.2)
+    result = fdr_report(reports['signal'].to_list(), reports['ic_tstat_nw'].to_list(), pvals, alpha=0.2)
     print(result)
