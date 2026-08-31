@@ -58,12 +58,13 @@ def equal_weighted_market_return( lf:pl.LazyFrame, ret_col:str='logret' ) -> pl.
     )
 
 
-def select_embargo_from_autocorrelation( lf:pl.LazyFrame, col_name:str, max_lag:int, alpha:float=0.2 ) -> dict:
+def select_embargo_from_autocorrelation( lf:pl.LazyFrame, col_name:str, max_lag:int, alpha:float=0.05 ) -> dict:
     '''
     lf_1d: flat series, one row per date, on which we compute the autocorrelation
     col_name: the column on which to compute the autocorrelation
     max_lag: search ceiling. A real, stated bound, not searched unboundedly, for FDR.
-    alpha: the FDR alpha, reusing the previous convention from fdr_report, like 0.2.
+    alpha: the FDR alpha, knowingly different from the FDR alpha, which needs to 
+        let in real-but-weak candidate signals. So sticking with the usual 0.05 alpha here.
 
     Returns a dict: 
         'embargo' : the selected integer 
@@ -78,7 +79,7 @@ def select_embargo_from_autocorrelation( lf:pl.LazyFrame, col_name:str, max_lag:
     tstats, pvalues = [], []
     for k in lags:
         r = ac[f'lag_{k}'][0]
-        n_k = n_obs - k  # k leading rows become null after the shift
+        n_k = n_obs - k  # k leading rows become null after the shift, so less obs total.
         if r is None or n_k <= 1:
             tstats.append(float('nan'))
             pvalues.append(float('nan'))
@@ -105,7 +106,7 @@ def select_embargo_from_autocorrelation( lf:pl.LazyFrame, col_name:str, max_lag:
 
     # Plot qvalues to check how dispersed they are
     import matplotlib.pyplot as plt
-    f, ax = plt.subplots(1, figsize=(12, 6))
+    _, _ = plt.subplots(1, figsize=(12, 6))
     plt.plot(fdr_table['qvalue'], '-o')
     plt.axhline(alpha)
     plt.show()
@@ -119,7 +120,7 @@ if __name__ == '__main__':
     lf = pl.scan_parquet('data/processed/features.parquet')
     market_lf = equal_weighted_market_return(lf, ret_col='logret')
     result = select_embargo_from_autocorrelation(
-        market_lf, 'logret', max_lag=252, alpha=0.2
+        market_lf, 'logret', max_lag=252, alpha=0.05
     )
     print(result['embargo'])
     print(result['fdr_table'])
