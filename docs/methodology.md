@@ -205,16 +205,8 @@ measuring close to the same 1-day relationship at different offsets.
 
 ### 1.6 Walk-forward, purged, embargoed cross-validation
 
-Random k-fold leaks future information into training folds in a time
-series, a model trained partly on data chronologically after its test set
-has seen the future. Walk-forward keeps training strictly before testing.
-Purging drops training rows whose label or feature window overlaps the test
-period (a `mom252`-based label computed near the fold boundary uses
-information technically inside the test window). Embargo adds a small gap
-after the test period before the next fold's training starts, since return
-autocorrelation can leak information across a hard boundary even after
-purging alone. Reference: López de Prado, *Advances in Financial Machine
-Learning*.
+Embargo adds a small gap after the test period before the next fold's training starts. Unlike in true K-fold (Section 1.7), this isn't protecting any single fold's own validity, purge alone already does that here, since train is always strictly before test in walk-forward. It's protecting the independence of results across folds when they get aggregated into one statistic (e.g. `ElasticNetCV` validation score across folds to pick `alpha`), without it, two folds whose train/test boundaries sit close together could give correlated rather than independent-ish OOS readings, understating how uncertain the aggregate really is. 
+Reference: López de Prado, *Advances in Financial Machine Learning*.
 
 We start constructing the folds from the latest date available, and go backwards from there. 
 That is to take full advantage of the "freshest" data, especially with the survivorship bias
@@ -232,7 +224,7 @@ across many trials (relevant later for elastic net alpha/l1_ratio and the GBM co
 
 Distinct from the walk-forward scheme above, not a replacement for it. Walk-forward keeps train strictly before test, realistic for simulating actual deployment, but only produces a handful of folds given the history available. True K-fold allows train to include data from both sides of a test block chronologically, which means embargo becomes necessary for a single fold's own validity here (not just for cross-fold independence, as in the walk-forward case, see splits.py's docstring), following López de Prado (2018), ch. 7. CPCV (purged_embargoed_kfold_splits with n_test_groups > 1) extends this combinatorially, evaluating every combination of held-out groups. Full AFML path reconstruction (ch. 12) is not implemented, not needed for the specific statistic used here (see below).
 
-**Tuning the embargo window:** `src/validation/embargo_selection.py` computes the autocorrelation of the market returns at lags 1 to `max_lag`. The maximum significant autocorrelation, i.e. below `alpha`, is set to be the embargo window, which should tranlate to more independent train/test sets during CPCV. The `alpha` here is different form the FDR's `alpha`. We set it to the common choice of 0.05 for now.
+**Tuning the embargo window:** `src/validation/embargo_selection.py` tests lag-wise autocorrelation of market returns for significance, FDR-corrected across all tested lags (`alpha=0.05`, distinct from the FDR module's own `0.2`, chosen independently for its own reason, not reused by habit). Rather than taking the single largest lag anywhere that survives correction, which is vulnerable to an isolated, disconnected significant lag inflating the estimate, embargo is set to the last lag in the first contiguous run of significant lags starting at lag 1. Current result: `EMBARGO=1`, driven by strong lag-1 reversal (q≈0), consistent with well-documented bid-ask bounce. Two additional isolated significant lags were found further out (see `docs/findings.md`), real, but disconnected from the origin, treated as a separate finding, not embargo material.
 
 **Probability of Backtest Overfitting:** `probability_of_backtest_overfitting()` implements the CSCV algorithm from Bailey, Borwein, López de Prado & Zhu (2017, Journal of Computational Finance 20(4), 39-69): given a performance matrix across several candidate strategies/configurations, repeatedly split into in-sample/out-of-sample halves, check whether the in-sample winner still ranks above the OOS median, PBO is the fraction of splits where it doesn't. Requires at least two real candidates to compare, not used to evaluate a single model in isolation. First planned use: comparing Elastic Net combiner configurations against each other, and later against the GBM alternative.
 
