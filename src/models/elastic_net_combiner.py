@@ -33,7 +33,7 @@ import polars as pl
 from polars import col as c
 from sklearn.linear_model import ElasticNet, ElasticNetCV
 
-from validation.walk_forward_cv import rolling_purged_embargoed_splits, Fold
+from src.validation.walk_forward_cv import walk_forward_cv, Fold
 
 
 # =============================================================================
@@ -91,7 +91,7 @@ def build_row_index_folds(
     mode for rolling-diagnostic plots instead. Defaulting to 'consecutive'
     here on purpose, for that reason.
     '''
-    folds = list(rolling_purged_embargoed_splits(
+    folds = list(walk_forward_cv(
         unique_dates, train_window, horizon, test_window, embargo, next_fold
     ))
     return [fold_to_row_indices(panel_dates, f) for f in folds]

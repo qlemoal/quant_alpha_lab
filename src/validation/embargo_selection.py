@@ -136,8 +136,7 @@ def select_embargo_from_autocorrelation( lf:pl.LazyFrame, col_name:str, max_lag:
         import matplotlib.pyplot as plt
         _, _ = plt.subplots(1, figsize=(12, 6))
         plt.plot(fdr_table['qvalue'], '-o')
-        plt.axhline(1.96/np.sqrt(n_total))
-        plt.axhline(0.05/np.sqrt(n_total))
+        plt.axhline(alpha)
         plt.xlabel('lag')
         plt.ylabel('qvalue')
         plt.grid()

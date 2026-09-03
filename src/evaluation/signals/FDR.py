@@ -125,7 +125,7 @@ def estimate_pi0(pvalues, lambdas=None):
 
 def qvalues(pvalues):
     '''
-    Storey q-values: for each candidate, the minimum FDR at which it would be
+    Storey q-values: for each candidate, its qvalue is the minimum FDR at which it would be
         called significant. No alpha, no per-signal cutoff decision baked in
         here, pi0 comes from the data (estimate_pi0), everything after that
         is a fixed, order-preserving transform of the p-values. Reported as

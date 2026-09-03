@@ -133,7 +133,10 @@ most candidates are obviously real signals.
 **Storey's q-value.** Flips the question: instead of "is this significant
 at a chosen alpha," it asks "if this p-value were used as the cutoff, what
 FDR would that produce?" That minimum achievable FDR, per candidate, is its
-q-value, the FDR analogue of a p-value. Two differences from BH/BY:
+q-value, the FDR analogue of a p-value. In other words: It's the smallest 
+false-discovery-rate level at which that specific test would still be called significant. 
+
+Two differences from BH/BY:
 
 - `pi0` (the true proportion of null candidates) is *estimated* from the
   data instead of assumed to be 1. Genuine null p-values are uniform on
@@ -224,7 +227,7 @@ across many trials (relevant later for elastic net alpha/l1_ratio and the GBM co
 
 Distinct from the walk-forward scheme above, not a replacement for it. Walk-forward keeps train strictly before test, realistic for simulating actual deployment, but only produces a handful of folds given the history available. True K-fold allows train to include data from both sides of a test block chronologically, which means embargo becomes necessary for a single fold's own validity here (not just for cross-fold independence, as in the walk-forward case, see splits.py's docstring), following López de Prado (2018), ch. 7. CPCV (purged_embargoed_kfold_splits with n_test_groups > 1) extends this combinatorially, evaluating every combination of held-out groups. Full AFML path reconstruction (ch. 12) is not implemented, not needed for the specific statistic used here (see below).
 
-**Tuning the embargo window:** `src/validation/embargo_selection.py` tests lag-wise autocorrelation of market returns for significance, FDR-corrected across all tested lags (`alpha=0.05`, distinct from the FDR module's own `0.2`, chosen independently for its own reason, not reused by habit). Rather than taking the single largest lag anywhere that survives correction, which is vulnerable to an isolated, disconnected significant lag inflating the estimate, embargo is set to the last lag in the first contiguous run of significant lags starting at lag 1. Current result: `EMBARGO=1`, driven by strong lag-1 reversal (q≈0), consistent with well-documented bid-ask bounce. Two additional isolated significant lags were found further out (see `docs/findings.md`), real, but disconnected from the origin, treated as a separate finding, not embargo material.
+**Tuning the embargo window:** `src/validation/embargo_selection.py` tests lag-wise autocorrelation of market returns for significance, FDR-corrected across all tested lags (`alpha=0.05`, distinct from the FDR module's own `0.2`, chosen independently for its own reason, not reused by habit). Rather than taking the single largest lag anywhere that survives correction, which is vulnerable to an isolated, disconnected significant lag inflating the estimate, embargo is set to the last lag in the first contiguous run of significant lags starting at lag 1. Current result: `EMBARGO=1`, driven by strong lag-1 reversal (q≈0), consistent with well-documented bid-ask bounce. Two additional isolated significant lags were found further out (see `docs/findings.md`), real, but disconnected from the origin, treated as a separate finding, not embargo material. It is also common practice to add the prediction horizon (e.g. 5 for next week returns) to the embargo window. 
 
 **Probability of Backtest Overfitting:** `probability_of_backtest_overfitting()` implements the CSCV algorithm from Bailey, Borwein, López de Prado & Zhu (2017, Journal of Computational Finance 20(4), 39-69): given a performance matrix across several candidate strategies/configurations, repeatedly split into in-sample/out-of-sample halves, check whether the in-sample winner still ranks above the OOS median, PBO is the fraction of splits where it doesn't. Requires at least two real candidates to compare, not used to evaluate a single model in isolation. First planned use: comparing Elastic Net combiner configurations against each other, and later against the GBM alternative.
 

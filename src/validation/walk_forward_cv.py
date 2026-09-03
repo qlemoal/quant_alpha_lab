@@ -23,7 +23,7 @@ from collections import namedtuple
 Fold = namedtuple('Fold', ['train_start', 'train_end', 'test_start', 'test_end'])
 
 
-def rolling_purged_embargoed_splits(dates, train_window, horizon, test_window, embargo, next_fold='consecutive'):
+def walk_forward_cv(dates, train_window, horizon, test_window, embargo, next_fold='consecutive'):
     '''
     Non-overlapping train -> purge -> test -> embargo cycles, tiled backward
         from the most recent date so the newest fold uses the latest data
