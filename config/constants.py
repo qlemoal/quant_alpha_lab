@@ -13,3 +13,7 @@ ROLLING_WINDOWS = {
 
 LONG_THRESHOLD = 0.8
 SHORT_THRESHOLD = -0.8
+
+#  To find the right embargo window, run embargo_selection.py on the right time series, 
+#       i.e., if 5-day forward returns are the target, compute ACF of 5-day aggregated returns
+EMBARGO_WINDOW = 16
