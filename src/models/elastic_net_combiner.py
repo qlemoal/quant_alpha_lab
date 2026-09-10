@@ -58,33 +58,24 @@ def fold_to_row_indices(panel_dates:np.ndarray, fold:Fold) -> tuple[np.ndarray, 
     return np.flatnonzero(train_mask), np.flatnonzero(test_mask)  # flatnonzero returns the indices of the elements that are non-zero (flattened).
 
 
-def build_row_index_folds(
-    panel_dates: np.ndarray,
-    unique_dates: np.ndarray,
-    train_window: int,
-    horizon: int,
-    test_window: int,
-    embargo: int,
-    next_fold: str | int = 'consecutive',
+def build_row_index_folds(  panel_dates:np.ndarray, unique_dates:np.ndarray, train_window:int,
+                            horizon:int, test_window:int, embargo:int, next_fold:str|int='consecutive'
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     '''
-    Wraps walk_forward_cv() + fold_to_row_indices() into the exact list-of-(train_idx, test_idx) format sklearn's cv= expects.
+    Wraps walk_forward_cv() + fold_to_row_indices() into the exact list of (train_idx, test_idx) format sklearn's cv= expects.
 
-    unique_dates: the deduplicated, sorted date array splits.py operates
-        on (what you'd pass to rolling_purged_embargoed_splits directly).
+    unique_dates: the deduplicated, sorted date array walk_forward.py operates on.
+
     panel_dates: the (date, ticker)-row-level date array from the actual
         design matrix, used only for the row-index lookup.
 
-    NOTE which next_fold mode to use here is a real, unsettled choice
-    (see conversation): 'consecutive' gives ~5-6 properly-embargoed,
-    close-to-independent folds, appropriate for THIS use (averaging fold
-    validation scores into a single alpha/l1_ratio choice). An int
-    next_fold (e.g. next_fold=test_window for dense back-to-back tiling)
-    gives many more folds but does NOT respect embargo between them and
-    should not be averaged over for a hyperparameter decision, save that
-    mode for rolling-diagnostic plots instead. Defaulting to 'consecutive'
+    NOTE: which next_fold mode to use here is a real, unsettled choice: 'consecutive' gives ~5-6 properly-embargoed,
+    close-to-independent folds, appropriate for THIS use (averaging fold validation scores into a single alpha/l1_ratio choice). An int
+    next_fold (e.g. next_fold=test_window for dense back-to-back tiling) gives many more folds but does NOT respect embargo between them and
+    should not be averaged over for a hyperparameter decision, save that mode for rolling-diagnostic plots instead. Defaulting to 'consecutive'
     here on purpose, for that reason.
     '''
+    
     folds = list(walk_forward_cv(
         unique_dates, train_window, horizon, test_window, embargo, next_fold
     ))
@@ -175,18 +166,9 @@ def apply_q_value_weighting( X:np.ndarray, signal_cols:list[str], q_values:dict[
 # STEP 4: fit, with the project's own CV folds, not sklearn's default
 # =============================================================================
 
-def fit_elastic_net_combiner(
-    panel : pl.DataFrame,
-    signal_cols : list[str],
-    fwd_ret_col : str,
-    date_col : str,
-    unique_dates : np.ndarray,
-    train_window : int,
-    horizon : int,
-    test_window:  int,
-    embargo : int,
-    q_values : dict[str, float] | None = None,
-    l1_ratio_grid : list[float] = [.1, .5, .7, .9, .95, .99, 1],
+def fit_elastic_net_combiner( panel:pl.DataFrame, signal_cols:list[str], fwdret_col:str, date_col:str,
+                              unique_dates:np.ndarray, train_window:int, horizon:int, test_window:int, embargo:int,
+                              q_values:dict[str, float]|None=None, l1_ratio_grid:list[float]=[.1, .5, .7, .9, .95, .99, 1],
 ) -> dict:
     '''
     l1_ratio_grid: sklearn's own standard default grid, a fixed convention here, not tuned to this dataset, consistent with the
@@ -196,7 +178,7 @@ def fit_elastic_net_combiner(
     '''
     panel_dates = panel[date_col].to_numpy()
     X = panel.select(signal_cols).to_numpy()
-    y = panel[fwd_ret_col].to_numpy()
+    y = panel[fwdret_col].to_numpy()
 
     if q_values is not None:
         X = apply_q_value_weighting(X, signal_cols, q_values)
