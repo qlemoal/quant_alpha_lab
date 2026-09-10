@@ -32,6 +32,7 @@ def compute_ic(lf:pl.LazyFrame, signal_col, forward_return_col='fwdret', method=
     )
 
 
+
 def summarize_ic(ic_lf:pl.LazyFrame|pl.DataFrame, ic_col='ic') -> dict:
     '''
     Returns dict of IC stats from a per-date IC series:

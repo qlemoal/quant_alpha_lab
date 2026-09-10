@@ -192,6 +192,34 @@ run, which it never is here. The q-value carries that context built in.
 
 **FDR choice: continuous prior, not a hard gate.** `fdr_report()` computes BH, BY, and q-value side by side, but none of `survives_bh` / `survives_by` is used as a hard filter into the signal combiner. Two reasons. First, a hard cutoff at any `alpha` throws away graded information, a candidate just above and just below the line are treated as categorically different despite being nearly identical in strength. Second, using a cutoff would introduce a second free parameter beyond `alpha` itself, which q-value would need (some chosen q-threshold), reproducing exactly the "picked because it looks right" problem this project's FDR module was built to avoid. Instead, the q-value feeds into the combiner as a continuous weight, letting the combiner's own regularization (see Section 5, Elastic Net) do the actual inclusion/exclusion, informed by evidence strength rather than a binary pass/fail upstream of it.
 
+### 1.5  Comparing model families: GBM vs. Elastic Net via PBO
+
+Once more than one finished combiner exists, comparing them by headline
+IC alone risks mistaking noise for a genuine difference. Probability of
+Backtest Overfitting (Bailey, Borwein, Lopez de Prado & Zhu, 2017,
+*Journal of Computational Finance* 20(4), 39-69) answers a different,
+more useful question: if you picked whichever candidate looked best on
+some slice of history, how often would that pick actually hold up on a
+different slice? Implemented in `probability_of_backtest_overfitting()`
+(`src/validation/cpcv.py`), consumed by `scripts/compare_gbm_vs_en_pbo.py`.
+
+Both candidates are tuned via CPCV on an identical search region using
+IDENTICAL folds (fairness: neither gets an easier or harder split by
+chance), then evaluated, fixed, on a shared, genuinely untouched holdout,
+split into contiguous sub-blocks for the PBO matrix. This is a scoped-down
+adaptation of full CSCV (see the script's docstring for exactly what's
+simplified and why), not the textbook nested-refit version, upgrade path
+noted there if this becomes a recurring comparison rather than a one-off.
+
+GBM (`src/models/gbm_combiner.py`, `HistGradientBoostingRegressor`) is
+the natural nonlinear counterpoint to Elastic Net: if it meaningfully
+outperforms, that's evidence of real interaction effects between
+candidate signals a linear model can't express. If not, per Friedman
+(2001), more flexible function classes only pay off if the true
+relationship has that shape, otherwise they mostly add variance, and PBO
+should reflect that as a high, unreliable-selection number rather than a
+confident model preference.
+
 ### 1.5 IC decay across forward-return horizons
 
 `ic_decay()`, Rank IC of a signal against forward returns at several

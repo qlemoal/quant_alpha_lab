@@ -222,11 +222,12 @@ US equities, daily bars only. No intraday, no other asset classes, no fundamenta
 - [x] Signal evaluation, Rank IC, Newey-West significance, IC decay, stability, paper Sharpe, numeric and visual one-call checks
 - [X] FDR across multiple candidate signals
 - [X] Rolling cross-validation, with purge and embargo buffer dates
-- [ ] Elastic Net signal combiner
-- [ ] Portfolio construction
-- [ ] Transaction cost modeling
-- [ ] RMT correlation cleaning
-- [ ] GBM comparison model
+- [x] Elastic Net signal combiner (walk-forward-tuned alpha/l1_ratio, CPCV-tuned as alternative)
+- [x] GBM comparison model, compared to EN via Probability of Backtest Overfitting
+- [ ] Risk-engine-driven portfolio construction layer
+- [ ] Transaction costs
+- [ ] RMT correlation cleaning + Louvain clustering
+- [ ] Full backtest loop with attribution
 - [ ] Robustness analysis
 
 ---
@@ -235,11 +236,10 @@ US equities, daily bars only. No intraday, no other asset classes, no fundamenta
  
 - [ ] Fix beta's market proxy (real benchmark index instead of the biased equal-weighted universe average)
 - [ ] `seasonality.py`
-- [ ] Elastic Net combiner across FDR-surviving signals
+- [ ] `icir.py`
 - [ ] `src/portfolio/`, position sizing, transaction costs
 - [ ] `src/risk/covariance_cleaning.py`, RMT denoising, absorption ratio
-- [ ] GBM comparison model, purged/embargoed walk-forward CV
-- [ ] Full backtest loop with attribution
+- [ ] Full backtest loop with performance attribution
 - [ ] Approximate point-in-time constituent list
 
 ---

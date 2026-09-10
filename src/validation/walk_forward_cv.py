@@ -53,7 +53,7 @@ def walk_forward_cv(dates, train_window, horizon, test_window, embargo, next_fol
         If an int, next train_set starts after next_fold dates after the previous.
 
     Yields Fold namedtuples in chronological order, oldest first. 
-        Use with "for train_start, train_end, test_start, test_end in rolling_purged_embargoed_splits(...):"
+        Use with "for train_start, train_end, test_start, test_end in walk_forward_cv(...):"
     '''
     n = len(dates)
     folds = []
@@ -66,7 +66,6 @@ def walk_forward_cv(dates, train_window, horizon, test_window, embargo, next_fol
 
         if train_start_idx < 0 or train_end_idx < 0 or test_start_idx < 0:
             break
-
 
         folds.append(Fold(
             train_start=dates[train_start_idx],
@@ -95,5 +94,5 @@ if __name__ == '__main__':
 
     dates = lf.select(pl.col('date').unique()).collect().to_numpy()[:, 0]
     print(len(dates), min(dates), max(dates))
-    for train_start, train_end, test_start, test_end in rolling_purged_embargoed_splits(dates, 500, 10, 100, 10, next_fold=252):
+    for train_start, train_end, test_start, test_end in walk_forward_cv(dates, 500, 10, 100, 10, next_fold=252):
         print(train_start, train_end, test_start, test_end)
