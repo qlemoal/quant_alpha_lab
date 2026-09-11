@@ -1,5 +1,5 @@
 '''
-Visualizes CPCV fold geometry across a few parameter settings, and sweeps the good_signal/noise_signal recovery check across those same settings.
+Visualizes CPCV fold structure across a few parameter settings, and sweeps the good_signal/noise_signal recovery check across those same settings.
 Not a test, not merged code, exploratory only.
 '''
 
@@ -34,6 +34,7 @@ for ax, s in zip(axes, settings):
 plt.tight_layout()
 plt.show()
 # plt.savefig('/tmp/cpcv_geometry.png', dpi=120); print('saved geometry plot')
+
 
 
 
