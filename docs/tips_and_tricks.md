@@ -2,6 +2,7 @@
 
 Small, practical stuff that's saved time on this project. Running list, linked from the main README.
 
+- **`pip install -e .`, once, from the repo root, instead of fighting `PYTHONPATH` or relative imports.** Makes every `src.*`/`config.*` import work from anywhere, scripts, tests, a notebook, without prepending `PYTHONPATH=.` every time or littering `sys.path.insert()` calls. `pyproject.toml`'s `[tool.setuptools.packages.find]` picks up the real package tree automatically, switched away from a hand-maintained list specifically because the module tree kept growing faster than the list was updated, a stale list means `pip install -e .` succeeds while silently leaving a new subpackage unimportable, worse than a clear error.
 - **`pipreqs`, for `pyproject.toml` dependencies.** Scans actual `import` statements in the codebase and prints a minimal dependency list, instead of hand-copying whatever happens to be sitting in the environment. `pipreqs . --print`, then hand-check and paste into `pyproject.toml`.
 - **`pip freeze > requirements.txt`, for a fully pinned, exact snapshot.** Different job than `pyproject.toml`: this one's the frozen full picture (every transitive dependency, exact versions), the other is the short curated list of what the code directly imports.
 - **`conda env export --from-history > environment.yml`, if using conda.** Only records what was explicitly asked for on install, not the full resolved tree with build strings. Keeps the file short and readable instead of machine-specific and broken elsewhere.

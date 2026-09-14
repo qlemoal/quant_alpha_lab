@@ -13,15 +13,23 @@ dependencies=[
     #     to make sure this file is well written before running pip install -e .
     # Note: it will create the *.egg-info/ file, which is needed then for pip and python to recognize my editable package. Added to .gitignore though.
     "matplotlib==3.11.1",
+    "networkx==3.6.1",
     "numpy==2.5.2",
     "pandas==3.0.5",
     "polars==1.43.1",
     "pytest==9.1.1",
+    "scikit-learn==1.7.2",
     "scipy==1.18.0",
     "Requests==2.34.2",
     "tqdm==4.70.0",
     "yfinance==1.5.2",
 ]
 
-[tool.setuptools]
-packages = ['src', 'src.features', 'src.utils', 'config']
+[tool.setuptools.packages.find]
+# switched from a hand-maintained list to automatic discovery: the module
+# tree has grown a new subpackage (src.models, src.validation, src.risk,
+# src.evaluation.signals.IC, src.evaluation.portfolio.clustering, ...)
+# every few weeks, a fixed list goes stale fast and silently, "pip install -e ."
+# would succeed while quietly leaving a new subpackage unimportable, worse
+# than an obvious error. find() re-discovers the real tree every install.
+include = ['src*', 'config*']

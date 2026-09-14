@@ -33,7 +33,7 @@ for ax, s in zip(axes, settings):
 
 plt.tight_layout()
 plt.show()
-# plt.savefig('/tmp/cpcv_geometry.png', dpi=120); print('saved geometry plot')
+fig.savefig('cpcv_geometry.png', dpi=120); print('saved geometry plot')
 
 
 
@@ -60,7 +60,7 @@ fwdret = TRUE_COEF * good_signal + rng.normal(0, 3.0, N_DATES_PANEL * N_TICKERS)
 lf = pl.DataFrame({'date': dates, 'ticker': tickers, 'good_signal': good_signal, 'noise_signal': noise_signal, 'fwdret': fwdret}).lazy()
 
 signal_cols = ['good_signal', 'noise_signal']
-panel = build_design_matrix(lf, signal_cols, fwd_ret_col='fwdret')
+panel = build_design_matrix(lf, signal_cols, fwdret_col='fwdret')
 unique_dates = panel['date'].unique().sort().to_numpy()
 panel_dates = panel['date'].to_numpy()
 X = panel.select(signal_cols).to_numpy()

@@ -20,13 +20,10 @@ About the 1-lag autocorrelation: The leading explanation in the literature is no
 
 ## 2026-09-10: GBM vs. Elastic Net, PBO comparison
 
-PUT MY NUMBER -->>
-On [real dataset / synthetic sanity check, specify once run for real],
-PBO between the CPCV-tuned GBM and Elastic Net combiners: [X.XX]. [If
-run on real signals: interpretation of whether the two are
-distinguishable, and which, if either, to prefer, with the caveat that
-a high PBO means the apparent winner shouldn't be trusted as a stable
-preference without more evidence.] Sanity-checked first on synthetic
-data with a known linear relationship (no true nonlinear structure for
-GBM to exploit), correctly returned a high PBO (~0.63), confirming the
-method doesn't manufacture a false preference where none should exist.
+Two synthetic sanity checks before trusting this on real signals, deliberately designed to test both directions:
+
+**Linear relationship** (`scripts/compare_gbm_vs_en_pbo.py`): `fwdret = 0.8*good_signal + noise`, no structure for GBM to exploit beyond what Elastic Net already captures. Result: `PBO=0.629`, correctly high, the two candidates trade holdout-block wins back and forth (`EN` and `GBM` per-block Sharpes interleave with no consistent pattern), matching the fact there's no real reason to prefer one here.
+
+**Sign-flip interaction** (`scripts/gbm_wins_interaction_test.py`): `fwdret = 1.2*signal_a*sign(signal_b) + noise`, a structure with exactly zero marginal linear correlation, a linear model cannot see it at all, by construction, not just in practice. Result: EN's coefficients correctly collapse to ~0 (doesn't manufacture fake structure from noise it can't use), holdout long-short Sharpe `0.72` (noise-level). GBM discovers the interaction directly via tree splits, holdout Sharpe `38.28`. `PBO=0.000`, GBM wins all 70 IS/OOS splits, full confidence.
+
+Together: PBO isn't defaulting to any particular answer regardless of input, it swings from "no real difference, don't trust either preference" to "full confidence, real and robust difference" depending on what's actually true in the data. Worth rerunning both checks once real signals and a real GBM/EN comparison exist, as a way of re-confirming the tool still behaves correctly before trusting its verdict on something that actually matters.
