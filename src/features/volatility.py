@@ -10,7 +10,7 @@ def add_volatility(lf, window=20):
                 c('logret')
                 .rolling_std(w)
                 .over('ticker')
-                .alias(f'std{w}')
+                .alias(f'vol{w}')
             )
         return lf.sort(['ticker', 'date']).with_columns(exprs)
     
@@ -20,6 +20,6 @@ def add_volatility(lf, window=20):
                         c('logret')
                         .rolling_std(window)
                         .over('ticker')
-                        .alias(f'std{window}')
+                        .alias(f'vol{window}')
                     )
                 )

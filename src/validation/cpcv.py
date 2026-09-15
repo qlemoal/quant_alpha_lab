@@ -116,7 +116,7 @@ def _merge_blocks(block_ids: tuple[int, ...]) -> list[tuple[int, int]]:
 
 
 
-def cpcv(n_dates: int, n_blocks: int, n_test_blocks: int, purge_w: int, embargo_w: int):
+def cpcv(n_dates:int, n_blocks:int, n_test_blocks:int, purge_w:int, embargo_w:int):
     '''
     Generates every C(n_groups, n_test_groups) combination of test groups, 
         accounting for purge and embargo windows around consecutive test blocks.

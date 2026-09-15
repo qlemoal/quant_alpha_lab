@@ -1,7 +1,6 @@
 import polars as pl
 from polars import col as c
 
-from setup import *
 from src.features.returns import *
 from src.features.momentum import *
 from src.features.volatility import *
