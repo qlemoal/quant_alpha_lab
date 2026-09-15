@@ -33,7 +33,9 @@ for ax, s in zip(axes, settings):
 
 plt.tight_layout()
 plt.show()
-fig.savefig('cpcv_geometry.png', dpi=120); print('saved geometry plot')
+# fig.savefig('cpcv_geometry.png', dpi=120); print('saved geometry plot')
+
+
 
 
 
@@ -43,20 +45,20 @@ fig.savefig('cpcv_geometry.png', dpi=120); print('saved geometry plot')
 
 import polars as pl
 import datetime
-from src.models.elastic_net_combiner import build_design_matrix, apply_q_value_weighting
+from src.models.elastic_net_combiner import build_design_matrix
 from sklearn.linear_model import ElasticNetCV
 
 N_DATES_PANEL = 700
 N_TICKERS = 30
 TRUE_COEF = 0.8
 
-rng = np.random.default_rng(0)
+rng = np.random.default_rng(1)
 calendar_dates = [datetime.date(2015, 1, 1) + datetime.timedelta(days=i) for i in range(N_DATES_PANEL)]
 dates = [d for d in calendar_dates for _ in range(N_TICKERS)]
 tickers = np.tile([f'T{i:02d}' for i in range(N_TICKERS)], N_DATES_PANEL)
 good_signal = rng.normal(0, 1, N_DATES_PANEL * N_TICKERS)
 noise_signal = rng.normal(0, 1, N_DATES_PANEL * N_TICKERS)
-fwdret = TRUE_COEF * good_signal + rng.normal(0, 3.0, N_DATES_PANEL * N_TICKERS)
+fwdret = TRUE_COEF * good_signal + rng.normal(0, 3.0, N_DATES_PANEL * N_TICKERS)  # we build the fwrdret from the good signal, with a lot of noise
 lf = pl.DataFrame({'date': dates, 'ticker': tickers, 'good_signal': good_signal, 'noise_signal': noise_signal, 'fwdret': fwdret}).lazy()
 
 signal_cols = ['good_signal', 'noise_signal']
@@ -65,6 +67,7 @@ unique_dates = panel['date'].unique().sort().to_numpy()
 panel_dates = panel['date'].to_numpy()
 X = panel.select(signal_cols).to_numpy()
 y = panel['fwdret'].to_numpy()
+
 
 print(f"\n{'setting':<55} {'n_folds':>8} {'good_signal':>13} {'noise_signal':>13}")
 for s in settings:

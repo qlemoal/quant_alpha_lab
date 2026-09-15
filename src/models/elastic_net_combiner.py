@@ -39,7 +39,7 @@ from src.validation.walk_forward_cv import walk_forward_cv, Fold
 
 
 
-# rolling_purged_embargoed_splits() yields Fold(train_start, train_end, test_start, test_end) as DATES. 
+# walk_forward_cv() yields Fold(train_start, train_end, test_start, test_end) as DATES. 
 # But the design matrix here has one row per (date, ticker), not one row per date, sklearn's `cv` parameter needs
 # integer ROW indices into that matrix. This adapter is the direct payoff of having built CV myself: 
 # everything downstream reuses it unchanged, no separate leakage logic duplicated here.
@@ -75,7 +75,7 @@ def build_row_index_folds(  panel_dates:np.ndarray, unique_dates:np.ndarray, tra
     should not be averaged over for a hyperparameter decision, save that mode for rolling-diagnostic plots instead. Defaulting to 'consecutive'
     here on purpose, for that reason.
     '''
-    
+
     folds = list(walk_forward_cv(
         unique_dates, train_window, horizon, test_window, embargo, next_fold
     ))

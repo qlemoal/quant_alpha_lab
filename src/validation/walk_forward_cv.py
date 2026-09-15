@@ -51,10 +51,12 @@ def walk_forward_cv(dates, train_window, purge, test_window, embargo, next_fold=
         alone already guarantees that. 
         We set it by default to config.constants.EMBARGO_WINDOW, 
         a too big embargo will make the number of folds too small.
-    next_fold = 'consecutive' or an int. 
-        If consecutive, no data is used by multiple sets --> very conservative.
-        If an int, next train_set starts after `next_fold` dates after the previous.
-            The obvious choice is to set it to test_window+embargo. Note that embargo is useless in that case.
+    next_fold = 'consecutive' or 'dense'.
+        'consecutive': no data used by multiple folds, maximally spaced, most conservative.
+        'dense': next fold starts exactly test_window+embargo dates after the previous, tightest packing that
+            still respects the SAME embargo value passed above, not a second, independently-chosen number.
+            Replaces the earlier arbitrary-int option, which silently ignored whatever `embargo` was passed
+            once you were in int mode, nothing enforced that your chosen int actually respected it.
 
 
     Yields Fold namedtuples in chronological order, oldest first. 
@@ -82,9 +84,9 @@ def walk_forward_cv(dates, train_window, purge, test_window, embargo, next_fold=
 
         if next_fold == 'consecutive':
             test_end_idx = train_start_idx - embargo - 1
-        elif isinstance(next_fold, int):
-            test_end_idx = test_end_idx - next_fold
-        else: raise ValueError
+        elif next_fold == 'dense':
+            test_end_idx = test_end_idx - (test_window + embargo)
+        else: raise ValueError(f"next_fold must be 'consecutive' or 'dense', got {next_fold!r}")
 
     yield from reversed(folds)
 
