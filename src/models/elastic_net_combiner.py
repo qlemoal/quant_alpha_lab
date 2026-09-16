@@ -50,8 +50,9 @@ from polars import col as c
 from sklearn.linear_model import ElasticNet, ElasticNetCV
 
 from config.constants import EMBARGO_WINDOW
-from src.validation.walk_forward_cv import walk_forward_cv, Fold
+from src.validation.walk_forward_cv import walk_forward_cv, Fold  # Import the Fold namedtuple type defined there, which described the train/test sets
 from src.validation.cpcv import cpcv
+from src.features.returns import add_fwd_returns, add_fwdret_horizon
 
 
 
@@ -74,7 +75,7 @@ from src.validation.cpcv import cpcv
 # beyond) only ever consumes a plain list[(train_idx, test_idx)], it doesn't
 # know or care which scheme produced it.
 
-def fold_to_row_indices(panel_dates:np.ndarray, fold:Fold) -> tuple[np.ndarray, np.ndarray]:
+def fold_dates_to_indices(panel_dates:np.ndarray, fold:Fold) -> tuple[np.ndarray, np.ndarray]:
     '''
     panel_dates: 1D array, one entry per ROW of the design matrix (i.e. not unique, repeats once per ticker per date). 
         Must be date-typed, same dtype as what walk_forward_cv() was called with.
@@ -91,11 +92,11 @@ def fold_to_row_indices(panel_dates:np.ndarray, fold:Fold) -> tuple[np.ndarray, 
 
 
 
-def build_row_index_folds(  panel_dates:np.ndarray, unique_dates:np.ndarray, train_window:int,
+def build_walk_forward_idx(  panel_dates:np.ndarray, unique_dates:np.ndarray, train_window:int,
                             horizon:int, test_window:int, embargo:int, next_fold:str='consecutive'
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     '''
-    Wraps walk_forward_cv() + fold_to_row_indices() into the exact list of (train_idx, test_idx) format sklearn's cv= expects.
+    Wraps walk_forward_cv() + fold_dates_to_indices() into the exact list of (train_idx, test_idx) format sklearn's cv= expects.
 
     unique_dates: the deduplicated, sorted date array walk_forward_cv.py operates on.
 
@@ -113,12 +114,12 @@ def build_row_index_folds(  panel_dates:np.ndarray, unique_dates:np.ndarray, tra
     folds = list(walk_forward_cv(
         unique_dates, train_window, horizon, test_window, embargo, next_fold
     ))
-    return [fold_to_row_indices(panel_dates, f) for f in folds]
+    return [fold_dates_to_indices(panel_dates, f) for f in folds]
 
 
 
 
-def build_cpcv_row_index_folds(
+def build_cpcv_idx(
     panel_dates:np.ndarray, unique_dates:np.ndarray,
     n_blocks:int, n_test_blocks:int, purge_w:int, embargo_w:int,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -252,8 +253,8 @@ def fit_elastic_net_combiner( panel:pl.DataFrame, signal_cols:list[str], fwdret_
                               q_values:dict[str, float]|None=None, l1_ratio_grid:list[float]=[.1, .5, .7, .9, .95, .99, 1],
 ) -> dict:
     '''
-    cv_folds: pre-built list[(train_idx, test_idx)], built by the CALLER via build_cpcv_row_index_folds()
-        (the recommended default, see module docstring) or build_row_index_folds() (walk-forward). This
+    cv_folds: pre-built list[(train_idx, test_idx)], built by the CALLER via build_cpcv_idx()
+        (the recommended default, see module docstring) or build_walk_foward_idx(). This
         function doesn't build folds itself anymore, doesn't know or care which scheme produced them, a
         deliberate refactor: the earlier version hard-coded walk-forward internally, which meant the more
         carefully-reasoned CPCV-search design (demonstrated in scripts/demos/) never actually fed into this
@@ -264,7 +265,7 @@ def fit_elastic_net_combiner( panel:pl.DataFrame, signal_cols:list[str], fwdret_
     l1_ratio_grid: sklearn's own standard default grid, a fixed convention here, not tuned to this dataset, consistent with the
         project's no-hand-picked-free-parameters rule. alphas left as None, auto-generated path, also not hand-picked.
 
-    Returns a dict with the fitted ElasticNetCV, the row-index folds used (for reuse in step 5's stability check), and the feature order.
+    Returns a dict with the fitted ElasticNetCV, the CV folds idx used (for reuse in step 5's stability check), and the feature order.
     '''
     X = panel.select(signal_cols).to_numpy()
     y = panel[fwdret_col].to_numpy()
@@ -282,6 +283,7 @@ def fit_elastic_net_combiner( panel:pl.DataFrame, signal_cols:list[str], fwdret_
         'cv_folds': cv_folds,
         'signal_cols': signal_cols,
         'q_values': q_values,
+        'fwdret_col': fwdret_col,
     }
 
 
@@ -313,16 +315,16 @@ def coefficient_stability_by_fold(fit_result:dict, panel:pl.DataFrame) -> pl.Dat
     X_full = panel.select(signal_cols).to_numpy()
     if fit_result['q_values'] is not None:
         X_full = apply_q_value_weighting(X_full, signal_cols, fit_result['q_values'])
-    y_full = panel[fit_result.get('fwd_ret_col', 'fwdret')].to_numpy()
+    y_full = panel[fit_result['fwdret_col']].to_numpy()
 
     rows = []
     for i, (train_idx, _test_idx) in enumerate(fit_result['cv_folds']):
-        fold_model = ElasticNet(alpha=model.alpha_, l1_ratio=model.l1_ratio_) # alpha's the Constant that multiplies the penalty terms, before the l1_ratio
-        fold_model.fit(X_full[train_idx], y_full[train_idx])
+        fold_model = ElasticNet( alpha=model.alpha_, l1_ratio=model.l1_ratio_ ) # alpha's the constant that multiplies the penalty terms, before the l1_ratio
+        fold_model.fit(X_full[train_idx], y_full[train_idx]) 
         row = {'fold': i}
         row.update(dict(zip(signal_cols, fold_model.coef_)))
         rows.append(row)
-    return pl.DataFrame(rows)
+    return  pl.DataFrame(rows)
 
 
 
@@ -367,58 +369,123 @@ def combined_score_column( lf:pl.LazyFrame, fit_result:dict, out_col:str='combin
 
 
 
+# =============================================================================
+# STEP 7: Encapsulate the data preparation and the EN-combiner
+# =============================================================================
 
 
-if __name__ == '__main__':
-    
-    from src.signals.combine import make_signal
-    
-    lf = pl.scan_parquet('data/processed/features.parquet')
-
-    lf = make_signal(lf, ['mom20', 'mom252'], method='zscore_tanh')
-    lf = make_signal(lf, ['vol60'], method='rank')
 
 
-    #  Test with fake signals and qvalues
-    survivor_signals = ['mom20_zscore_tanh', 'mom252_zscore_tanh', 'vol60_rank']
-    q_values = {'mom20_zscore_tanh': 0.02, 'mom252_zscore_tanh': 0.01, 'vol60_rank': 0.15}
 
-    print('Building design matrix')
-    panel = build_design_matrix(lf, survivor_signals, fwdret_col='fwdret')
+
+def run_en_combiner(
+    lf: pl.LazyFrame,
+    signal_cols: list[str],
+    horizon: int,
+    embargo_window: int,
+    n_blocks: int = 10,
+    n_test_blocks: int = 2,
+    holdout_dates: int = 200,
+    q_values: dict[str, float] | None = None,
+    l1_ratio_grid: list[float] = [.1, .5, .7, .9, .95, .99, 1],
+) -> dict:
+    '''
+    Instead of passing a fwdret_col in lf, we compute on the fly the 
+    foward returns at wanted horizon, which becomes the response of
+    our regression. 
+
+    Single entry point, horizon is the one thing everything else derives
+    from, set once here, not passed as several separately-typed strings/
+    numbers that have to be kept in sync by hand (fwdret column name,
+    purge, the y column fed to ElasticNet, all downstream of horizon
+    alone, and previously each computed or typed out separately by the
+    caller, exactly the kind of drift that produced the fwd_ret_col vs
+    fwdret_col mismatch fixed alongside this).
+
+    Computes fwdret AT horizon internally: add_fwd_returns() for
+    horizon=1 (its own literal 'fwdret' column name), then derives
+    purge_w=horizon+1 from it (structural minimum since we use 
+    the more realistic open prices, see methodology.md
+    Section 1.7), combines with embargo_window (the autocorrelation-
+    derived component, from scripts/research/embargo_selection.py, NOT
+    computed here, but stored in config.constants.EMARGO_WINDOW previously).
+
+    Builds the CPCV search region and a genuinely untouched holdout
+    (holdout_dates most recent dates, excluded from search with an
+    embargo_w gap), fits via fit_elastic_net_combiner(), and evaluates
+    the fixed, already-chosen model on the holdout, all in one call, one
+    returned dict. fit_result's own keys (model, cv_folds, signal_cols,
+    q_values, fwdret_col) are included via **fit_result, not duplicated.
+    '''
+    print(f'    Computing returns at horizon {horizon}')
+    if horizon == 1:
+        lf = add_fwd_returns(lf)
+        fwdret_col = 'fwdret'
+    else:
+        lf = add_fwdret_horizon(lf, horizon)
+        fwdret_col = f'fwdret{horizon}'
+
+    purge_w = horizon + 1
+    embargo_w = purge_w + embargo_window
+
+    print('    Building the design matrix')
+    panel = build_design_matrix(lf, signal_cols, fwdret_col=fwdret_col)
     unique_dates = panel['date'].unique().sort().to_numpy()
 
-    # --- nested design: CPCV search on a search region, genuine holdout for the final check ---
-    # numbers below are illustrative, not tuned, real EMBARGO_WINDOW/horizon come from
-    # config.constants and scripts/research/embargo_selection.py, see methodology.md Section 1.7
-    horizon = 1
-    purge_w = horizon + 1
-    embargo_w = purge_w + EMBARGO_WINDOW  # purge_w + EMBARGO_WINDOW(16), sum convention, methodology.md Section 1.7
-    n_blocks, n_test_blocks = 10, 2
-    holdout_dates = 200
-
-    holdout_start_date = unique_dates[-holdout_dates]
+    print('    Separating the train/holdout sets')
+    holdout_start = unique_dates[-holdout_dates]
     gap_cutoff = unique_dates[-holdout_dates - embargo_w]
     search_panel = panel.filter(pl.col('date') <= gap_cutoff)
-    holdout_panel = panel.filter(pl.col('date') >= holdout_start_date)
+    holdout_panel = panel.filter(pl.col('date') >= holdout_start)
     search_unique_dates = search_panel['date'].unique().sort().to_numpy()
     search_panel_dates = search_panel['date'].to_numpy()
 
-    print('Building the CPCV folds')
-    cv_folds = build_cpcv_row_index_folds(
+    print('    Building the CPCV folds')
+    cv_folds = build_cpcv_idx(
         search_panel_dates, search_unique_dates, n_blocks, n_test_blocks, purge_w, embargo_w
     )
 
-    print('Fitting the ElsticNetCV on the CPCV folds')
+    print('    Fitting the EN in each fold')
     fit_result = fit_elastic_net_combiner(
-        search_panel, survivor_signals, 'fwdret', cv_folds, q_values=q_values,
+        search_panel, signal_cols, fwdret_col, cv_folds, q_values=q_values, l1_ratio_grid=l1_ratio_grid
     )
-    fit_result['fwd_ret_col'] = 'fwdret'
 
-    print('Computing the coefficient stability by fold (by re-fitting an ElasticNet on each fold -not CPCV)')
-    print(coefficient_stability_by_fold(fit_result, search_panel))
-
-    print('Evaluating the signal resulting from EN')
-    # fixed, already-chosen model, evaluated ONLY on the untouched holdout, never seen during the CPCV search
-    combined_lf = combined_score_column(holdout_panel.lazy(), fit_result)
     from src.evaluation.signals.report import signal_report
-    print(signal_report(combined_lf, 'combined_score', 'fwdret'))
+    print('    Combining the EN into one signal')
+    combined_lf = combined_score_column(holdout_panel.lazy(), fit_result)
+    print('    Computing the signal report for this combined signal')
+    holdout_report = signal_report(combined_lf, 'combined_score', fwdret_col)
+
+    return {
+        **fit_result,
+        'horizon': horizon,
+        'purge_w': purge_w,
+        'embargo_w': embargo_w,
+        'search_panel': search_panel,
+        'holdout_panel': holdout_panel,
+        'holdout_report': holdout_report,
+    }
+
+
+
+# Runs for about 1min30s
+if __name__ == '__main__':
+
+    from src.signals.combine import make_signal
+    from config.constants import EMBARGO_WINDOW
+
+    lf = pl.scan_parquet('data/processed/features.parquet')
+    lf = make_signal(lf, ['mom20', 'mom252'], method='zscore_tanh')
+    lf = make_signal(lf, ['vol60'], method='rank')
+
+    survivor_signals = ['mom20_zscore_tanh', 'mom252_zscore_tanh', 'vol60_rank']
+    q_values = {'mom20_zscore_tanh': 0.02, 'mom252_zscore_tanh': 0.01, 'vol60_rank': 0.15}
+
+    result = run_en_combiner(lf, survivor_signals, horizon=20, embargo_window=EMBARGO_WINDOW, q_values=q_values,
+                             n_blocks=10, n_test_blocks=2, holdout_dates=200,  l1_ratio_grid=[.1, .5, .7, .9, .95, .99, 1])
+    
+
+    print(f"alpha={result['model'].alpha_:.4f}, l1_ratio={result['model'].l1_ratio_}")
+    print(dict(zip(['signal_cols'], result['model'].coef_)), 'intercept=', result['model'].intercept_)
+    print(coefficient_stability_by_fold(result, result['search_panel']))
+    print(result['holdout_report'])

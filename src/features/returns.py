@@ -42,7 +42,7 @@ def add_fwdret_horizon(lf:pl.LazyFrame, horizon=1) -> pl.LazyFrame:
     '''
     open_logret = c('open').log().diff().over('ticker')
     return lf.sort(['ticker', 'date']).with_columns(
-        open_logret.rolling_sum(horizon).over('ticker').shift(-(horizon+1)).alias(f'fwd_ret_{horizon}')
+        open_logret.rolling_sum(horizon).over('ticker').shift(-(horizon+1)).alias(f'fwdret{horizon}')
     )
     # Previous version using Close prices
     # '''

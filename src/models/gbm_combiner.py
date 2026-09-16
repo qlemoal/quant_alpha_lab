@@ -1,6 +1,4 @@
 '''
-TO INSPECT
-
 Structurally parallel to elastic_net_combiner.py, same fold-generation and
 design-matrix machinery reused directly, not duplicated. The real
 difference, and the thing worth understanding before using this, is that

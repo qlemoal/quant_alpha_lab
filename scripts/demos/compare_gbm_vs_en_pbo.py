@@ -1,14 +1,6 @@
 '''
-
-TO INSPECT
-
 Compares the Elastic Net and GBM combiners honestly, via PBO, not by
-eyeballing which has the higher headline IC. See the conversation for the
-full step-by-step explanation of what PBO is and why headline comparison
-isn't enough, summary here: whichever model looks better on one number is
-exactly the kind of comparison PBO exists to stress-test, a single
-comparison can't tell you if that ranking would hold up under a different
-slice of the same data.
+eyeballing which has the higher headline IC. 
 
 DESIGN, deliberately scoped down from full textbook CSCV, stated
 explicitly rather than silently:
