@@ -31,12 +31,13 @@ def plot_coefficient_stability(stability_df: pl.DataFrame, fit_result: dict, pan
     fig, ax = plt.subplots(figsize=(11, 5))
     for col in signal_cols:
         values = stability_df[col].to_numpy()[order]
-        ax.plot(sorted_midpoints, values, 'o', marker='o', markersize=10, label=col, alpha=0.5)
+        ax.plot(sorted_midpoints, values, 'o', markersize=10, label=col, alpha=0.5)
     ax.axhline(0, color='grey', linewidth=0.8, linestyle='--')
     ax.set_xlabel("fold's train-window midpoint (chronological, not fold index)")
     ax.set_ylabel('fitted coefficient')
     ax.set_title('Coefficient stability across CPCV folds, by fold time, not fold index')
     ax.legend()
+    plt.grid()
     plt.xticks(rotation=30)
     plt.tight_layout()
     plt.show()
@@ -51,7 +52,7 @@ if __name__ == '__main__':
     sys.path.insert(0, '/home/claude/quant_alpha_lab')
     from src.models.elastic_net_combiner import run_en_combiner, coefficient_stability_by_fold
 
-    N_DATES, N_TICKERS, NOISE_STD = 10000, 30, 3.0
+    N_DATES, N_TICKERS, NOISE_STD = 10000, 30, 0.02
     rng = np.random.default_rng(0)
     calendar_dates = [datetime.date(2005, 1, 1) + datetime.timedelta(days=i) for i in range(N_DATES)]
 
@@ -75,4 +76,4 @@ if __name__ == '__main__':
                               q_values={'good_signal': 0.01, 'noise_signal': 0.6}, holdout_dates=200)
     stability = coefficient_stability_by_fold(result, result['search_panel'])
     plot_coefficient_stability(stability, result, result['search_panel'],
-                                save_path=None)
+                                save_path='docs/images/en_combiner_coef_stability.png')
