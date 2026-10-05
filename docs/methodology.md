@@ -484,6 +484,23 @@ downstream:
 Use `scripts/inspect_signal.py` to compare signals or inspect a unique signal.
 TODO: Add FDR report in `inspect_signal.py` when comparing signals, and IC_decay?
 
+### 6.1 Log returns are not additive across assets, only across time
+
+`fwd_ret_col` is a log return throughout this project (`src/features/returns.py`), deliberately, since log returns
+*are* additive across time, exactly what makes the `rolling_sum()` multi-day horizon construction work. They are
+**not** additive across assets at a point in time: a basket's simple return is the weight-average of its
+constituents' simple returns, the same statement is false for log returns. `decile_longshort_returns()` and
+`get_decile_longshort_returns_DF()` (`src/evaluation/signals/performance.py`) were averaging `fwd_ret_col` directly
+within each basket, silently computing the wrong basket return, every `long_short_sharpe` reported anywhere in this
+project before this fix inherited that bias. Measured on a realistic 20-name basket with dispersed daily log returns:
+~10% relative error in the basket return for that single day, not negligible, and it compounds across every day in
+the series. Fixed by converting to simple return (`exp(x) - 1`) before the cross-sectional mean, aggregating across
+assets in simple-return space (where "equal-weight average across a basket" is actually valid P&L arithmetic), then
+combining the long and short legs (each already basket-level simple returns, a dollar-neutral `+1/-1` notional
+combination of simple returns is itself additive). Same consideration applies to the future backtest loop (Section
+5.3): aggregating weighted asset returns into a daily portfolio return must happen in simple-return space, not by
+summing `weight_i * logret_i` directly.
+
 
 
 
