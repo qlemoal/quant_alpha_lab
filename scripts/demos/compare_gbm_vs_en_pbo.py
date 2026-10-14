@@ -1,5 +1,4 @@
 '''
-TO CHECK
 
 Compares the Elastic Net and GBM combiners honestly, via PBO, not by
 eyeballing which has the higher headline IC. 
@@ -33,7 +32,7 @@ from src.models.elastic_net_combiner import (
 from src.models.gbm_combiner import fit_gbm_combiner, combined_score_from_gbm
 from src.validation.cpcv import cpcv, total_embargo_window, probability_of_backtest_overfitting
 from sklearn.linear_model import ElasticNetCV
-
+from config.constants import EMBARGO_WINDOW
 
 N_DATES = 900
 N_TICKERS = 30
@@ -43,7 +42,7 @@ NOISE_STD = 3.0
 N_BLOCKS, N_TEST_BLOCKS = 10, 2
 HORIZON = 5
 PURGE_W = HORIZON + 1
-AUTOCORR_EMBARGO = 1  # placeholder, would come from scripts/embargo_selection.py on real data
+AUTOCORR_EMBARGO = EMBARGO_WINDOW  # placeholder, would come from scripts/embargo_selection.py on real data
 EMBARGO_W = total_embargo_window(PURGE_W, AUTOCORR_EMBARGO, combine='sum')
 
 HOLDOUT_DATES = 200
@@ -76,7 +75,7 @@ def cpcv_row_index_folds(panel_dates, unique_dates, n_blocks, n_test_blocks, pur
     return folds
 
 
-def per_block_sharpe(returns: np.ndarray, n_blocks: int) -> np.ndarray:
+def per_block_sharpe(returns:np.ndarray, n_blocks:int) -> np.ndarray:
     '''
     Splits a 1D daily-return series into n_blocks equal contiguous
     chunks, returns one Sharpe per chunk. This is the raw material for
@@ -89,6 +88,9 @@ def per_block_sharpe(returns: np.ndarray, n_blocks: int) -> np.ndarray:
         mu, sigma = b.mean(), b.std(ddof=1)
         sharpes.append(mu / sigma if sigma > 0 else 0.0)
     return np.array(sharpes)
+
+
+
 
 
 if __name__ == '__main__':

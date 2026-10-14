@@ -67,7 +67,7 @@ import numpy as np
 
 BlockTuple = namedtuple('Block', ['start_idx', 'end_idx'])  # inclusive date-index bounds of train/test blocks
 
-def get_raw_train_test_blocks(n_dates: int, n_blocks: int) -> list[BlockTuple]:
+def get_raw_train_test_blocks(n_dates:int, n_blocks:int) -> list[BlockTuple]:
     '''
     Partition n_dates indices into n_blocks of roughly-equal size. 
     Sizes differ by at most 1 date when n_dates doesn't divide evenly, remainder distributed to the earliest groups.
@@ -88,7 +88,7 @@ def get_raw_train_test_blocks(n_dates: int, n_blocks: int) -> list[BlockTuple]:
 
 
 
-def _merge_blocks(block_ids: tuple[int, ...]) -> list[tuple[int, int]]:
+def _merge_blocks(block_ids:tuple[int, ...]) -> list[tuple[int, int]]:
     '''
     Certain combinations of K test blocks in N total blocks have some consecutive
         test blocks. In this case we do not need to remove the purge and embargo windows 
@@ -112,6 +112,32 @@ def _merge_blocks(block_ids: tuple[int, ...]) -> list[tuple[int, int]]:
             run_start = run_end = block_id
     runs.append((run_start, run_end))
     return runs
+
+
+
+
+def total_embargo_window(purge_window:int, autocorr_embargo:int, combine:str='sum') -> int:
+    '''
+    Combines the structural purge/label-overlap buffer (purge_window,
+    typically horizon+1, see scripts/embargo_selection.py's module
+    docstring for the mechanism) with the empirically-derived
+    autocorrelation buffer (autocorr_embargo, from
+    select_embargo_from_autocorrelation) into the single number passed
+    as embargo_w to cpcv() below.
+
+    combine='sum' (default): matches the convention in Lopez de Prado
+    (2018), purge + embargo as the total buffer around a test block.
+    combine='max': the alternative reading, whichever of the two channels
+    needs more protection already covers the other, since the smaller
+    channel's requirement is by definition smaller. Both are legitimate,
+    genuine judgment call, sum is the project's chosen default.
+    '''
+    if combine == 'sum':
+        return purge_window + autocorr_embargo
+    elif combine == 'max':
+        return max(purge_window, autocorr_embargo)
+    else:
+        raise ValueError(f'unknown combine: {combine}')
 
 
 
@@ -177,7 +203,7 @@ def cpcv(n_dates:int, n_blocks:int, n_test_blocks:int, purge_w:int, embargo_w:in
 # SECTION 2: PBO via CSCV (Bailey, Borwein, Lopez de Prado & Zhu, 2017)
 # =============================================================================
 
-def probability_of_backtest_overfitting(performance_matrix: np.ndarray, n_splits: int, metric: str = 'sharpe') -> dict:
+def probability_of_backtest_overfitting(performance_matrix:np.ndarray, n_splits:int, metric:str='sharpe') -> dict:
     '''
     PBO is computed by comparing the bset performing strat in sample to its rank OOS.
         The OOS rank is put in (0,1) and transformed into logits.
