@@ -1,5 +1,3 @@
-#  TO CHECK
-
 import numpy as np
 import polars as pl
 
@@ -7,9 +5,9 @@ import polars as pl
 def marchenko_pastur_bounds(n_assets: int, n_obs: int, variance: float = 1.0) -> tuple[float, float]:
     '''
     Theoretical (lambda_min, lambda_max) eigenvalue bounds for a correlation matrix built from pure noise, 
-        given the assets-to-observations ratio q = n_assets / n_obs.
-    Eigenvalues falling inside this range are statistically indistinguishable from noise and should be shrunk/removed when cleaning an empirical
-    correlation matrix.
+        given the assets-to-observations ratio q = n_assets / n_obs (also called ASPECT RATIO).
+    Eigenvalues falling inside this range are statistically indistinguishable from noise and should be shrunk/removed 
+        when cleaning an empirical correlation matrix.
 
     Reference: Laloux, Cizeau, Bouchaud, Potters (1999). Noise dressing of
     financial correlation matrices. Physical Review Letters, 83(7), 1467.
@@ -35,6 +33,8 @@ def marchenko_pastur_bounds(n_assets: int, n_obs: int, variance: float = 1.0) ->
     lambda_min = variance * (1 - np.sqrt(q)) ** 2
     lambda_max = variance * (1 + np.sqrt(q)) ** 2
     return lambda_min, lambda_max
+
+
 
 
 def clean_correlation_matrix(corr: np.ndarray, n_obs: int) -> np.ndarray:
