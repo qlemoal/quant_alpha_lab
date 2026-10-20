@@ -1,12 +1,13 @@
 # Alpha Research Framework
 
-> A production-grade quantitative research pipeline built from scratch, implementing the full workflow used at systematic investment firms (Millennium, Citadel, Two Sigma, AQR).
+> A production-grade quantitative research pipeline built from scratch, implementing the full workflow used at systematic investment firms.
 
 ---
 
 ## 🎯 Objective
 
-Build **reusable infrastructure** — not a single strategy. Every component (data, features, signals, evaluation, portfolio construction, backtesting) is modular, tested, and replaceable. New alpha idea = implement the signal; everything else already exists.
+Build **reusable infrastructure** -> not a single strategy. Every component (data, features, signals, evaluation, portfolio construction, backtesting) is modular, tested, and replaceable. 
+-> New alpha idea = implement the signal -> everything else already exists.
 
 ---
 
@@ -18,7 +19,6 @@ Seeking **Quantitative Researcher** role in Switzerland
 
 📧 qs.lemoal@gmail.com  
 🔗 [LinkedIn](https://www.linkedin.com/in/qlemoal/)  
-🐙 [GitHub](https://github.com/qlemoal)
 
 > This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See **Known Limitations** before trusting any number.
 
@@ -31,8 +31,8 @@ Seeking **Quantitative Researcher** role in Switzerland
 │   DOWNLOAD  │───▶│     ETL     │───▶│  FEATURES   │───▶│  SIGNALS    │───▶│  EVALUATE   │
 │  (yfinance) │    │  (DuckDB)   │    │  (Polars)   │    │ (transform) │    │   (IC/FDR)  │
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
-                                                                       │
-                                                                       ▼
+                                                                                     │
+                                                                                     ▼
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │  BACKTEST   │◀───│   COSTS     │◀───│ PORTFOLIO   │◀───│  COMBINE    │◀───│   FDR       │
 │  (walk-fwd) │    │  (sqrt)     │    │  (HRP/ERC)  │    │  (EN/GBM)   │    │  (q-value)  │
@@ -184,10 +184,10 @@ python scripts/pipeline/04_build_portfolio.py
 
 | Feature | File | Formula |
 |---------|------|---------|
-| `logret` | `returns.py` | $\log(P_t) - \log(P_{t-1})$ |
+| `logret` | `returns.py` | $\log(P_t)  - \log(P_{t-1})$ | 
 | `mom{w}` | `momentum.py` | $\frac{P_t}{P_{t-w}} - 1$ |
 | `std{w}` | `volatility.py` | $\sqrt{\frac{1}{w-1}\sum_{i=1}^w (r_{t-i} - \bar{r})^2}$ |
-| `log_adv{w}` | `adv.py` | $\log\left(\frac{1}{w}\sum_{i=1}^w \text{Volume}_{t-i} \times \text{Close}_{t-i}\right)$ |
+| `logadv{w}` | `adv.py` | $\log\left(\frac{1}{w}\sum_{i=1}^w \text{Volume}_{t-i} \times \text{Close}_{t-i} \right)$ |
 | `beta{w}` | `beta.py` | $\frac{\text{Cov}(r_i, r_{mkt})}{\text{Var}(r_{mkt})}$ |
 
 ### Signals & Evaluation
@@ -354,7 +354,8 @@ Delisted/removed companies missing entirely. Recent additions have history pre-d
 
 ## 💡 Design Philosophy
 
-> **Written manually, on purpose.** The point is understanding every decision, not maximizing coding speed.
+> Until correlation_cleaning.py code was **written manually, on purpose.** The point is understanding every decision, not maximizing coding speed.
+> Then Claude Code with multiple models is used to generate code. However each design decision is made by me and the code is reviewed manually.
 
 - **No free parameters by construction** (see Methodology):
   - Rank IC over raw backtest Sharpe (harder to overfit)
