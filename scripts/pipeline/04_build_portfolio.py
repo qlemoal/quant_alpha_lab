@@ -1,18 +1,47 @@
 '''
-scripts/pipeline/04_build_portfolio.py
-
 Full portfolio construction & backtest pipeline.
+
+
+================================================================================
+POSSIBLE CONSTRUCTIONS
+================================================================================
+
+1. Inverse Volatility / Risk Parity Weighting (Asness, Frazzini, Pedersen 2012)
+   - Weight ∝ 1/σᵢ, risk-equalized positions
+   - More robust than mean-variance; no expected return estimation needed
+2. Mean-Variance with Shrinkage (Ledoit-Wolf 2004, 2012; Oracle Approximating Shrinkage)
+   - $\hat{Sigma}=\rho \dot F + (1-\rho) \dot S$ or Σ̂ = ρ·F + (1-ρ)·S where F is structured estimator (single-factor, constant correlation)
+   - Analytical optimal shrinkage intensity ρ
+   - Used at AQR, BlackRock, etc.
+3. Hierarchical Risk Parity (HRP) (López de Prado 2016)
+   - Uses correlation clustering (like our Louvain) to build hierarchical structure
+   - Recursive bisection allocates risk budget top-down
+   - Solves instability of Markowitz without ad-hoc constraints
+4. Clustered Risk Parity (Raffinot 2018; extends HRP)
+   - Directly uses our Louvain clusters as risk allocation units
+   - Equal risk contribution within and across clusters
+5. Factor-Aware Optimization (Meucci 2007; Black-Litterman for signals)
+   - Explicit factor model: r = B·f + ε
+   - Optimize in factor space (low-dim) rather than asset space
+   - Signal as "views" in Black-Litterman framework
+6. Transaction Cost-Aware Optimization (Almgren-Chriss 2001; square-root impact)
+   - Cost = spread/2 + commission + σ·√(participation_rate)
+   - Integrated into objective: max w'μ - λ·w'Σw - κ·√(w'·ADV⁻¹·w)
+   - Solved via convex optimization (CVXPY) or custom first-order methods
+7. Robust / Distributionally Robust Optimization (Ben-Tal, El Ghaoui, Nemirovski; Bertsimas)
+   - Max-min over uncertainty set for μ, Σ
+   - Wasserstein ambiguity sets for modern DRO
 
 ================================================================================
 WHAT THIS DOES
 ================================================================================
 
-Orchestrates the complete pipeline from combined signals to backtest results:
+From combined signals to backtest results:
 
-  1. Loads combined signals (from Elastic Net / GBM combiner)
-  2. Loads/estimates correlation matrix (RMT-cleaned + shrunk)
-  3. Runs Louvain clustering on cleaned correlation
-  4. Loads ADV and volatility for cost model
+  1. Loads combined signals (now from Elastic Net, implemented also GBM combiner)
+  2. Estimates correlation matrix C (RMT-cleaned + shrunk)
+  3. Louvain clustering on C
+  4. Loads ADV (average dollar volume) and volatility for cost model
   5. Runs walk-forward portfolio construction + backtest
   6. Computes performance metrics and attribution
   7. Saves results to data/exports/
@@ -21,7 +50,7 @@ This is the production entry point -- run this after:
   - 01_download_data.py
   - 02_etl_prices.py
   - 03_build_features.py
-  - elastic_net_combiner.py (or gbm_combiner.py) to generate combined_score
+  - TO MODIFIY: elastic_net_combiner.py (or gbm_combiner.py) to generate combined_score 
 
 ================================================================================
 USAGE
