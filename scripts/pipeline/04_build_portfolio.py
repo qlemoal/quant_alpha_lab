@@ -10,7 +10,7 @@ POSSIBLE CONSTRUCTIONS
    - Weight ∝ 1/σᵢ, risk-equalized positions
    - More robust than mean-variance; no expected return estimation needed
 2. Mean-Variance with Shrinkage (Ledoit-Wolf 2004, 2012; Oracle Approximating Shrinkage)
-   - $\hat{Sigma}=\rho \dot F + (1-\rho) \dot S$ or Σ̂ = ρ·F + (1-ρ)·S where F is structured estimator (single-factor, constant correlation)
+   - Σ̂ = ρ·F + (1-ρ)·S where F is structured estimator (single-factor, constant correlation)
    - Analytical optimal shrinkage intensity ρ
    - Used at AQR, BlackRock, etc.
 3. Hierarchical Risk Parity (HRP) (López de Prado 2016)
@@ -31,6 +31,32 @@ POSSIBLE CONSTRUCTIONS
 7. Robust / Distributionally Robust Optimization (Ben-Tal, El Ghaoui, Nemirovski; Bertsimas)
    - Max-min over uncertainty set for μ, Σ
    - Wasserstein ambiguity sets for modern DRO
+
+
+   
+================================================================================
+WHAT THIS DOES
+================================================================================
+
+┌─────────────────────────┬───────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────┐
+│          Layer          │           Function            │                                    State-of-the-Art Method                                    │
+├─────────────────────────┼───────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 1. Signal → Raw Weight  │ Score to dollar-neutral       │ Proportional to signal (as in methodology) + Inverse Volatility tilt                          │
+│                         │ weights                       │                                                                                               │
+├─────────────────────────┼───────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 2. Risk Model           │ Covariance estimation         │ RMT-cleaned correlation + Ledoit-Wolf shrinkage (our correlation_cleaning.py + analytical     │
+│                         │                               │ shrinkage)                                                                                    │
+├─────────────────────────┼───────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 3. Cluster Risk         │ Limit cluster exposure        │ Clustered Risk Parity using Louvain clusters                                                  │
+│ Budgeting               │                               │                                                                                               │
+├─────────────────────────┼───────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 4. Vol Targeting        │ Scale to target volatility    │ Standard (methodology) using cleaned Σ                                                        │
+├─────────────────────────┼───────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 5. Transaction Costs    │ Net return estimation         │ Almgren-Chriss + square-root impact using ADV                                                 │
+├─────────────────────────┼───────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 6. Optimization         │ Final weight solver           │ Convex QP (CVXPY) or iterative coordinate descent for speed                                   │
+└─────────────────────────┴───────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────┘
+
 
 ================================================================================
 WHAT THIS DOES
