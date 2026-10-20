@@ -1,55 +1,148 @@
 # Alpha Research Framework
 
-Hi! This is a quant research framework built from scratch, modeled on the workflow used by systematic investment firms.
-
-I'm not trying to find one profitable strategy. I'm trying to build reusable infrastructure: data, features, signals, evaluation, portfolio construction, backtesting, all under one framework. New idea = implement the signal, everything else already exists.
+> A production-grade quantitative research pipeline built from scratch, implementing the full workflow used at systematic investment firms (Millennium, Citadel, Two Sigma, AQR).
 
 ---
 
-# About
+## 🎯 Objective
 
-PhD in Mathematics (Quantitative Finance chair) from EPFL, I'm looking for a Quantitative Researcher role in Switzerland.
-
-This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See "Known Limitations" below before trusting any number above it.
-
-Contact: qs.lemoal@gmail.com / [LinkedIn](https://www.linkedin.com/in/qlemoal/)
+Build **reusable infrastructure** — not a single strategy. Every component (data, features, signals, evaluation, portfolio construction, backtesting) is modular, tested, and replaceable. New alpha idea = implement the signal; everything else already exists.
 
 ---
 
-# Objectives
+## 👤 About
 
-Full pipeline:
+**Quentin Le Moal**  
+PhD in Mathematics (Quantitative Finance) — EPFL  
+Seeking **Quantitative Researcher** role in Switzerland
 
-- download raw market data
-- clean and validate it
-- engineer features
-- generate alpha signals
-- evaluate them properly
-- control false discoveries (FDR)
-- build a portfolio
-- backtest it
-- check robustness
-- compare multiple signals in the same framework
+📧 qs.lemoal@gmail.com  
+🔗 [LinkedIn](https://www.linkedin.com/in/qlemoal/)  
+🐙 [GitHub](https://github.com/qlemoal)
+
+> This repo is a real research sandbox, not a polished demo. I show what's finished, what's simplified, and what's missing. See **Known Limitations** before trusting any number.
 
 ---
 
-# Stack
+## 🏗️ Full Pipeline
 
-**DuckDB + SQL:**
-For anything touching large datasets: imports, joins, filtering, aggregations, quality checks. Works directly on parquet, no need to lowad everything into memory.
-
-**Polars:**
-For features and signals. Lazy evaluation, fast rolling computations, low memory footprint. Stays lazy until the final `collect()`.
-
-**Pandas:**
-Only once data is small. Plotting, exploration, quick debugging.
-
-**Matplotlib:**
-Visual checks. Every transformation gets eyeballed before moving to the next stage, see `notebooks/inspect_*.ipynb`.
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   DOWNLOAD  │───▶│     ETL     │───▶│  FEATURES   │───▶│  SIGNALS    │───▶│  EVALUATE   │
+│  (yfinance) │    │  (DuckDB)   │    │  (Polars)   │    │ (transform) │    │   (IC/FDR)  │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+                                                                       │
+                                                                       ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  BACKTEST   │◀───│   COSTS     │◀───│ PORTFOLIO   │◀───│  COMBINE    │◀───│   FDR       │
+│  (walk-fwd) │    │  (sqrt)     │    │  (HRP/ERC)  │    │  (EN/GBM)   │    │  (q-value)  │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+```
 
 ---
 
-# Setup
+## 🛠️ Stack
+
+| Layer | Technology | Why |
+|-------|------------|-----|
+| **Data & ETL** | DuckDB + SQL | Works directly on Parquet, no memory loading, fast joins/aggregations |
+| **Features & Signals** | Polars | Lazy evaluation, fast rolling ops, low memory, stays lazy until `collect()` |
+| **Evaluation & Plotting** | Pandas + Matplotlib | Small data only, exploration/debugging |
+| **Optimization** | NumPy + SciPy (+ CVXPY optional) | Linear algebra, convex optimization |
+| **Validation** | Custom CPCV | Purge/embargo, combinatorial, no leakage |
+
+**Dependencies (pinned in `requirements.txt`):**
+`polars`, `duckdb`, `numpy`, `pandas`, `scikit-learn`, `scipy`, `matplotlib`, `networkx`, `yfinance`, `pytest`
+
+---
+
+## 📁 Repository Structure
+
+```
+quant_alpha_lab/
+├── pyproject.toml              # Package metadata, editable install
+├── requirements.txt            # Frozen environment snapshot
+├── config/
+│   ├── paths.py                # Centralized filesystem paths
+│   ├── constants.py            # Trading days, windows, thresholds
+│   └── settings.py             # Global settings
+├── data/                       # Git-ignored
+│   ├── raw/                    # Original downloads (prices, fundamentals)
+│   ├── processed/              # Clean, research-ready data
+│   ├── intermediate/           # Scratch data
+│   └── exports/                # Figures, backtest results
+├── notebooks/                  # Exploration, plotting, hypothesis generation ONLY
+├── scripts/
+│   ├── pipeline/               # Executable pipeline steps
+│   │   ├── 01_download_data.py
+│   │   ├── 02_etl_prices.py
+│   │   ├── 03_build_features.py
+│   │   └── 04_build_portfolio.py    # NEW: full portfolio + backtest
+│   ├── research/               # Standalone research scripts
+│   │   ├── embargo_selection.py
+│   │   └── inspect_signal.py
+│   └── demos/                  # Comparison/validation demos
+│       ├── compare_gbm_vs_en_pbo.py
+│       └── plot_en_combiner_coef_stability.py
+├── src/
+│   ├── features/               # Feature engineering (one file per family)
+│   │   ├── returns.py          # logret, fwdret (open-to-open)
+│   │   ├── momentum.py         # mom{w}: % price change over w days
+│   │   ├── volatility.py       # std{w}: rolling std over w days
+│   │   ├── adv.py              # log_adv{w}: avg dollar volume
+│   │   ├── beta.py             # beta{w}: rolling market beta
+│   │   └── seasonality.py      # Calendar effects (planned)
+│   ├── signals/                # Signal construction
+│   │   ├── combine.py          # make_signal(): 4 transform methods
+│   │   ├── transforms.py       # zscore, tanh, clip
+│   │   ├── ranking.py          # rank, decile
+│   │   ├── normalize.py        # zscore_expr
+│   │   └── thresholds.py       # thresholding
+│   ├── evaluation/
+│   │   ├── signals/
+│   │   │   ├── ic/             # Rank IC, Newey-West, IC decay
+│   │   │   ├── fdr.py          # BH, BY, Storey q-value
+│   │   │   ├── performance.py  # Stability, long-short Sharpe
+│   │   │   ├── report.py       # Numeric health check
+│   │   │   └── signal_plots.py # Visual health check
+│   │   └── portfolio/          # Attribution (planned)
+│   ├── models/
+│   │   ├── elastic_net_combiner.py   # EN with CPCV-tuned α, l1_ratio
+│   │   └── gbm_combiner.py         # HistGradientBoostingRegressor
+│   ├── risk/
+│   │   ├── correlation_cleaning.py # RMT / Marchenko-Pastur denoising
+│   │   ├── clustering.py           # Louvain community detection
+│   │   ├── covariance.py           # Ledoit-Wolf, OAS, Factor model
+│   │   └── portfolio_construction.py # Signal→weights, cluster caps, vol target
+│   ├── portfolio/
+│   │   ├── costs.py              # Spread, commission, √-impact
+│   │   ├── optimization.py       # HRP, ERC, BL, cost-aware MVO
+│   │   └── backtest.py           # Walk-forward loop + attribution
+│   ├── validation/
+│   │   ├── walk_forward_cv.py    # Purged walk-forward CV
+│   │   ├── cpcv.py               # Combinatorial Purged CV + PBO
+│   │   └── cpcv_visualization.py # Fold geometry plots
+│   └── utils/
+│       ├── stats.py              # Autocorrelation, p-values
+│       ├── helpers.py            # as_list, add_expr
+│       ├── panels.py             # Panel reshaping
+│       └── my_plotting.py        # Plot helpers
+├── tests/
+│   ├── conftest.py               # "Musée des horreurs" edge-case fixtures
+│   ├── test_signals.py
+│   ├── test_cpcv.py
+│   ├── test_fdr.py
+│   ├── test_beta.py
+│   └── test_en_combiner.py
+└── docs/
+    ├── methodology.md            # Detailed methodology (this file's twin)
+    ├── findings.md               # Dated research log
+    └── tips_and_tricks.md        # Practical notes
+```
+
+---
+
+## ⚡ Quick Start
 
 ```bash
 git clone https://github.com/qlemoal/quant_alpha_lab.git
@@ -58,194 +151,241 @@ cd quant_alpha_lab
 python -m venv .venv
 source .venv/bin/activate
 
-pip install -e .
+pip install -e .        # Installs package + dependencies
+# or: pip install -r requirements.txt  # Exact frozen env
 ```
 
-`pip install -e .` installs the project as an editable package, so `import src.features.beta` works from any notebook or script, no manual path hacking.
+Run the pipeline:
+```bash
+# 1. Download S&P 500 prices from Yahoo
+python scripts/pipeline/01_download_data.py
 
-`requirements.txt` is a frozen, pinned snapshot for exact reproducibility. `pyproject.toml` lists the actual direct dependencies.
+# 2. ETL: clean, validate, write prices.parquet
+python scripts/pipeline/02_etl_prices.py
 
----
+# 3. Build features: returns, momentum, vol, ADV, beta
+python scripts/pipeline/03_build_features.py
 
-# Repository structure
+# 4. Generate signals & evaluate (via notebooks or scripts)
+#    See notebooks/inspect_signal.ipynb
 
-```
-.
-├── pyproject.toml          project metadata, dependencies, editable install
-├── requirements.txt        frozen environment snapshot
-│
-├── docs/
-│   methodology.md           evaluation, correlation cleaning, signal construction
-│   tips_and_tricks.md       small practical stuff worth remembering
-│   findings.md              date appended as I try things
-│
-├── config/
-│   paths.py                 centralized filesystem paths
-│   constants.py             trading days, rolling windows, thresholds, feature/label column rules
-│   settings.py              global settings
-│
-├── data/                    git-ignored
-│   raw/                     original downloads (prices, fundamentals, macro, sectors)
-│   processed/                clean, research-ready data
-│   intermediate/             scratch data
-│   exports/                  figures, reports
-│
-├── notebooks/                exploration, plotting, debugging, hypothesis generation only
-│
-├── scripts/                  executable pipeline scripts
-│   download_data.py
-│   etl_prices.py             ETL: extract raw CSVs, transform, load prices.parquet
-│   build_features.py
-│   inspect_signal.py         standalone diagnostic runner, no notebook needed
-│
-├── src/                      reusable, importable code
-│   features/                 feature engineering, one file per family
-│   signals/                  transforms, rankings, normalizations or clippings, and make_signal, turning features into tradeable signals
-│   evaluation/
-│       signals/              IC, significance, stability, one-call report and plots
-│       portfolio/            not started, real turnover, drawdown, cost-adjusted returns
-│       models/               not started, log loss, Brier score, calibration
-│   portfolio/                not started, position sizing, transaction costs
-│   risk/                     correlation matrix cleaning, factor diagnostics (stubbed)
-│   models/                   elastic_net_combiner.py
-│   validation/               taylor-made rolling CV with purge and embargo
-│   utils/                    panel reshaping, plotting helpers, general statistics
-│
-├── sql/                      where DuckDB queries will be kept separate for readability (TODO)
-├── tests/                    pytest unit tests, conftest.py holds the edge-case panel fixtures
-└── README.md
+# 5. Combine signals (Elastic Net + GBM) and run backtest
+python scripts/pipeline/04_build_portfolio.py
 ```
 
 ---
 
-# Workflow
+## ✅ Implemented Features
 
-```
--> Download data -> ETL data -> Inspect data 
--> Build features -> Inspect features 
--> Generate signal -> Inspect signals -> Evaluate predictive power -> Control false discoveries
--> Portfolio construction (incl. costs) -> Backtest -> Attribution -> Robustness
-```
+### Data & Features
+- [x] **Download**: S&P 500 constituents from Wikipedia + yfinance
+- [x] **ETL**: DuckDB aggregation, cleaning, deduplication → `prices.parquet`
+- [x] **Features** (all Polars, per-ticker, sorted by `[ticker, date]`):
 
----
+| Feature | File | Formula |
+|---------|------|---------|
+| `logret` | `returns.py` | $\log(P_t) - \log(P_{t-1})$ |
+| `mom{w}` | `momentum.py` | $\frac{P_t}{P_{t-w}} - 1$ |
+| `std{w}` | `volatility.py` | $\sqrt{\frac{1}{w-1}\sum_{i=1}^w (r_{t-i} - \bar{r})^2}$ |
+| `log_adv{w}` | `adv.py` | $\log\left(\frac{1}{w}\sum_{i=1}^w \text{Volume}_{t-i} \times \text{Close}_{t-i}\right)$ |
+| `beta{w}` | `beta.py` | $\frac{\text{Cov}(r_i, r_{mkt})}{\text{Var}(r_{mkt})}$ |
 
-# Implemented features
+### Signals & Evaluation
+- [x] **4 Transform Methods** (`signals/combine.py`):
+  - `zscore_tanh`: $z \mapsto \tanh(\text{scale} \cdot z)$ — well-behaved features
+  - `zscore_clip`: $z \mapsto \text{clip}(z, -3, 3)$ — hard bound
+  - `rank`: $\text{rank}(x) \mapsto [-1, 1]$ — robust, no magnitude
+  - `decile`: Bucket into 10 quantiles — academic baseline
+- [x] **Evaluation** (`evaluation/signals/`):
+  - Rank IC (Spearman) per date + summary (mean, std, IR, hit rate)
+  - **Newey-West HAC t-stat** (L=4·(N/100)^(2/9)) — corrects for overlapping windows
+  - IC decay across horizons (1, 5, 10, 20 days)
+  - Stability (day-over-day turnover proxy)
+  - Naive long-short paper Sharpe (pre-cost)
+- [x] **FDR Control** (`fdr.py`):
+  - Benjamini-Hochberg (BH)
+  - Benjamini-Yekutieli (BY) — valid under arbitrary dependence
+  - **Storey q-value** (preferred) — estimates π₀ from p-value distribution, no α needed
+- [x] **Validation** (`validation/`):
+  - Walk-forward CV with purge + embargo
+  - **CPCV** (Combinatorial Purged CV) — all combinations of test blocks
+  - **PBO** (Probability of Backtest Overfitting) — Bailey et al. (2017)
 
-`src/features/`, all Polars, all grouped by ticker (`.over('ticker')`), all computed on data sorted by `['ticker', 'date']`.
+### Signal Combination
+- [x] **Elastic Net** (`elastic_net_combiner.py`):
+  - Pooled panel regression (not Fama-MacBeth)
+  - q-value weighting: $X_j \leftarrow (1 - q_j) X_j$ (Adaptive Lasso equivalent)
+  - CPCV-tuned α, l1_ratio (nested: search on CPCV, eval on untouched holdout)
+- [x] **GBM** (`gbm_combiner.py`): `HistGradientBoostingRegressor` with same CPCV
+- [x] **PBO Comparison**: GBM vs EN on identical folds, shared holdout
 
-| Feature | File | What it is |
-|---|---|---|
-| `logret` | `returns.py` | daily log return |
-| `mom{w}` | `momentum.py` | % price change over trailing `w` days |
-| `std{w}` | `volatility.py` | rolling std over trailing `w` days |
-| `log_adv{w}` | `adv.py` | average (log-) dollar volume over trailing `w` days |
-| `beta{w}` | `beta.py` | rolling market beta, `Cov(r_i, r_mkt) / Var(r_mkt)` |
-| `seasonality.py` | not started | calendar effects |
-
-Full methodology behind evaluation, signal construction, and correlation cleaning: see [`docs/methodology.md`](docs/methodology.md).
-
----
-
-# Signals and evaluation
- 
-`src/signals/transforms.py` turns a feature into a tradeable signal, cross-sectionally, per date. Four construction methods: `zscore_tanh`, `zscore_clip`, `rank`, `decile`, decided using make_signal from `src/signals/combine.py`. Which one fits a given feature depends on how much its raw magnitude is trusted, see `docs/methodology.md`.
- 
-`src/evaluation/signals/` scores a signal once it exists:
- 
-| File | What it gives you |
-|---|---|
-| `ic/core.py` | Rank IC per date, summary stats (mean, IR, hit rate) |
-| `ic/metrics.py` | Newey-West corrected significance, IC decay across forward horizons |
-| `ic/plots.py` | IC time series, cumulative IC, IC distribution, decile spread, comparing several methods at once |
-| `performance.py` | signal stability (day-over-day change), naive long-short paper Sharpe |
-| `report.py` | one call, numeric-only health check, no plots |
-| `signal_plots.py` | one call, visual health check, coverage/moments/heatmap/sample tickers |
- 
-Every new signal gets both a `report.signal_report()` call and a `signal_plots.one_pager()` call before it's trusted for anything further, this is checked, not assumed, `tests/` has a deliberately awkward set of edge-case panels (`conftest.py`) every new function gets run against.
- 
----
-
-
-# Design philosophy: no free parameters, by construction
-
-A recurring principle across this repo: prefer methods with no parameter to hand-pick over methods that need one, even when the tunable version is more powerful. A parameter chosen by checking what it does to the results, however innocently, is a parameter chosen to fit this specific dataset, and that's a direct path to overfitting the research process itself, not just a model. 
-
-This shows up in several independent decisions, e.g.:
-
-- **Rank IC over raw-return backtests.** A single backtest's Sharpe ratio is trivial to overfit by adjusting almost anything about it. Rank correlation against forward returns is harder to game by construction.
-- **Rank transform preferred over zscore-tanh for untrusted features.** No clip bound, no tanh scale to pick, ordinal position only.
-- **Louvain over k-means for clustering.** k-means needs k chosen in advance, a free parameter with no principled answer from the data itself. Louvain finds the number of communities by maximizing modularity, nothing to feed it beforehand.
-- **Newey-West's lag length uses the standard 1994 rule of thumb**, not a value searched over to produce a preferred t-stat.
-- **FDR: Storey's q-value over a fixed BH/BY alpha**, wherever it's usable. BH and BY both require declaring a significance level up front, a small number written by a human, and a different number will validate a different, cherry-pickable set of signals. Storey's pi0 is estimated from the p-value distribution itself. See docs/methodology.md for the mechanics.
-
-The distinction that matters isn't "no parameters anywhere," some numbers are unavoidable (a significance convention, a kernel bandwidth rule). It's whether a parameter was fixed by a defensible convention before looking at results, or picked, however implicitly, because it produced a result that looked good. Every parameter in this repo should be defensible as the former. If it can't be, it's a bug in my research process, not just in the code.
-
----
-
-# Known limitations
-
-## Survivorship bias
-
-The universe is today's S&P 500 constituents, applied retroactively. Delisted/removed companies are missing entirely. Recently added companies have history predating their actual index membership. Every return, Sharpe ratio, and factor exposure in this repo is biased upward as a result.
- 
-Not an oversight, a scope decision: true point-in-time constituent history needs a paid vendor (CRSP, Compustat) I don't have access to outside an institutional setting. A free approximate point-in-time list is on the roadmap.
- 
-**This bias also corrupts the market proxy used for beta.** `beta.py` currently derives "market return" as the equal-weighted average across this same biased, thin-in-early-years universe. In the early 2000s, few of today's constituents have history yet, so the market proxy is built from a small, unstable sample, which makes its variance swing around and produces spuriously extreme beta values pre-2003. Two fixes: a minimum-ticker-count guard to null out beta until the universe is wide enough (quick, implemented as a stopgap), and replacing the proxy with a real benchmark index (S&P 500 / SPY) entirely (the actual fix, planned).
-
-## Data provenance
-
-Prices come from `yfinance`, unofficial, not a licensed feed. `Adj Close` gets retroactively restated by Yahoo whenever a new corporate action happens, so re-downloading the same history later can give slightly different values for the same date. No guarantee on completeness or timeliness compared to a real vendor.
-
-Also worth flagging alongside price reversal: `Adj Close` gets retroactively restated whenever a new corporate action happens, so re-downloaded history can carry slightly different daily values than the original download. That's a second, harder-to-rule-out source of artificial day-to-day return noise, no clean way to separate it from genuine short-term reversal without a licensed feed to compare against.
-
-## No transaction costs yet
-
-No spread, commission, or slippage modeled. Any return or Sharpe figure right now is a pre-cost upper bound, not realistic. Planned in `src/portfolio/costs.py`: spread + commission + square-root market impact, using `adv` as the participation-rate basis, once portfolio construction exists.
-
-## Single asset class, single frequency
-
-US equities, daily bars only. No intraday, no other asset classes, no fundamentals. Everything so far comes from price and volume alone.
-
-## Test coverage
-
-`tests/` exists but isn't fully populated yet. Correctness currently leans on the `inspect_*.ipynb` notebooks plus targeted unit tests as they get added.
+### Risk & Portfolio Construction (NEW)
+- [x] **RMT Correlation Cleaning** (`correlation_cleaning.py`):
+  - Marchenko-Pastur bounds: $\lambda_{\max} = (1 + \sqrt{q})^2$, $q = N/T$
+  - Eigenvalues ≤ λₘₐₓ → replace with mean (preserves trace)
+- [x] **Louvain Clustering** (`clustering.py`):
+  - Graph from positive correlations only (negative = diversification, not risk)
+  - Modularity maximization → no *k* to choose
+- [x] **Covariance Estimation** (`covariance.py`):
+  - **Ledoit-Wolf (2004)**: Analytical shrinkage to identity
+  - **OAS (2012)**: Finite-sample optimal shrinkage
+  - **Factor Model (PCA)**: Low-rank + diagonal residual
+- [x] **Portfolio Construction** (`portfolio_construction.py`):
+  - Signal → weights: proportional / inverse-vol / rank
+  - Cluster caps: max 2× equal share per Louvain cluster
+  - Vol targeting: scale to 10% annualized using cleaned Σ
+- [x] **Transaction Costs** (`costs.py`):
+  - Spread: power-law in ADV (Bacry et al. 2015)
+  - Commission: fixed bps
+  - **Market Impact**: Almgren-Chriss √-model: $\kappa \sigma \sqrt{\frac{|\Delta w| \cdot \text{NAV}}{\text{ADV}}}$
+- [x] **Optimization** (`optimization.py`):
+  - Inverse Volatility (naive risk parity)
+  - **Equal Risk Contribution (ERC)**: $RC_i = w_i (\Sigma w)_i / (w'\Sigma w) = 1/P$
+  - **Hierarchical Risk Parity (HRP)**: López de Prado (2016)
+  - **Clustered Risk Parity**: Raffinot (2018) — uses Louvain clusters directly
+  - **Black-Litterman**: Market prior + signal views
+  - **Cost-Aware MVO**: Gârleanu & Pedersen (2013) — $\max w'\mu - \frac{1}{2}w'(\Sigma+\Lambda)w + w'\Lambda w_{\text{prev}}$
+- [x] **Backtest Engine** (`backtest.py`):
+  - Walk-forward rebalancing (daily/weekly/monthly)
+  - Realistic execution lag (signal at close *t* → trade at open *t+1*)
+  - Cost-adjusted returns, turnover, attribution framework
 
 ---
 
-# Current progress
+## 📊 Current Progress
 
-- [x] Download historical prices
-- [x] Clean price data
-- [x] Price inspection
-- [X] Feature engineering, returns/momentum/volatility/ADV done and validated, beta implemented (market proxy has a known thin-history issue, see limitations), seasonality not started
-- [x] Signal construction, four methods, tested against edge-case panels
-- [x] Signal evaluation, Rank IC, Newey-West significance, IC decay, stability, paper Sharpe, numeric and visual one-call checks
-- [X] FDR across multiple candidate signals
-- [X] Rolling cross-validation, with purge and embargo buffer dates
-- [x] Elastic Net signal combiner (walk-forward-tuned alpha/l1_ratio, CPCV-tuned as alternative)
-- [x] GBM comparison model, compared to EN via Probability of Backtest Overfitting
-- [ ] Risk-engine-driven portfolio construction layer
-- [ ] Transaction costs
-- [ ] RMT correlation cleaning + Louvain clustering
-- [ ] Full backtest loop with attribution
-- [ ] Robustness analysis
-
----
-
-# Roadmap
- 
-- [ ] Fix beta's market proxy (real benchmark index instead of the biased equal-weighted universe average)
-- [ ] `seasonality.py`
-- [ ] `icir.py`
-- [ ] `src/portfolio/`, position sizing, transaction costs
-- [ ] `src/risk/covariance_cleaning.py`, RMT denoising, absorption ratio
-- [ ] Full backtest loop with performance attribution
-- [ ] Approximate point-in-time constituent list
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Data download & ETL | ✅ Complete | |
+| Feature engineering | ✅ Complete | 5 families, 20+ features |
+| Signal transforms | ✅ Complete | 4 methods, tested |
+| Signal evaluation (IC, NW, decay) | ✅ Complete | |
+| FDR (BH, BY, q-value) | ✅ Complete | |
+| Walk-forward CV + CPCV | ✅ Complete | Purge/embargo |
+| Elastic Net combiner | ✅ Complete | CPCV-tuned, q-weighted |
+| GBM combiner | ✅ Complete | Same CV framework |
+| PBO (GBM vs EN) | ✅ Complete | Identical folds, shared holdout |
+| RMT correlation cleaning | ✅ Complete | Validated on synthetic |
+| Louvain clustering | ✅ Complete | Validated on synthetic |
+| Covariance shrinkage | ✅ Complete | LW, OAS, Factor |
+| Portfolio construction | ✅ Complete | 3-layer pipeline |
+| Transaction costs | ✅ Complete | Spread + commission + √-impact |
+| Optimization solvers | ✅ Complete | HRP, ERC, BL, cost-aware |
+| Backtest engine | ✅ Complete | Walk-forward + attribution |
+| **Seasonality features** | 🔲 Planned | |
+| **Point-in-time constituents** | 🔲 Planned | Need CRSP/Compustat approx |
+| **Fundamentals** | 🔲 Not started | |
+| **Intraday / other assets** | 🔲 Not started | |
 
 ---
 
-# Development philosophy
+## 🧪 Testing Philosophy
 
-Written manually, on purpose. Point is understanding every decision, not maximizing coding speed.
+> **Every function is tested against the "Musée des Horreurs"** — a zoo of deliberately awkward panels in `tests/conftest.py`:
 
-LLMs get used for discussion, debugging, and code review, not for writing implementation decisions I don't understand. Anything an LLM suggests gets read, questioned, and checked (often against a second implementation) before it stays in the codebase.
+| Fixture | Tests |
+|---------|-------|
+| `panel_normal` | Baseline: 4 tickers, 1 date, distinct values |
+| `panel_normal_multidate` | Real baseline: 4 tickers, 3 dates |
+| `panel_unsorted` | Row order shuffled — catches missing `.sort()` |
+| `panel_ragged` | IPOs/delistings — tickers not on every date |
+| `panel_single_ticker` | Group size = 1 (std=0, rank degenerate) |
+| `panel_identical_values` | All equal — std=0, all ranks tied |
+| `panel_with_nulls` | Missing features (insufficient history) |
+| `panel_uneven_group` | 7 tickers → doesn't divide into 10 deciles |
+| `panel_with_ties` | Tied values — tests `qcut` behavior |
+
+**Rule**: Every new feature/signal function must pass relevant fixtures before touching real data.
+
+---
+
+## ⚠️ Known Limitations
+
+### 1. Survivorship Bias (Critical)
+**Universe = today's S&P 500 applied retroactively.**  
+Delisted/removed companies missing entirely. Recent additions have history pre-dating index membership. All returns, Sharpe ratios, factor exposures biased upward.
+
+> **Not an oversight — scope decision.** True point-in-time constituents need CRSP/Compustat (paid). Free approximate PIT list is on roadmap.
+
+**Also corrupts market proxy for beta:** Equal-weighted average over this biased universe. Pre-2003: few constituents → unstable variance → extreme beta values.  
+*Fixes*: (1) Minimum ticker count guard (implemented), (2) Replace with SPY/SP500 index (planned).
+
+### 2. Data Provenance
+- Prices from **yfinance** (unofficial, not licensed)
+- `Adj Close` retroactively restated by Yahoo on new corporate actions
+- Re-downloading same history → slightly different values
+- No completeness/timeliness guarantees vs real vendor
+
+### 3. No Transaction Costs in Early Stages
+- Signal evaluation Sharpe = **pre-cost upper bound**
+- Costs modeled only in final backtest (`04_build_portfolio.py`)
+
+### 4. Single Asset Class / Frequency
+- US equities, daily bars only
+- No intraday, no other asset classes, no fundamentals
+
+### 5. Test Coverage
+- `tests/` exists but not fully populated
+- Correctness leans on `inspect_*.ipynb` notebooks + targeted unit tests
+
+---
+
+## 🗺️ Roadmap
+
+### High Priority
+- [ ] **Fix beta market proxy** → use SPY/SP500 index returns
+- [ ] **Seasonality features** (`seasonality.py`)
+- [ ] **Approximate point-in-time constituent list** (free sources)
+- [ ] **Factor attribution** in backtest (style, sector, country)
+
+### Medium Priority
+- [ ] **Fundamentals integration** (earnings, book value, etc.)
+- [ ] **Multi-asset class** (futures, FX, crypto)
+- [ ] **Intraday features** (if data available)
+- [ ] **Real-time paper trading** simulation
+
+### Research Ideas
+- [ ] **Nonlinear signal transforms** (splines, trees)
+- [ ] **Regime-aware portfolio construction** (vol regime, correlation regime)
+- [ ] **Alternative risk models** (GARCH, stochastic vol)
+- [ ] **Alternative clustering** (HDBSCAN, spectral)
+
+---
+
+## 💡 Design Philosophy
+
+> **Written manually, on purpose.** The point is understanding every decision, not maximizing coding speed.
+
+- **No free parameters by construction** (see Methodology):
+  - Rank IC over raw backtest Sharpe (harder to overfit)
+  - Rank transform over zscore-tanh for untrusted features (no clip bound to pick)
+  - Louvain over k-means (no *k* to choose)
+  - Newey-West lag = standard rule of thumb (not tuned per signal)
+  - Storey q-value over fixed α (estimates π₀ from data)
+- **LLMs used for discussion, debugging, code review — NOT for implementation decisions I don't understand.** Anything suggested gets read, questioned, checked against a second implementation.
+
+---
+
+## 📚 Key References
+
+| Area | Reference |
+|------|-----------|
+| **Backtest Overfitting** | Bailey, Borwein, López de Prado & Zhu (2017), *J. Comput. Finance* 20(4) |
+| **CPCV / Purged CV** | López de Prado (2018), *Advances in Financial ML*, Ch. 7, 12 |
+| **RMT / Marchenko-Pastur** | Laloux, Cizeau, Bouchaud, Potters (1999), *PRL* 83(7) |
+| **Louvain Clustering** | Blondel, Guillaume, Lambiotte, Lefebvre (2008), *J. Stat. Mech.* |
+| **HRP** | López de Prado (2016), *J. Portfolio Mgmt* 42(4) |
+| **Clustered Risk Parity** | Raffinot (2018), *SSRN* |
+| **Ledoit-Wolf Shrinkage** | Ledoit & Wolf (2004), *J. Multivariate Anal.* 88(2) |
+| **OAS** | Ledoit & Wolf (2012), *Ann. Statist.* 40(2) |
+| **Almgren-Chriss Impact** | Almgren & Chriss (2001), *J. Risk* 3(2) |
+| **Cost-Aware Optimization** | Gârleanu & Pedersen (2013), *J. Finance* 68(6) |
+| **Black-Litterman** | Black & Litterman (1992), *FAJ* 48(5) |
+| **FDR / q-value** | Storey (2002), *JRSS-B* 64(3); Benjamini & Yekutieli (2001) |
+| **Newey-West** | Newey & West (1987, 1994), *Econometrica* / *Rev. Econ. Stud.* |
+
+---
+
+## 📄 License
+
+MIT License — see `LICENSE` file.
