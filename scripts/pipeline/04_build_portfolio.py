@@ -3,17 +3,17 @@ Full portfolio construction & backtest pipeline.
 
 
 ================================================================================
-POSSIBLE CONSTRUCTIONS
+POSSIBLE PF CONSTRUCTIONS
 ================================================================================
 
-1. Inverse Volatility / Risk Parity Weighting (Asness, Frazzini, Pedersen 2012)
+1. Inverse Volatility / Risk Parity Weighting (Asness, Frazzini, Pedersen 2012)
    - Weight ∝ 1/σᵢ, risk-equalized positions
    - More robust than mean-variance; no expected return estimation needed
 2. Mean-Variance with Shrinkage (Ledoit-Wolf 2004, 2012; Oracle Approximating Shrinkage)
    - Σ̂ = ρ·F + (1-ρ)·S where F is structured estimator (single-factor, constant correlation)
    - Analytical optimal shrinkage intensity ρ
    - Used at AQR, BlackRock, etc.
-3. Hierarchical Risk Parity (HRP) (López de Prado 2016)
+3. Hierarchical Risk Parity (HRP) (López de Prado 2016)
    - Uses correlation clustering (like our Louvain) to build hierarchical structure
    - Recursive bisection allocates risk budget top-down
    - Solves instability of Markowitz without ad-hoc constraints
@@ -35,7 +35,7 @@ POSSIBLE CONSTRUCTIONS
 
    
 ================================================================================
-WHAT THIS DOES
+OUR APPROACH
 ================================================================================
 
 ┌─────────────────────────┬───────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -76,7 +76,7 @@ This is the production entry point -- run this after:
   - 01_download_data.py
   - 02_etl_prices.py
   - 03_build_features.py
-  - TO MODIFIY: elastic_net_combiner.py (or gbm_combiner.py) to generate combined_score 
+  - elastic_net_combiner.py (or gbm_combiner.py) to generate combined_score (TO MODIFY?)
 
 ================================================================================
 USAGE

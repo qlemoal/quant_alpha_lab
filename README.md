@@ -355,7 +355,7 @@ Delisted/removed companies missing entirely. Recent additions have history pre-d
 ## 💡 Design Philosophy
 
 > Until correlation_cleaning.py code was **written manually, on purpose.** The point is understanding every decision, not maximizing coding speed.
-> Then Claude Code with multiple models is used to generate code. However each design decision is made by me and the code is reviewed manually.
+> Then multiple models (mainly Nvidia's Nemotron Ultra and Super) are used to generate code in Claude Code. However each design decision is made by me and the code is reviewed manually.
 
 - **No free parameters by construction** (see Methodology):
   - Rank IC over raw backtest Sharpe (harder to overfit)

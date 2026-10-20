@@ -1,563 +1,522 @@
-# Methodology notes
+# Methodology
 
-Detailed write-ups on the parts of this project worth getting right, not just
-implementing: what each method does, the formula, why it's the right tool
-here rather than a common alternative, and what its actual failure modes are.
-Written to be read back later, not just once. Linked from the main README.
+**Version:** 1.0  
+**Last Updated:** 2026-10-20  
+**Status:** Living document — updated as components are implemented and validated
 
 ---
 
-## 1. Evaluating a signal properly
+## Overview
 
-### 1.1 Information Coefficient (IC)
+This document describes the **full quantitative research pipeline** implemented in this repository, from raw data to backtested portfolio. Every component is modular, tested, and replaceable — the goal is reusable infrastructure, not a single strategy.
 
-The Information Coefficient is the cross-sectional correlation, per date,
-between a signal's values and the forward return realized after that date.
-It's the main evaluation metric here, not a single backtest's return or
-Sharpe ratio, which is far easier to overfit by adjusting almost anything
-about how the backtest is constructed.
+The methodology follows practices used at systematic investment firms (Millennium, Citadel, Two Sigma, AQR) but built from scratch to ensure full understanding of every decision.
 
-**Spearman, not Pearson.** IC here always means Spearman rank correlation
-("Rank IC"), computed via `pl.corr(signal, fwd_ret, method='spearman')`.
-Pearson correlation is sensitive to outliers, a handful of extreme return
-days can dominate the whole day's IC value. Spearman only depends on
-ranking, which is what actually matters when the signal is used to rank and
-select stocks, not predict their exact return magnitude.
+---
 
-`src/evaluation/signals/IC/core.py`: `compute_ic()` returns one IC value per
-date. `summarize_ic()` aggregates that series into `mean`, `std`,
-`ir = mean/std` (information ratio, the main number for comparing signals),
-`hit_rate` (fraction of days with IC > 0), and a naive t-stat.
-
-### 1.2 Naive significance vs Newey-West HAC correction
-
-**The naive t-stat.** `mean / (std / sqrt(n))`, treating each day's IC as an
-independent draw. This is the textbook formula, and it's wrong here by
-construction: overlapping-window features (`mom20` uses a 20-day window, so
-consecutive days' feature values, and therefore consecutive days' IC, are
-mechanically correlated) violate the independence assumption the naive
-formula needs.
-
-**Newey-West (HAC) correction.** `IC/metrics.py`, `newey_west_ic_tstat()`.
-Instead of treating the IC series as independent draws, it estimates the
-long-run variance directly, accounting for serial correlation up to a chosen
-number of lags:
+## Pipeline Architecture
 
 ```
-long_run_var = gamma_0 + 2 * sum_{k=1}^{L} (1 - k/(L+1)) * gamma_k
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   DOWNLOAD  │───▶│     ETL     │───▶│  FEATURES   │───▶│  SIGNALS    │───▶│  EVALUATE   │
+│  (yfinance) │    │  (DuckDB)   │    │  (Polars)   │    │ (transform) │    │   (IC/FDR)  │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+                                                                       │
+                                                                       ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  BACKTEST   │◀───│   COSTS     │◀───│ PORTFOLIO   │◀───│  COMBINE    │◀───│   FDR       │
+│  (walk-fwd) │    │  (sqrt)     │    │  (HRP/ERC)  │    │  (EN/GBM)   │    │  (q-value)  │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
 ```
 
-where `gamma_k` is the lag-k autocovariance of the demeaned IC series, and
-the `(1 - k/(L+1))` weight is the Bartlett kernel, it down-weights higher
-lags smoothly rather than cutting them off abruptly. The standard error of
-the mean is then `sqrt(long_run_var / n)`, and the t-stat is `mean / se`.
-`L`, the max lag, defaults to the Newey-West (1994) rule of thumb,
-`4 * (n/100)^(2/9)`, a fixed convention, not tuned per signal.
+---
 
-**Which direction the correction goes is not fixed.** The common intuition
-is "overlapping windows mean positive autocorrelation, so NW inflates the
-standard error and lowers the t-stat." That's the typical case, but not
-guaranteed. NW responds to whatever autocorrelation is actually present, and
-that can be negative: a slow-moving feature like `mom252`, whose
-cross-sectional ranking barely changes day to day (especially after decile
-bucketing), produces an IC series whose day-to-day *variation* comes almost
-entirely from the forward-return side, not the signal side. If short-horizon
-returns carry mild negative serial correlation (short-term reversal,
-bid-ask bounce, or artifacts from `Adj Close` being retroactively restated,
-see README's data provenance limitation), that negative correlation
-telescopes into the IC series, and a negative `gamma_1` genuinely tightens
-the NW standard error relative to the naive one, successive noise partially
-cancels. A higher NW t-stat than the naive one is a legitimate result in
-that case, not a bug, distinct from a real bug that also produces this
-symptom (see next paragraph).
+## 1. Data Layer
 
-**A distinct historical bug, for context.** An earlier version of
-`newey_west_ic_tstat` silently accepted a 2D input (a full `date, ic`
-DataFrame instead of the `ic` column alone), which corrupted the mean with
-date values cast to float and produced nonsensical, wildly inflated t-stats
-(observed: 3.8 naive vs 194 NW, a ratio no realistic autocorrelation
-structure can produce, verified by simulation: even an unrealistic
-lag-1 autocorrelation of -0.9 over 1250 observations only inflates the
-t-stat by about 3.3x). Fixed by validating input shape at the top of the
-function (`if x.ndim != 1: raise ValueError(...)`) rather than coercing
-silently. Kept here as a reminder: a NW t-stat moving in the "wrong"
-direction is worth checking the input shape first, then the actual
-autocorrelation, in that order.
+### 1.1 Universe & Download
 
-### 1.3 Autocorrelation diagnostics
+- **Source:** S&P 500 constituents from Wikipedia + daily OHLCV from yfinance
+- **Frequency:** Daily, adjusted close (`Adj Close`)
+- **Period:** 2000-01-01 to present (configurable)
 
-`src/utils/stats.py`, `autocorrelation()`. General-purpose lag-k
-autocorrelation, usable on a flat single time series (e.g. a daily IC
-series, one row per date) or on a ticker panel (per-group autocorrelation,
-aggregated to a cross-group mean and std, since a single "the"
-autocorrelation doesn't exist across a panel of different tickers). This is
-the direct diagnostic for the NW question above: print `gammas` from
-`newey_west_ic_tstat`, or call `autocorrelation(ic_df, 'ic', lags=(1,2,3))`
-directly, to see the sign and size of the serial dependence actually driving
-a given correction, rather than inferring it indirectly from IC decay
-(decay measures the *level* of predictive power at different horizons, a
-different question, conflating the two was an earlier mistake in this
-project's own reasoning, worth remembering not to repeat).
+### 1.2 ETL & Cleaning (DuckDB)
 
-### 1.4 False discovery rate control
+| Step | Description |
+|------|-------------|
+| Deduplication | Drop exact duplicate rows |
+| Missing data | Forward-fill `Adj Close` within ticker (max 5 days) |
+| Returns | Compute log returns: $r_t = \log(P_t) - \log(P_{t-1})$ |
+| Validation | Flag tickers with $< 60$ observations, extreme returns $> 50\%$/day |
+| Output | `prices.parquet`: [date, ticker, open, high, low, close, adj_close, volume, logret] |
 
-Testing many candidate signals, or many parameter variants of the same
-signal, in the same round is a multiple-testing problem. A 5% significance
-threshold applied independently to each one produces false positives by
-construction. `src/evaluation/signals/fdr.py` implements three approaches,
-deliberately kept side by side rather than collapsing to one:
+### 1.3 Known Data Limitations
 
-**Benjamini-Hochberg (BH).** Sort p-values ascending, `p_(1) <= p_(2) <=
-... <= p_(m)`. Find the largest `k` such that `p_(k) <= alpha * k / m`,
-reject (call significant) every hypothesis up to and including that `k`.
-Valid under independence or positive regression dependence (PRDS) among the
-test statistics.
+> **Survivorship Bias (Critical):** Universe = today's S&P 500 applied retroactively. Delisted companies missing entirely. Returns, Sharpe ratios, factor exposures biased upward. **Not an oversight — scope decision.** True point-in-time constituents need CRSP/Compustat.
 
-**Benjamini-Yekutieli (BY).** Identical mechanics, but the threshold is
-divided by the harmonic number `H_m = sum_{i=1}^{m} 1/i`:
-`p_(k) <= alpha * k / (m * H_m)`. Valid under arbitrary dependence, no PRDS
-assumption needed, at the cost of a threshold that shrinks as `H_m` grows
-with `m` (roughly 3.6x more conservative than BH at m=20). The right choice
-when candidates are correlated, which is the normal case here: different
-lookback windows of the same feature, or different transform methods of the
-same underlying signal, are built from the same overlapping return history,
-so BH's independence/PRDS assumption is questionable. Harvey, Liu & Zhu
-(2016, "...and the Cross-Section of Expected Returns", Review of Financial
-Studies) use exactly this reasoning for the same problem in finance.
+> **Beta Market Proxy:** Equal-weighted average over biased universe. Pre-2003: few constituents $\to$ unstable variance $\to$ extreme beta values. Fixes planned: minimum ticker guard + SPY index proxy.
 
-**BH and BY both fix `alpha` before producing an answer**, and both
-implicitly assume the worst case, that every single candidate could be a
-true null (`pi0 = 1`), which is exactly why they're conservative even when
-most candidates are obviously real signals.
-
-**Storey's q-value.** Flips the question: instead of "is this significant
-at a chosen alpha," it asks "if this p-value were used as the cutoff, what
-FDR would that produce?" That minimum achievable FDR, per candidate, is its
-q-value, the FDR analogue of a p-value. In other words: It's the smallest 
-false-discovery-rate level at which that specific test would still be called significant. 
-
-Two differences from BH/BY:
-
-- `pi0` (the true proportion of null candidates) is *estimated* from the
-  data instead of assumed to be 1. Genuine null p-values are uniform on
-  [0,1]; genuine signals pile up near 0. Looking at the right tail of the
-  p-value distribution (p-values near 1, where real signals essentially
-  never land) estimates what fraction is pure noise. Implementation:
-  compute `pi0_hat(lambda) = mean(p > lambda) / (1 - lambda)` across a
-  fixed grid of `lambda` values (a standard, dataset-independent grid, not
-  tuned per batch), fit a cubic smoothing spline across the grid, evaluate
-  at the right edge. This is the estimator itself, no alpha involved.
-- q-values need no `alpha` to compute. Every candidate gets a number,
-  monotonically enforced via a backward pass,
-  `q_(i) = min(pi0 * m * p_(i) / i, q_(i+1))`, starting from
-  `q_(m) = pi0 * p_(m)`. Any cutoff applied afterward is a visibly separate
-  decision from the significance computation itself.
-
-Net effect: when `pi0 < 1` (expected whenever a batch actually contains real
-signals, not pure noise), q-values are strictly more powerful than BH/BY at
-the same nominal FDR, because they aren't spending budget pretending
-everything might be null. The cost is one extra estimation step BH/BY don't
-need. This is preferred going forward per this project's no-free-parameters
-principle (see README, "Design philosophy"): BH/BY require a human-chosen
-`alpha` to produce any output at all; q-values don't.
-
-Choosing `alpha`: the famous low signal-to-noise ratio translates to little
-to none signals selected with an `alpha` of 0.05 or lower. This means we lose 
-real-but-weak candidate signals. We therefore allow `alpha` to be bigger, 
-for now set at `0.2`.
-
-*Reading a q-value, concretely.* Test 10 candidate signals, sorted
-p-values `0.001, 0.004, 0.006, 0.01, 0.02, 0.03, 0.05, 0.08, 0.10, 0.5`, and
-suppose the data suggests about half this batch is genuinely null
-(`pi0 = 0.5`). The resulting q-values: `0.005, 0.01, 0.01, 0.0125, 0.02,
-0.025, 0.036, 0.05, 0.056, 0.25`.
-
-Read the 3rd one: q=0.01 means "if I declared the 3 smallest p-values
-significant, I'd expect 1% of that set of 3 to be false discoveries." Not
-"this single signal has a 1% chance of being false", that's not what any
-p-value-derived number means, it's a statement about the batch you get if
-you drew the line at this candidate's rank.
-
-Notice p and q move in different directions relative to each other: the
-smallest p-value (0.001) gets a *larger* q (0.005), penalized for having
-been tested alongside 9 other candidates. The largest p-value (0.5) gets a
-*smaller* q (0.25) than its own p, because `pi0=0.5` means the procedure
-isn't assuming, the way BH's threshold implicitly does, that every last
-candidate might be null.
-
-Which number to trust when reporting one figure per signal: the q-value.
-A p-value in isolation says nothing about how many other candidates were
-tested alongside it, quoting it alone silently implies it's the only test
-run, which it never is here. The q-value carries that context built in.
-
-**FDR choice: continuous prior, not a hard gate.** `fdr_report()` computes BH, BY, and q-value side by side, but none of `survives_bh` / `survives_by` is used as a hard filter into the signal combiner. Two reasons. First, a hard cutoff at any `alpha` throws away graded information, a candidate just above and just below the line are treated as categorically different despite being nearly identical in strength. Second, using a cutoff would introduce a second free parameter beyond `alpha` itself, which q-value would need (some chosen q-threshold), reproducing exactly the "picked because it looks right" problem this project's FDR module was built to avoid. Instead, the q-value feeds into the combiner as a continuous weight, letting the combiner's own regularization (see Section 5, Elastic Net) do the actual inclusion/exclusion, informed by evidence strength rather than a binary pass/fail upstream of it.
-
-### 1.5 IC decay across forward-return horizons
-
-`ic_decay()`, Rank IC of a signal against forward returns at several
-horizons (1, 5, 10, 20 days by default). Shows how long predictive power
-actually persists, which directly informs a sensible rebalance frequency: a
-signal with IC only at horizon 1 wants daily rebalancing (expensive), one
-that holds to horizon 20 can rebalance far less often. Depends entirely on
-forward returns being computed correctly as the *cumulative* return over the
-horizon, `log(P_{t+h}/P_t) = sum_{k=1}^{h} logret_{t+k}`, not the single
-day's return h days out, an earlier bug (`shift(-h)` instead of
-`rolling_sum(h).shift(-h)`) computed the latter, which produces a decay
-curve that looks artificially flat because every horizon was really
-measuring close to the same 1-day relationship at different offsets.
-
-### 1.6 Walk-forward, purged, embargoed cross-validation
-
-Embargo adds a small gap after the test period before the next fold's training starts. Unlike in true K-fold (Section 1.7), this isn't protecting any single fold's own validity, purge alone already does that here, since train is always strictly before test in walk-forward. It's protecting the independence of results across folds when they get aggregated into one statistic (e.g. `ElasticNetCV` validation score across folds to pick `alpha`), without it, two folds whose train/test boundaries sit close together could give correlated rather than independent-ish OOS readings, understating how uncertain the aggregate really is. 
-Reference: López de Prado, *Advances in Financial Machine Learning*.
-
-We start constructing the folds from the latest date available, and go backwards from there. 
-That is to take full advantage of the "freshest" data, especially with the survivorship bias
-currently present, responsible for less data at the start of our dataset. 
-
-We added the `next_fold` argument to the function, to choose when to start the next fold, 
-either directly after the last `test_set` using `consecutive` argument, or give an `int` to 
-set the number of dates between one `train_set` and the next. 
-
-Recent literature (Arian et al. 2024) states plain walk-forward remains the industry standard for realistic simulation, 
-combinatorial purged CV is better at mitigating overfitting specifically when you're doing model/hyperparameter search 
-across many trials (relevant later for elastic net alpha/l1_ratio and the GBM comparison, not for basic signal evaluation now)
-
-### 1.7 True purged-embargoed K-fold and CPCV 
-
-Distinct from the walk-forward scheme above, not a replacement for it. Walk-forward keeps train strictly before test, realistic for simulating actual deployment, but only produces a handful of folds given the history available. True K-fold allows train to include data from both sides of a test block chronologically, which means embargo becomes necessary for a single fold's own validity here (not just for cross-fold independence, as in the walk-forward case, see splits.py's docstring), following López de Prado (2018), ch. 7. CPCV (purged_embargoed_kfold_splits with n_test_groups > 1) extends this combinatorially, evaluating every combination of held-out groups. Full AFML path reconstruction (ch. 12) is not implemented, not needed for the specific statistic used here (see below).
-
-![CPCV fold geometry across parameter settings](images/cpcv_geometry.png)
-
-Grey = train, red = test, blue = purge/embargo excluded. Fold count matches `C(n_blocks, n_test_blocks)` exactly in every setting shown (6, 15, 45, 120). Test blocks widen and multiply together as `n_test_blocks` grows, more combinatorial coverage, but each individual combination covers a wider, less granular slice, a real tradeoff, visible directly here rather than just asserted in prose.
-
-**Tuning the embargo window, two separate components, combined explicitly, not silently:**
-
-1. **Structural minimum, `horizon + 1`.** The test set's own forward-return label reaches `horizon+1` days past `test_end` (per the open-to-open execution lag in `returns.py`). A training row placed any closer than that has a label window overlapping the test label's own construction, sharing raw daily returns even though neither row's features touch the other's data. Fixed, known in advance, no estimation needed.
-2. **Empirical component, from `scripts/embargo_selection.py`.** Tests lag-wise autocorrelation of market returns, FDR-corrected across all tested lags (`alpha=0.05`, distinct from the FDR module's own `0.2`, chosen independently, not reused by habit). Final choice: `largest_surviving_lag` under BY correction, not the gentler `first_contiguous_run` alternative, deliberate: any lag with a genuinely FDR-validated correlation, however far out, is a channel a training row could still "see" information through, worth protecting against even if it's more likely a distinct periodic effect than boundary decay. Current result: **16** (BY), driven partly by strong lag-1 reversal (well-documented nonsynchronous-trading effect, Lo & MacKinlay, 1990) and partly by isolated dependence further out (see `docs/findings.md`, not yet explained).
-
-The two combine via `sum` (`src/validation/cpcv.py`, `total_embargo_window()`), matching the convention in López de Prado (2018): purge + embargo as the total buffer around a test block, `max()` is available as an alternative if the two risks are believed not to compound, not the project's chosen default. For `horizon=20`: `total_embargo = (20+1) + 16 = 37`. Recompute the empirical component whenever the market's own behavior might have changed, or when the forecasting horizon changes meaningfully, rerun on the horizon-matched, market-aggregated forward return (not daily `logret`) to check for real dependence beyond what pure overlap in the label construction already explains structurally.
-
-**Probability of Backtest Overfitting:** `probability_of_backtest_overfitting()` implements the CSCV algorithm from Bailey, Borwein, López de Prado & Zhu (2017, Journal of Computational Finance 20(4), 39-69): given a performance matrix across several candidate strategies/configurations, repeatedly split into in-sample/out-of-sample halves, check whether the in-sample winner still ranks above the OOS median, PBO is the fraction of splits where it doesn't. Requires at least two real candidates to compare, not used to evaluate a single model in isolation, see Section 5 for the concrete GBM vs. Elastic Net application.
+> **yfinance Provenance:** Unofficial, not licensed. `Adj Close` retroactively restated on corporate actions. Re-downloading yields slightly different values.
 
 ---
 
-## 2. Turning a feature into a signal
+## 2. Feature Engineering
 
-A raw feature (`mom20`) isn't directly usable to rank stocks against each
-other, different tickers live on different scales. Needs a cross-sectional
-transform first, per date, across all tickers. `src/signals/combine.py`,
-`make_signal()`.
+All features computed per-ticker, sorted by `[ticker, date]`, using **Polars lazy evaluation** (memory efficient, no collect until needed).
 
-### 2.1 Z-score, then bound the tails
+| Feature | File | Formula | Lookback Windows |
+|---------|------|---------|------------------|
+| **Log Return** | `returns.py` | $r_t = \log P_t - \log P_{t-1}$ | — |
+| **Forward Return** | `returns.py` | $R_{t \to t+h} = \sum_{k=1}^h r_{t+k}$ | 1, 5, 10, 20 |
+| **Momentum** | `momentum.py` | $\text{mom}_w = \frac{P_t}{P_{t-w}} - 1$ | 5, 20, 60, 126, 252 |
+| **Volatility** | `volatility.py` | $\sigma_w = \sqrt{\frac{1}{w-1}\sum_{i=1}^w (r_{t-i} - \bar{r})^2}$ | 20, 60, 126, 252 |
+| **Avg Dollar Volume** | `adv.py` | $\text{ADV}_w = \frac{1}{w}\sum_{i=1}^w V_{t-i} \cdot P_{t-i}$ | 20, 60, 126 |
+| **Beta** | `beta.py` | $\beta_w = \frac{\text{Cov}(r_i, r_{mkt})}{\text{Var}(r_{mkt})}$ | 60, 126, 252 |
 
-Standardize within each date: subtract the cross-sectional mean, divide by
-the cross-sectional std. Preserves relative magnitude, a stock two standard
-deviations above average looks meaningfully different from one five above.
-Unbounded by construction, needs a follow-up step:
-
-- **Hard clip** (`clip(-3, 3)`), simple, standard default, discontinuous at
-  the boundary.
-- **tanh**, smooth alternative, near-linear close to 0, saturates past
-  roughly `|x| = 3`. Preferred when the clip's discontinuity feels wrong.
-
-### 2.2 Rank transform
-
-Rank the feature within each date, rescale to `[-1, 1]`. Bounded and
-outlier-proof by construction, since it only uses ordinal position, no
-separate clipping step needed. Trade-off: discards magnitude, a stock ranked
-#1 and #2 are treated as equally far apart as #50 and #51, even if their raw
-values differ wildly.
-
-### 2.3 Decile / quantile bucketing
-
-Split the cross-section into buckets, assign a bucket label instead of a
-continuous score. Coarser than either of the above, but this is the
-standard way academic factor papers report results (long top decile, short
-bottom decile), useful as an easy baseline to benchmark a continuous signal
-against.
-
-### 2.4 Which one fits which feature
-
-- Well-behaved, already-validated features (`mom`, `adv`, `std`): z-score +
-  tanh by default. Magnitude is trustworthy, worth keeping.
-- Features not fully trusted yet (`beta`, until the market-proxy fix
-  lands): rank transform, robust to whatever extreme values the underlying
-  computation still produces.
-- A simple, explainable baseline, or comparison against an academic
-  long/short factor result: decile bucketing.
-
-Not mutually exclusive across the project, different features can use
-different methods. Not usually worth stacking two on the same feature.
+**Output:** `features.parquet` with all features joined on `[date, ticker]`.
 
 ---
 
-## 3. Combining signals: the Elastic Net combiner
+## 3. Signal Construction
 
-`src/models/elastic_net_combiner.py`. Takes the survivors of `signal_report()` + `fdr_report()`, combines them into a single predictive score via Elastic Net regression against forward returns, with `alpha`/`l1_ratio` chosen through this project's own leakage-safe CV (Section 1.6/1.7), not sklearn's default random k-fold, which would silently reintroduce exactly the leakage the CV module exists to prevent.
+A raw feature is not a signal. It must be transformed cross-sectionally (per date, across all tickers) to become comparable.
 
-**Why Elastic Net, not Lasso or Ridge alone.** Candidate signals are correlated by construction, `mom20`/`mom60`/`mom252` share overlapping return history. Pure Lasso handles correlated groups badly, tends to arbitrarily keep one member of a correlated group and zero the rest, unstable across resamples (Zou & Hastie, 2005, JRSS B, 67(2), 301-320, their own framing: "if predictors are correlated, lasso arbitrarily selects one"). Ridge keeps everything, never zeros anything, no sparsity, harder to say which signals actually survived combination. Elastic Net's L1+L2 mix is the standard answer to exactly this setup.
+### 3.1 Transform Methods (`src/signals/combine.py`)
 
-![Illustrative candidate signal correlation](images/signal_correlation_illustrative.png)
+| Method | Formula | Properties | Best For |
+|--------|---------|------------|----------|
+| **zscore_tanh** | $z \mapsto \tanh(c \cdot z)$ | Smooth, bounded, preserves magnitude near 0 | Validated features (mom, adv, std) |
+| **zscore_clip** | $z \mapsto \text{clip}(z, -c, c)$ | Hard bound, discontinuous at boundary | Quick prototyping |
+| **rank** | $\text{rank}(x) \mapsto \frac{2\cdot\text{rank} - N - 1}{N - 1} \in [-1, 1]$ | Bounded, outlier-proof, discards magnitude | Untrusted features (beta) |
+| **decile** | $x \mapsto \text{bucket}_{10}(x)$ | Coarse, academic baseline | Comparison vs literature |
 
-Synthetic, not yet real candidate signals (none of the actual `mom`/`vol`/`adv` family has been jointly correlation-checked yet), illustrating the structural point: overlapping-lookback momentum signals (`mom5` through `mom252`) correlate strongly with each other (0.22-0.83) purely from shared return history, while an unrelated signal (`vol20` here) stays near-independent, the contrast that motivates Elastic Net over Lasso. 
+Where $z = \frac{x - \mu_{\text{cs}}}{\sigma_{\text{cs}}}$ (cross-sectional z-score), $c=3$ default.
 
-**q-value as a continuous penalty weight, not a hard filter.** `apply_q_value_weighting()`. Per Section 1.4's design decision (continuous prior, not a hard gate), a candidate's q-value needs to influence the combiner without ever being used as a survives/doesn't-survive cutoff. sklearn's `ElasticNet.fit(sample_weight=)` weights *rows* (observations), q-value is a property of a *column* (a candidate signal), these aren't interchangeable. The mechanism used instead: rescale each signal's column by `(1 - q)` before fitting. Elastic Net's penalty acts uniformly on coefficient magnitude, so shrinking a low-quality signal's raw input values means a larger true coefficient is needed to contribute the same amount to the prediction, an implicit differential penalty without a second regularization parameter to tune. Same idea as Zou's Adaptive Lasso (2006, JASA 101(476), 1418-1429), per-feature penalty weights, theoretical grounding, not an ad hoc trick: the adaptive lasso objective is `[prediction error] + lambda * sum_j w_j |beta_j|`, a higher `w_j` pushing `beta_j` toward zero more easily, exactly what `(1-q)` rescaling achieves indirectly through the input scale rather than an explicit per-coefficient weight. Open question, not resolved: whether a linear `(1-q)` rescale is the right transform versus `sqrt(1-q)` (gentler) or `(1-q)^2` (harsher), no literature-mandated answer, whichever is used should be a stated convention decided before seeing which signals it favors.
+### 3.2 Design Principle
 
-**Pooled panel, not Fama-MacBeth.** `build_design_matrix()` pools every `(date, ticker)` row across a fold's history into one design matrix, rather than fitting a separate cross-sectional regression per date and averaging the resulting coefficients (the classic Fama-MacBeth, 1973, two-step procedure). Fama-MacBeth exists primarily as an *inference* tool, testing whether a characteristic's average risk premium is significantly different from zero over time, accounting for cross-sectional correlation of residuals within a date, largely the same question Section 1.2's Newey-West correction and Section 1.4's FDR machinery already answer here, applied to individual candidate signals before they ever reach the combiner. What's needed at the combiner stage is different: an optimally-regularized *predictive* combination for deployment, which is what pooled Elastic Net directly targets. A pooled fit also solves a practical problem Fama-MacBeth would reintroduce, a single date's cross-section is only around 500 names, too thin to fit several correlated signals against stably, pooling across a fold's ~800 trading days gives tens of thousands of rows instead. Genuine open question for later, once there's a working combiner: how its risk-adjusted performance holds up over calendar time (recent years vs. older, or across CPCV blocks) is a more directly actionable question than how its fitted coefficients evolve, worth investigating first, coefficient evolution second if the first raises specific concerns.
-
-**Missing-data policy, explicit, not implicit.** `build_design_matrix()` drops a `(date, ticker)` *row* if *any* of its candidate signal columns is null, all-or-nothing per row, not a blanket drop of any signal project-wide. Real cost: candidate signals have different lookback windows (`mom20` needs 20 days, `mom252` needs 252), so including a long-lookback signal disproportionately drops early-history and recently-listed tickers, interacting with the survivorship-bias caveat already documented in the README. The alternative, cross-sectional per-date median imputation, replaces a missing signal value for one ticker with that date's median across all *other* tickers rather than dropping the row. Since signals are already cross-sectionally normalized (z-scored/ranked, see Section 2) before reaching the combiner, the cross-sectional median of a normalized signal sits close to zero, so imputing with it effectively says "unknown tilt on this signal, treat as neither long nor short conviction on it" for that one ticker, while keeping the row's *other* signals and its forward-return label as usable training data. Current default is drop, not imputation, not yet tested against the musée des horreurs fixtures, worth doing before trusting either policy in production.
-
-**Nested CPCV search + untouched final holdout, current gap.** `fit_elastic_net_combiner()`, as currently wired, only uses the walk-forward scheme (Section 1.6) via `build_row_index_folds()`, `'consecutive'` mode. `scripts/en_cpcv_demo.py` and `scripts/compare_gbm_vs_en_pbo.py` demonstrate a more rigorous nested design instead: tune `alpha`/`l1_ratio` via CPCV (Section 1.7, more folds, more robust against the search itself overfitting one historical path), then sanity-check the fixed, already-chosen model on a genuinely untouched final holdout, never seen during the CPCV search, evaluated the causally-realistic, walk-forward-style way. That nested design exists and has been tested (both scripts run end to end), it just hasn't been folded back into `fit_elastic_net_combiner()` as the default yet, worth doing once the design is settled rather than maintaining two divergent code paths.
-
----
-
-## 4. Comparing model families: GBM vs. Elastic Net via PBO
-
-Once more than one finished combiner exists, comparing them by headline
-IC alone risks mistaking noise for a genuine difference. Probability of
-Backtest Overfitting (Bailey, Borwein, Lopez de Prado & Zhu, 2017,
-*Journal of Computational Finance* 20(4), 39-69) answers a different,
-more useful question: if you picked whichever candidate looked best on
-some slice of history, how often would that pick actually hold up on a
-different slice? Implemented in `probability_of_backtest_overfitting()`
-(`src/validation/cpcv.py`), consumed by `scripts/compare_gbm_vs_en_pbo.py`.
-
-Both candidates are tuned via CPCV on an identical search region using
-IDENTICAL folds (fairness: neither gets an easier or harder split by
-chance), then evaluated, fixed, on a shared, genuinely untouched holdout,
-split into contiguous sub-blocks for the PBO matrix. This is a scoped-down
-adaptation of full CSCV (see the script's docstring for exactly what's
-simplified and why), not the textbook nested-refit version, upgrade path
-noted there if this becomes a recurring comparison rather than a one-off.
-
-GBM (`src/models/gbm_combiner.py`, `HistGradientBoostingRegressor`) is
-the natural nonlinear counterpoint to Elastic Net: if it meaningfully
-outperforms, that's evidence of real interaction effects between
-candidate signals a linear model can't express. If not, per Friedman
-(2001), more flexible function classes only pay off if the true
-relationship has that shape, otherwise they mostly add variance, and PBO
-should reflect that as a high, unreliable-selection number rather than a
-confident model preference. See `docs/findings.md` for two sanity checks:
-a synthetic linear relationship (correctly high PBO, no real difference
-to detect) and a synthetic interaction relationship (correctly low PBO,
-GBM genuinely and detectably better there).
+- **No free parameters by construction:** Rank transform needs no clip bound. Louvain needs no $k$. Storey q-value needs no $\alpha$.
+- **Different features $\to$ different transforms:** Not mutually exclusive, not usually worth stacking.
 
 ---
 
-## 5. Correlation structure and portfolio construction
+## 4. Signal Evaluation
 
-Two genuinely separate questions get asked about the same correlation
-matrix, kept as separate functions on purpose, never chained
-automatically under the hood:
+**Primary metric = Rank IC (Spearman), not backtest Sharpe.**  
+Backtest Sharpe is far easier to overfit by adjusting construction details. IC measures predictive power directly.
 
-### 5.1 Cleaning the correlation matrix (RMT / Marchenko-Pastur)
+### 4.1 Rank IC
 
-`src/risk/correlation_cleaning.py`. An empirical
-correlation matrix over hundreds of tickers is mostly noise. Random Matrix
-Theory gives a theoretical eigenvalue range (Marchenko-Pastur) expected from
-a pure-noise correlation matrix, given the assets-to-observations ratio
-`q = n_assets / n_obs`. Eigenvalues inside that range get shrunk or
-replaced (commonly with their average, to preserve the trace), only
-eigenvalues above the range are treated as genuine common-factor structure.
-Answers: "how much of this correlation matrix is real." Only the upper MP
-bound (`lambda_max`) is used, not the lower one, financial correlation
-matrices are positive semi-definite by construction, MP's theoretical
-lower bound can dip below zero for large `q`, not a real constraint here.
-Reference: Laloux, Cizeau, Bouchaud, Potters (1999).
+For each date $t$:
+$$
+\text{IC}_t = \rho_S(s_t, R_{t \to t+h})
+$$
+where $\rho_S$ = Spearman rank correlation, $s_t$ = signal values, $R_{t \to t+h}$ = forward returns.
 
-Validated on synthetic data with known structure before trusting on real
-signals: 3 planted clusters (sizes 15/10/8) buried in 12 pure-noise
-tickers, `n_obs=500`. Result: exactly 3 eigenvalues land above `lambda_max`,
-with a real gap between the 3rd (3.39) and 4th (1.27, right at the noise
-boundary 1.69), trace preserved exactly (45.0 -> 45.0) after cleaning.
+Summary statistics:
+- $\text{Mean IC}$, $\text{Std IC}$
+- **Information Ratio:** $\text{IR} = \frac{\text{Mean IC}}{\text{Std IC}}$
+- **Hit Rate:** $\frac{1}{T}\sum_{t=1}^T \mathbb{1}[\text{IC}_t > 0]$
 
-### 5.2 Community detection (Louvain)
+### 4.2 Newey-West HAC t-statistic
 
-`src/evaluation/portfolio/clustering/louvain.py` (header comment notes
-intended future path `src/risk/clustering.py`, not yet moved). Groups
-tickers into clusters that maximize modularity on the correlation graph.
-Answers a different question from RMT cleaning: "which stocks move
-together," not "how much of the correlation structure is real." Louvain
-over k-means deliberately, no `k` to choose in advance, the number of
-clusters falls out of the modularity-maximization itself, consistent with
-this project's no-free-parameters preference (README, "Design
-philosophy"). Operates on whatever matrix it's given, raw or RMT-cleaned;
-chaining the two is a separate, explicit orchestration step, not
-automatic inside `louvain_clustering()` itself, so cleaning is never
-silently applied or silently skipped. Reference: Blondel et al. (2008),
-"Fast unfolding of communities in large networks."
+Overlapping windows (e.g., mom20 uses 20-day window) induce serial correlation in IC series. Naive t-stat assumes independence $\to$ wrong.
 
-**Edge-weight convention, a real decision, not mechanical.** Only
-positive correlations become graph edges, negative correlations are
-dropped entirely rather than taken as `|corr|`. Purpose here is grouping
-tickers that move together so a downstream risk step can avoid stacking
-correlated exposures in one cluster. Two tickers with correlation -0.8
-are the *opposite* of a diversification risk, holding both reduces
-portfolio variance, treating them as "belonging together" via absolute
-value would be actively wrong for this purpose, not a rounding choice.
+**Long-run variance:**
+$$
+\hat{\Omega} = \gamma_0 + 2\sum_{k=1}^L \left(1 - \frac{k}{L+1}\right)\gamma_k
+$$
+where $\gamma_k$ = lag-$k$ autocovariance of demeaned IC series, Bartlett kernel weights.
 
-Validated on the same synthetic 3-cluster panel used above: Louvain
-recovers all three planted clusters with perfect membership, no mixing,
-run on the RMT-cleaned correlation matrix from Section 5.1.
+**Standard error:** $\text{SE} = \sqrt{\hat{\Omega} / T}$  
+**t-stat:** $t = \frac{\text{Mean IC}}{\text{SE}}$
 
-Kritzman & Li's **Absorption Ratio** (`absorption_ratio.py`, not yet
-implemented, currently misplaced under `src/evaluation/signals/`, header
-comment notes intended path `src/risk/covariance_cleaning.py`), share of
-total variance explained by the top few eigenvalues, is a related but
-distinct diagnostic: a rising ratio means the correlation structure is
-collapsing onto fewer common factors, historically associated with
-periods preceding market stress. A rolling summary statistic, not a
-clustering or cleaning method.
+**Lag $L$:** Newey-West (1994) rule of thumb $L = 4(T/100)^{2/9}$ — fixed convention, **not tuned per signal**.
 
-### 5.3 From combined score to risk-adjusted weights
+> **Direction not fixed:** Positive autocorrelation $\to$ NW inflates SE $\to$ lower t-stat (typical). Negative autocorrelation $\to$ NW tightens SE $\to$ higher t-stat. Both are legitimate.
 
-`src/risk/portfolio_construction.py`. Chains the two pieces above into
-actual position weights, consuming the combined score from Section 3 or
-4. Operates on one cross-section (one date) given precomputed inputs,
-deliberately: how often to re-estimate the correlation matrix and
-re-cluster (daily? weekly? what trailing window?) belongs to the future
-backtest loop, not to this module, kept separate so each piece is
-testable in isolation.
+### 4.3 IC Decay
 
-**Score to raw weight.** `raw_weights_from_score()`: proportional,
-dollar-neutral, gross-normalized (`weight_i = score_i / sum(|score_j|)`
-per date), not decile-bucketed. A decile long-short needs a bucket-count
-parameter with no data-driven justification; proportional weighting uses
-the score's own continuous magnitude directly, no cutoff to defend.
-Real tradeoff: likely higher turnover than decile buckets, since every
-score wiggle moves every weight a little rather than only weights
-crossing a bucket boundary, not measured yet.
+Rank IC vs forward horizon $h \in \{1, 5, 10, 20\}$:
+$$
+\text{IC}(h) = \rho_S(s_t, R_{t \to t+h})
+$$
+Informs rebalance frequency: IC only at $h=1$ $\to$ daily rebalancing (expensive); IC holds to $h=20$ $\to$ weekly/monthly feasible.
 
-**Cluster exposure caps.** `apply_cluster_caps()`: caps each cluster's
-total absolute exposure at `max_cluster_multiple` times its equal share,
-default 2.0, a stated, non-data-derived convention, no parameter-free
-version of "how concentrated is too concentrated" exists. **Verified
-behavior, not just asserted:** this caps a cluster's exposure relative to
-the *original* total gross, it does not redistribute freed-up capacity
-into other names or renormalize gross back to its prior level. A capped
-cluster's *share* of the final (now smaller) total can end up well above
-the nominal `max_cluster_multiple/n_clusters` fraction, tested directly:
-a cluster capped to an absolute 66.7% ended up at 93% of the shrunken
-total, correct arithmetic, unintuitive without knowing this. An iterative
-redistribution scheme would give the more intuitive "no cluster exceeds
-X% of the final portfolio" guarantee, not implemented, real added
-complexity, revisit once a backtest shows whether the simpler version is
-actually binding often enough to matter.
+### 4.4 Naive Long-Short Paper Sharpe
 
-**Vol targeting.** `apply_vol_target()`: scales weights uniformly so
-`sqrt(w' Sigma w) == target_vol`. Applied *after* cluster capping, on
-purpose, targeting the vol of the portfolio actually held, not a pre-cap
-one no longer in use. `Sigma` built from the RMT-cleaned correlation
-(Section 5.1), not raw, a covariance built from a noisy correlation
-matrix would reinherit exactly the spurious off-diagonal terms cleaning
-exists to remove.
+Pre-cost upper bound. Decile long-short, equal-weight, rebalanced daily:
+$$
+\text{Sharpe}_{\text{paper}} = \frac{\mathbb{E}[R_{\text{LS}}]}{\text{Std}[R_{\text{LS}}]} \times \sqrt{252}
+$$
+**Uses simple returns for cross-sectional aggregation** (log returns not additive across assets — see Section 12.1).
 
-**Scope boundary, explicit:** drawdown constraints are not implemented
-here. Vol targeting and cluster caps are cross-sectional, a function of
-one date's data. Drawdown constraints are path-dependent, a function of
-the realized trailing P&L sequence, they need the backtest loop's actual
-running state, not a single date's correlation matrix and scores. Belongs
-in the future backtest loop, a genuine scope boundary, not a gap here.
+### 4.5 Stability
+
+Day-over-day turnover proxy: $\frac{1}{T}\sum_t \|\mathbf{w}_t - \mathbf{w}_{t-1}\|_1$ where $\mathbf{w}_t$ = signal ranks.
 
 ---
 
-## 6. Evaluating a new signal: the fixed checklist
+## 5. False Discovery Rate Control
 
-Run in this order, every time, before a signal is trusted for anything
-downstream:
+Testing $m$ candidate signals $\to$ multiple testing problem. Fixed $\alpha = 0.05$ per test $\to$ false positives by construction.
 
-1. Build it with `make_signal()`.
-2. `signal_plots.one_pager()`, visual check: coverage, per-date mean/std,
-   ticker x date heatmap, sample ticker lines. Catches structural bugs
-   before anything else does.
-3. `report.signal_report()`, numeric check: IC mean/std/IR, Newey-West
-   corrected t-stat, hit rate, stability, naive long-short paper Sharpe.
-4. `IC/metrics.py`'s `ic_decay()`, how far out predictive power actually
-   holds, informs rebalance frequency.
-5. `report.compare_reports()` against other candidates, side by side.
-6. `fdr.py`'s `fdr_report()` across everything tested this round: BH, BY,
-   and q-value reported together, no single verdict picked automatically.
-7. Survivors move to the signal combiner.
+### 5.1 Benjamini-Hochberg (BH)
 
-(EDIT)
-Use `scripts/inspect_signal.py` to compare signals or inspect a unique signal.
-TODO: Add FDR report in `inspect_signal.py` when comparing signals, and IC_decay?
+Sort p-values: $p_{(1)} \le p_{(2)} \le \dots \le p_{(m)}$  
+Find max $k$: $p_{(k)} \le \alpha \cdot \frac{k}{m}$  
+Reject $H_0$ for $i \le k$. Valid under independence / PRDS.
 
-### 6.1 Log returns are not additive across assets, only across time
+### 5.2 Benjamini-Yekutieli (BY)
 
-`fwd_ret_col` is a log return throughout this project (`src/features/returns.py`), deliberately, since log returns
-*are* additive across time, exactly what makes the `rolling_sum()` multi-day horizon construction work. They are
-**not** additive across assets at a point in time: a basket's simple return is the weight-average of its
-constituents' simple returns, the same statement is false for log returns. `decile_longshort_returns()` and
-`get_decile_longshort_returns_DF()` (`src/evaluation/signals/performance.py`) were averaging `fwd_ret_col` directly
-within each basket, silently computing the wrong basket return, every `long_short_sharpe` reported anywhere in this
-project before this fix inherited that bias. Measured on a realistic 20-name basket with dispersed daily log returns:
-~10% relative error in the basket return for that single day, not negligible, and it compounds across every day in
-the series. Fixed by converting to simple return (`exp(x) - 1`) before the cross-sectional mean, aggregating across
-assets in simple-return space (where "equal-weight average across a basket" is actually valid P&L arithmetic), then
-combining the long and short legs (each already basket-level simple returns, a dollar-neutral `+1/-1` notional
-combination of simple returns is itself additive). Same consideration applies to the future backtest loop (Section
-5.3): aggregating weighted asset returns into a daily portfolio return must happen in simple-return space, not by
-summing `weight_i * logret_i` directly.
+Same mechanics, threshold divided by harmonic number:
+$$
+p_{(k)} \le \frac{\alpha \cdot k}{m \cdot H_m}, \quad H_m = \sum_{i=1}^m \frac{1}{i}
+$$
+Valid under **arbitrary dependence** (our case: correlated signals from overlapping history). ~3.6$\times$ more conservative than BH at $m=20$.
 
+### 5.3 Storey's q-value (Preferred)
 
+Flips the question: *If this p-value were the cutoff, what FDR would result?*
 
+1. Estimate $\pi_0$ = proportion of true nulls from p-value right tail:
+   $$
+   \hat{\pi}_0(\lambda) = \frac{\#\{p_i > \lambda\}}{m(1-\lambda)}, \quad \lambda \in \Lambda
+   $$
+   Cubic spline fit over fixed grid $\Lambda$, evaluate at $\lambda \to 1$.
 
-## References
+2. Compute q-values (backward pass, monotonic):
+   $$
+   q_{(i)} = \min\left(\hat{\pi}_0 \cdot m \cdot \frac{p_{(i)}}{i},\; q_{(i+1)}\right), \quad q_{(m)} = \hat{\pi}_0 \cdot p_{(m)}
+   $$
 
-Bailey, D. H., Borwein, J. M., López de Prado, M., & Zhu, Q. J. (2017).
-The probability of backtest overfitting. Journal of Computational
-Finance, 20(4), 39-69.
+**Advantages:**
+- No $\alpha$ needed to compute
+- More powerful when $\pi_0 < 1$ (real signals present)
+- Continuous weight for combiner, not hard gate
 
-Blondel, V. D., Guillaume, J.-L., Lambiotte, R., & Lefebvre, E. (2008).
-Fast unfolding of communities in large networks. Journal of Statistical
-Mechanics: Theory and Experiment, 2008(10), P10008.
+**Usage:** q-values feed into Elastic Net as continuous weights $(1 - q_j)$, not as survives/doesn't-survive filter.
 
-Fama, E. F., & MacBeth, J. D. (1973). Risk, return, and equilibrium:
-Empirical tests. Journal of Political Economy, 81(3), 607-636.
+---
 
-Friedman, J. H. (2001). Greedy function approximation: A gradient
-boosting machine. Annals of Statistics, 29(5), 1189-1232.
+## 6. Validation: Leakage-Safe Cross-Validation
 
-Grinold, R. C., & Kahn, R. N. (2000). Active Portfolio Management (2nd
-ed.). McGraw-Hill.
+### 6.1 Purged Walk-Forward CV
 
-Harvey, C. R., Liu, Y., & Zhu, H. (2016). ...and the cross-section of
-expected returns. Review of Financial Studies, 29(1), 5-68.
+Train strictly before test. Purge = drop training rows whose labels overlap test period. Embargo = gap after test before next training starts.
 
-Jegadeesh, N. (1990). Evidence of predictable behavior of security
-returns. Journal of Finance, 45(3), 881-898.
+```
+Train ────────┐     ┌──────── Test ────────┐     ┌──── Next Train
+              └─Purge─┘                     └─Embargo─┘
+```
 
-Jegadeesh, N., & Titman, S. (1993). Returns to buying winners and selling
-losers: Implications for stock market efficiency. Journal of Finance,
-48(1), 65-91.
+**Embargo = Structural + Empirical:**
+- Structural: $h + 1$ days (forward label reaches $h+1$ days past test end)
+- Empirical: Largest lag with FDR-validated autocorrelation in market returns (currently 16 days, BY-corrected)
+- **Total embargo = 37 days for $h=20$** (sum convention, López de Prado 2018)
 
-Kritzman, M., & Li, Y. (2010). Skulls, financial turbulence, and risk
-management. Financial Analysts Journal, 66(5), 30-41.
+### 6.2 Combinatorial Purged CV (CPCV)
 
-Laloux, L., Cizeau, P., Bouchaud, J.-P., & Potters, M. (1999). Noise
-dressing of financial correlation matrices. Physical Review Letters,
-83(7), 1467.
+True K-fold: train can surround test chronologically $\to$ embargo needed for **single-fold validity** (not just cross-fold).
 
-Lo, A. W., & MacKinlay, A. C. (1990). An econometric analysis of
-non-synchronous trading. Journal of Econometrics, 45(1-2), 181-211.
+CPCV: Evaluate all $\binom{n_{\text{blocks}}}{n_{\text{test}}}$ combinations of held-out blocks. More folds, more robust against path-dependent overfitting.
 
-López de Prado, M. (2018). Advances in Financial Machine Learning. Wiley.
+### 6.3 Probability of Backtest Overfitting (PBO)
 
-Newey, W. K., & West, K. D. (1987). A simple, positive semi-definite,
-heteroskedasticity and autocorrelation consistent covariance matrix.
-Econometrica, 55(3), 703-708.
+Bailey et al. (2017): Given performance matrix across candidates, repeatedly split into IS/OOS halves. PBO = fraction where IS winner ranks below OOS median.
 
-Newey, W. K., & West, K. D. (1994). Automatic lag selection in covariance
-matrix estimation. Review of Economic Studies, 61(4), 631-653.
+**Used for:** GBM vs Elastic Net comparison (Section 8).
 
-Storey, J. D. (2002). A direct approach to false discovery rates. Journal
-of the Royal Statistical Society: Series B, 64(3), 479-498.
+---
 
-Zou, H. (2006). The adaptive lasso and its oracle properties. Journal of
-the American Statistical Association, 101(476), 1418-1429.
+## 7. Signal Combination
 
-Zou, H., & Hastie, T. (2005). Regularization and variable selection via
-the elastic net. Journal of the Royal Statistical Society: Series B,
-67(2), 301-320.
+### 7.1 Elastic Net Combiner (`src/models/elastic_net_combiner.py`)
+
+Pooled panel regression (not Fama-MacBeth):
+$$
+\min_{\beta} \frac{1}{2N}\|\mathbf{y} - \mathbf{X}\beta\|_2^2 + \lambda\left[\alpha\|\beta\|_1 + \frac{1-\alpha}{2}\|\beta\|_2^2\right]
+$$
+with **q-value column weighting**: $\mathbf{X}_j \leftarrow (1 - q_j)\mathbf{X}_j$
+
+**Why Elastic Net?**
+- Candidate signals correlated by construction (mom20/mom60/mom252 share history)
+- Pure Lasso: arbitrarily picks one from correlated group (unstable)
+- Pure Ridge: no sparsity, keeps noise
+- EN L1+L2: standard answer for correlated predictors (Zou & Hastie 2005)
+
+**Why pooled, not Fama-MacBeth?**
+- Fama-MacBeth = inference tool (time-series of cross-sectional $\beta$)
+- We need **predictive combination for deployment**
+- Single date: ~500 names, too thin for stable fit; pooled across fold: ~40,000 rows
+
+**Hyperparameter search:** CPCV-tuned $(\alpha, l1\_ratio)$ on identical folds for fair comparison.
+
+### 7.2 GBM Combiner (`src/models/gbm_combiner.py`)
+
+`HistGradientBoostingRegressor` — nonlinear counterpoint to EN.
+- If GBM outperforms $\to$ real interaction effects exist
+- If not $\to$ flexibility adds variance, PBO should reflect this (Friedman 2001)
+
+### 7.3 Missing Data Policy
+
+Current: **Drop row if any signal null** (all-or-nothing).  
+Cost: Long-lookback signals (mom252) disproportionately drop early/recent tickers.
+
+Alternative (planned): Cross-sectional median imputation. Since signals are normalized, median $\approx 0$ $\to$ "no conviction" on that signal for that ticker.
+
+---
+
+## 8. Model Comparison: GBM vs Elastic Net via PBO
+
+**Protocol (`scripts/compare_gbm_vs_en_pbo.py`):**
+1. Identical CPCV folds for both models (fairness)
+2. Hyperparameter search on CPCV
+3. Fixed, chosen models evaluated on **shared untouched holdout**
+4. Holdout split into contiguous sub-blocks for PBO matrix
+5. Compute PBO: fraction of splits where IS winner fails OOS
+
+**Sanity checks (passing):**
+- Synthetic linear: High PBO (no real difference to detect) ✓
+- Synthetic interaction: Low PBO (GBM genuinely better) ✓
+
+---
+
+## 9. Risk Model: Correlation & Covariance
+
+### 9.1 RMT Correlation Cleaning (`src/risk/correlation_cleaning.py`)
+
+Empirical correlation matrix $\mathbf{C}$ over $N$ assets, $T$ observations $\to$ mostly noise.
+
+**Marchenko-Pastur (MP) bounds:** For pure noise, eigenvalues lie in
+$$
+\lambda \in \left[(1 - \sqrt{q})^2,\; (1 + \sqrt{q})^2\right], \quad q = \frac{N}{T}
+$$
+
+**Cleaning:** Eigenvalues $\le \lambda_{\max} = (1 + \sqrt{q})^2$ replaced by their mean (preserves trace = $N$). Only eigenvalues $> \lambda_{\max}$ treated as genuine factor structure.
+
+**Why upper bound only:** Financial $\mathbf{C}$ is PSD by construction; MP lower bound can dip below 0 for large $q$ $\to$ not a real constraint.
+
+**Validated:** Synthetic 3-cluster panel (sizes 15/10/8 + 12 noise, $T=500$) $\to$ exactly 3 eigenvalues above $\lambda_{\max}$, gap between 3rd (3.39) and 4th (1.27, at noise boundary 1.69), trace preserved exactly (45.0 $\to$ 45.0).
+
+### 9.2 Louvain Community Detection (`src/risk/clustering.py`)
+
+Graph from **positive correlations only** (negative = diversification, not risk clustering). Edges: $w_{ij} = \max(C_{ij}, 0)$.
+
+Modularity maximization:
+$$
+Q = \frac{1}{2m}\sum_{ij} \left[A_{ij} - \frac{k_i k_j}{2m}\right]\delta(c_i, c_j)
+$$
+No $k$ to choose $\to$ number of clusters falls out automatically (no-free-parameters).
+
+**Validated:** Same synthetic panel $\to$ perfect recovery of 3 planted clusters on RMT-cleaned matrix.
+
+### 9.3 Covariance Estimation (`src/risk/covariance.py`)
+
+$\mathbf{\Sigma} = \mathbf{D}\mathbf{C}\mathbf{D}$ where $\mathbf{D} = \text{diag}(\sigma_i)$
+
+| Method | Description | Reference |
+|--------|-------------|-----------|
+| **Ledoit-Wolf (LW)** | Analytical shrinkage to identity/single-factor | Ledoit & Wolf (2004) |
+| **Oracle Approximating Shrinkage (OAS)** | Finite-sample optimal shrinkage | Ledoit & Wolf (2012) |
+| **Factor Model (PCA)** | Low-rank $\mathbf{B}\mathbf{B}'$ + diagonal residual | Bai & Ng (2002) for factor selection |
+
+---
+
+## 10. Portfolio Construction (`src/risk/portfolio_construction.py`)
+
+One cross-section at a time. Re-estimation frequency belongs to backtest loop.
+
+### 10.1 Score $\to$ Raw Weights
+
+| Method | Formula | Notes |
+|--------|---------|-------|
+| **Proportional** (default) | $w_i = \frac{s_i}{\sum_j |s_j|}$ | Dollar-neutral, gross-normalized, continuous |
+| **Inverse Volatility** | $w_i \propto \frac{s_i}{\sigma_i}$ | Risk-equalized signal tilt |
+| **Rank** | $w_i \propto \frac{\text{rank}(s_i)}{\sum_j |\text{rank}(s_j)|}$ | Robust to outliers |
+
+**Proportional preferred:** No bucket-count parameter, uses continuous magnitude. Tradeoff: likely higher turnover than decile buckets (not yet measured).
+
+### 10.2 Cluster Exposure Caps
+
+Cap each cluster's absolute exposure at $\text{max\_multiple} \times \text{equal\_share}$ (default 2.0).
+
+**Verified behavior:** Caps relative to *original* total gross, does **not** redistribute freed capacity. A capped cluster's share of the *shrunken* total can exceed nominal cap (e.g., capped to 66.7% $\to$ ends at 93% of final total). Iterative redistribution would give intuitive "no cluster exceeds X% of final portfolio" — not implemented, revisit if binding.
+
+### 10.3 Volatility Targeting
+
+Scale weights uniformly:
+$$
+\mathbf{w} \leftarrow \mathbf{w} \cdot \frac{\sigma_{\text{target}}}{\sqrt{\mathbf{w}'\mathbf{\Sigma}\mathbf{w}}}
+$$
+Applied **after** cluster capping (target vol of portfolio actually held). $\mathbf{\Sigma}$ built from **RMT-cleaned correlation**, not raw.
+
+### 10.4 Scope Boundary
+
+Drawdown constraints = path-dependent $\to$ belong in backtest loop, not here.
+
+---
+
+## 11. Transaction Costs (`src/portfolio/costs.py`)
+
+Realistic cost model for optimization and backtesting.
+
+### 11.1 Spread Cost
+
+Power-law in ADV (Bacry et al. 2015):
+$$
+\text{spread}_i = \text{spread}_{\text{ref}} \cdot \left(\frac{\text{ADV}_{\text{ref}}}{\text{ADV}_i}\right)^\beta, \quad \beta \approx 0.25
+$$
+Half-spread paid per trade (crossing spread).
+
+### 11.2 Commission
+
+Fixed per notional:
+$$
+\text{comm}_i = \text{commission\_bps} \cdot 10^{-4} \cdot |\Delta w_i| \cdot \text{NAV}
+$$
+
+### 11.3 Market Impact (Almgren-Chriss Square-Root)
+
+$$
+\text{impact}_i = \kappa \cdot \sigma_i \cdot \sqrt{\frac{|\Delta w_i| \cdot \text{NAV}}{\text{ADV}_i}}
+$$
+where $\kappa \approx 0.1$–$0.3$ (calibrated), $\sigma_i$ = daily volatility.
+
+### 11.4 Total Cost per Rebalance
+
+$$
+\text{Cost} = \sum_i \left(\frac{\text{spread}_i}{2} + \text{comm}_i + \text{impact}_i\right) \cdot |\Delta w_i| \cdot \text{NAV}
+$$
+
+---
+
+## 12. Optimization (`src/portfolio/optimization.py`)
+
+### 12.1 Hierarchical Risk Parity (HRP)
+
+López de Prado (2016). Uses correlation hierarchy (our Louvain clusters) for recursive bisection allocation. Solves Markowitz instability without ad-hoc constraints.
+
+### 12.2 Clustered Risk Parity
+
+Raffinot (2018). Equal risk contribution **within and across** Louvain clusters directly.
+
+### 12.3 Equal Risk Contribution (ERC)
+
+$RC_i = w_i (\mathbf{\Sigma}\mathbf{w})_i / (\mathbf{w}'\mathbf{\Sigma}\mathbf{w}) = 1/P$ for all $i$.
+
+### 12.4 Black-Litterman
+
+Market equilibrium prior + signal views:
+$$
+\mathbf{\mu}_{\text{BL}} = [(\tau\mathbf{\Sigma})^{-1} + \mathbf{P}'\mathbf{\Omega}^{-1}\mathbf{P}]^{-1}[(\tau\mathbf{\Sigma})^{-1}\mathbf{\Pi} + \mathbf{P}'\mathbf{\Omega}^{-1}\mathbf{Q}]
+$$
+Signal = views $\mathbf{Q}$, confidence $\mathbf{\Omega}$.
+
+### 12.5 Cost-Aware MVO
+
+Gârleanu & Pedersen (2013):
+$$
+\max_{\mathbf{w}} \mathbf{w}'\boldsymbol{\mu} - \frac{1}{2}\mathbf{w}'(\mathbf{\Sigma} + \mathbf{\Lambda})\mathbf{w} + \mathbf{w}'\mathbf{\Lambda}\mathbf{w}_{\text{prev}}
+$$
+where $\mathbf{\Lambda}$ = diagonal cost matrix from Section 11.
+
+---
+
+## 13. Backtest Engine (`src/portfolio/backtest.py`)
+
+### 13.1 Walk-Forward Loop
+
+For each rebalance date $t$:
+1. **Lookback window** $[t-W, t]$: Estimate $\mathbf{\Sigma}$, clusters, ADV, vol
+2. **Signal at close $t$** $\to$ construct weights
+3. **Execute at open $t+1$** (1-day execution lag)
+4. **Hold until next rebalance** $\to$ realize returns
+5. **Apply costs** based on weight change $\Delta \mathbf{w}$
+
+### 13.2 Key Realism Features
+
+- Execution lag: Signal at close $t$ $\to$ trade at open $t+1$
+- Costs deducted from gross returns $\to$ net returns
+- Vol targeting uses cleaned $\mathbf{\Sigma}$ at each rebalance
+- Turnover, costs, attribution tracked per period
+
+### 13.3 Performance Metrics
+
+| Metric | Formula |
+|--------|---------|
+| Net Sharpe | $\frac{\mathbb{E}[r_{\text{net}}]}{\text{Std}[r_{\text{net}}]}\sqrt{252}$ |
+| Gross Sharpe | Same, pre-cost returns |
+| Annual Return | $(1 + \text{mean daily})^{252} - 1$ |
+| Max Drawdown | $\max_{\tau} \frac{\text{peak}_\tau - \text{trough}_\tau}{\text{peak}_\tau}$ |
+| Hit Rate | $\frac{1}{T}\sum \mathbb{1}[r_t > 0]$ |
+| Cost Drag | $\text{Gross Sharpe} - \text{Net Sharpe}$ (annualized bps) |
+| Turnover | $\frac{1}{T}\sum_t \|\mathbf{w}_t - \mathbf{w}_{t-1}\|_1$ |
+
+---
+
+## 14. Known Limitations & What Doesn't Work
+
+| Area | Limitation | Impact | Mitigation |
+|------|------------|--------|------------|
+| **Survivorship Bias** | Today's S&P 500 applied retroactively | Upward bias in all returns/Sharpe | Scope decision; PIT list planned |
+| **Beta Proxy** | EW average over biased universe | Extreme pre-2003 betas | Min ticker guard + SPY index (planned) |
+| **Data Vendor** | yfinance unofficial | Retroactive Adj Close changes | Documented, not fixable free |
+| **Single Asset Class** | US equities daily only | No diversification benefit | Roadmap: futures, FX, crypto |
+| **No Fundamentals** | Price/volume only | Misses value/quality factors | Roadmap: earnings, book value |
+| **Pre-Cost Evaluation** | Signal IC/Sharpe = upper bound | Overstates tradability | Costs modeled only in final backtest |
+| **Test Coverage** | Not all functions tested | Reliance on notebook inspection | `tests/` expansion planned |
+| **Cluster Cap Redistribution** | No reallocation of capped capital | Final portfolio may be concentrated | Iterative scheme if binding |
+
+---
+
+## 15. Design Philosophy (No Free Parameters)
+
+| Decision | Principle | Alternative Rejected |
+|----------|-----------|---------------------|
+| Rank IC > Paper Sharpe | Harder to overfit | Backtest Sharpe (too many degrees of freedom) |
+| Rank transform | No clip bound to pick | zscore+clip (free parameter $c$) |
+| Louvain clustering | No $k$ to choose | k-means (free parameter $k$) |
+| NW lag = rule of thumb | Not tuned per signal | Cross-validated lag (overfits) |
+| Storey q-value > BH/BY | No $\alpha$ needed | Fixed $\alpha$ (free parameter) |
+| q-value as weight | Continuous, not binary | Hard filter (second free parameter) |
+| Pooled panel EN | Predictive, not inferential | Fama-MacBeth (inference tool) |
+
+---
+
+## 16. Key References
+
+| Area | Reference |
+|------|-----------|
+| **Backtest Overfitting / PBO** | Bailey, Borwein, López de Prado & Zhu (2017), *J. Comput. Finance* 20(4) |
+| **CPCV / Purged CV** | López de Prado (2018), *Advances in Financial ML*, Ch. 7, 12 |
+| **RMT / Marchenko-Pastur** | Laloux, Cizeau, Bouchaud, Potters (1999), *PRL* 83(7) |
+| **Louvain Clustering** | Blondel, Guillaume, Lambiotte, Lefebvre (2008), *J. Stat. Mech.* |
+| **HRP** | López de Prado (2016), *J. Portfolio Mgmt* 42(4) |
+| **Clustered Risk Parity** | Raffinot (2018), *SSRN* |
+| **Ledoit-Wolf Shrinkage** | Ledoit & Wolf (2004), *J. Multivariate Anal.* 88(2) |
+| **OAS** | Ledoit & Wolf (2012), *Ann. Statist.* 40(2) |
+| **Almgren-Chriss Impact** | Almgren & Chriss (2001), *J. Risk* 3(2) |
+| **Cost-Aware Optimization** | Gârleanu & Pedersen (2013), *J. Finance* 68(6) |
+| **Black-Litterman** | Black & Litterman (1992), *FAJ* 48(5) |
+| **FDR / q-value** | Storey (2002), *JRSS-B* 64(3); Benjamini & Yekutieli (2001) |
+| **Newey-West** | Newey & West (1987, 1994), *Econometrica* / *Rev. Econ. Stud.* |
+| **Elastic Net** | Zou & Hastie (2005), *JRSS-B* 67(2) |
+| **Adaptive Lasso** | Zou (2006), *JASA* 101(476) |
+
+---
+
+## 17. Reproducibility
+
+```bash
+# Full pipeline
+python scripts/pipeline/01_download_data.py
+python scripts/pipeline/02_etl_prices.py
+python scripts/pipeline/03_build_features.py
+# Inspect signals via notebooks/inspect_signal.ipynb
+python scripts/pipeline/04_build_portfolio.py  # Combines signals, builds portfolio, backtests
+```
+
+All randomness seeded. Configuration via environment variables (see `04_build_portfolio.py`).
+
+---
+
+*End of Methodology*

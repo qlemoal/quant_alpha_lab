@@ -1,6 +1,4 @@
 '''
-src/portfolio/backtest.py
-
 Walk-forward backtest loop with performance attribution.
 
 ================================================================================
