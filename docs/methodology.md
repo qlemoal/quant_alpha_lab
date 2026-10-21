@@ -337,7 +337,7 @@ One cross-section at a time. Re-estimation frequency belongs to backtest loop.
 
 ### 10.2 Cluster Exposure Caps
 
-Cap each cluster's absolute exposure at $\text{max\_multiple} \times \text{equal\_share}$ (default 2.0).
+Cap each cluster's absolute exposure at $\text{max multiple} \times \text{equal share}$ (default 2.0).
 
 **Verified behavior:** Caps relative to *original* total gross, does **not** redistribute freed capacity. A capped cluster's share of the *shrunken* total can exceed nominal cap (e.g., capped to 66.7% $\to$ ends at 93% of final total). Iterative redistribution would give intuitive "no cluster exceeds X% of final portfolio" — not implemented, revisit if binding.
 
@@ -516,7 +516,3 @@ python scripts/pipeline/04_build_portfolio.py  # Combines signals, builds portfo
 ```
 
 All randomness seeded. Configuration via environment variables (see `04_build_portfolio.py`).
-
----
-
-*End of Methodology*
