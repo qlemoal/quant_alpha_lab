@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 '''
+===============================================
 Phase 0: Generate Elastic Net Combined Scores
 ===============================================
 
@@ -25,9 +26,9 @@ import os
 import sys
 from pathlib import Path
 
-# Add src to path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+# # Add src to path
+# PROJECT_ROOT = Path(__file__).parent.parent.parent
+# sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.models.elastic_net_combiner import fit_elastic_net_combiner
 from src.evaluation.signals.fdr import fdr_report
@@ -39,6 +40,7 @@ import polars as pl
 # =============================================================================
 
 # Input
+FEATURES_FILE = 'data/processed/features.parquet'
 FEATURES_FILE = PROJECT_ROOT / 'data' / 'processed' / 'features.parquet'
 SIGNALS_FILE = PROJECT_ROOT / 'data' / 'processed' / 'signals.parquet'  # from make_signal()
 PRICES_FILE = PROJECT_ROOT / 'data' / 'processed' / 'prices.parquet'

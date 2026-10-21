@@ -1,0 +1,29 @@
+# Research Findings
+
+Dated, append-only. Each entry: what was tested, what was found, FDR status, robustness check. 
+Cross-reference config/commit where useful for reproducibility.
+
+
+## 2026-08-20: Momentum/reversal dead zone in `mom` across horizons
+
+The momentum/reversal dead zone. Testing `mom` across horizons (5, 10, 20, 60, 120, 252 days) surfaces two distinct, literature-consistent effects rather than one smooth signal. 
+    - Short horizons (5, 10, 20 days) show significant negative IC, short-term reversal, consistent with Jegadeesh (1990). 
+    - The long horizon (252 days) shows significant positive IC, medium-term momentum, consistent with Jegadeesh & Titman (1993). 
+    - Between them, roughly 60-120 days, IC is weak and doesn't survive BY correction. 
+This is a real structural feature of the data, not a bug: reversal and momentum are documented as separate phenomena with different (in fact opposite-signed) economic mechanisms, a dead zone between them is exactly what the literature would predict, not an artifact to explain away. Confirmed independently via `long_short_sharpe` sign consistency across the two regimes, not just the IC sign alone.
+
+## 2026-09-02: Isolated autocorrelation at lags ~15-16 and ~32 in market returns** 
+
+Beyond the expected lag-1 reversal, lag-wise autocorrelation testing (FDR-corrected, `alpha=0.05`, BY) found two further isolated significant lags, disconnected from any contiguous decay from the origin. Not used for embargo sizing (see `methodology.md`), but worth investigating on their own, plausible candidates: biweekly/monthly rebalancing flows, options-expiration-adjacent effects, not yet checked against an actual calendar. Open question, no conclusion yet.
+
+About the 1-lag autocorrelation: The leading explanation in the literature is nonsynchronous trading, sometimes called the Fisher effect after Lawrence Fisher's original 1966 observation. Not every stock in your panel trades right up to the close, some print their last trade a few minutes (or, for smaller/less liquid names, longer) before the actual close. When you average returns across many such stocks, today's cross-sectional average partly reflects information that some constituents hadn't fully incorporated yet, that gets included instead in tomorrow's average. This mechanically induces positive autocorrelation in a diversified portfolio's returns even when no individual stock shows meaningful predictability. Lo & MacKinlay's An Econometric Analysis of Nonsynchronous Trading (Journal of Econometrics, 1990) formalized this. A related, compounding effect: information genuinely diffuses across stocks at different speeds, large, heavily-covered names react to news faster than smaller ones, so a systematic move can partly "continue" the next day as slower-reacting names catch up.
+
+## 2026-09-10: GBM vs. Elastic Net, PBO comparison
+
+Two synthetic sanity checks before trusting this on real signals, deliberately designed to test both directions:
+
+**Linear relationship** (`scripts/compare_gbm_vs_en_pbo.py`): `fwdret = 0.8*good_signal + noise`, no structure for GBM to exploit beyond what Elastic Net already captures. Result: `PBO=0.629`, correctly high, the two candidates trade holdout-block wins back and forth (`EN` and `GBM` per-block Sharpes interleave with no consistent pattern), matching the fact there's no real reason to prefer one here.
+
+**Sign-flip interaction** (`scripts/compare_gbm_vs_en_pbo.py`): `fwdret = 1.2*signal_a*sign(signal_b) + noise`, a structure with exactly zero marginal linear correlation, a linear model cannot see it at all, by construction, not just in practice. Result: EN's coefficients correctly collapse to ~0 (doesn't manufacture fake structure from noise it can't use), holdout long-short Sharpe `0.72` (noise-level). GBM discovers the interaction directly via tree splits, holdout Sharpe `38.28`. `PBO=0.000`, GBM wins all 70 IS/OOS splits, full confidence.
+
+Together: PBO isn't defaulting to any particular answer regardless of input, it swings from "no real difference, don't trust either preference" to "full confidence, real and robust difference" depending on what's actually true in the data. Worth rerunning both checks once real signals and a real GBM/EN comparison exist, as a way of re-confirming the tool still behaves correctly before trusting its verdict on something that actually matters.
