@@ -1,238 +1,173 @@
-#!/usr/bin/env python
-'''
-Inspect Intermediate Results
-=============================
 
-Quick inspection scripts for each phase's outputs.
-Run after each phase to verify results before proceeding.
+'''
+===============================================
+Inspect Pipeline Outputs
+===============================================
+
+Quick look at any phase output.
 
 Usage:
-  python scripts/pipeline/04_inspect.py --phase 1  # Inspect risk model
-  python scripts/pipeline/04_inspect.py --phase 2  # Inspect weights
-  python scripts/pipeline/04_inspect.py --phase 3  # Inspect backtest
-  python scripts/pipeline/04_inspect.py --all      # Inspect all
+  python scripts/pipeline/04_inspect.py --phase signals --tag default
+  python scripts/pipeline/04_inspect.py --phase eval --tag default
+  python scripts/pipeline/04_inspect.py --phase risk --tag default
+  python scripts/pipeline/04_inspect.py --phase weights --tag default
+  python scripts/pipeline/04_inspect.py --phase backtest --tag default
+  python scripts/pipeline/04_inspect.py --all --tag default
 '''
 
 import argparse
+from pathlib import Path
 import polars as pl
 import numpy as np
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-EXPORTS_DIR = PROJECT_ROOT / 'data' / 'exports'
-RISK_DIR = EXPORTS_DIR / 'risk_model'
 
 
-def inspect_phase1():
-    '''Inspect risk model outputs'''
-    print('=' * 70)
-    print('PHASE 1 INSPECTION: Risk Model')
-    print('=' * 70)
+def inspect_signals(tag):
+    f = Path(f'data/processed/signals_{tag}.parquet')
+    if not f.exists(): return print(f'Not found: {f}')
+    df = pl.read_parquet(f)
+    print(f'\n=== SIGNALS ({tag}) ===')
+    print(f'Rows: {len(df):,}, Cols: {len(df.columns)}')
+    print(f'Date range: {df["date"].min()} to {df["date"].max()}')
+    sig_cols = [c for c in df.columns if c not in {'date', 'ticker'} and not c.startswith('fwd_ret')]
+    fwd_cols = [c for c in df.columns if c.startswith('fwd_ret')]
+    print(f'Signals: {sig_cols}')
+    print(f'Forward returns: {fwd_cols}')
 
-    # Cluster summary
-    summary_file = RISK_DIR / 'cluster_summary.json'
-    if summary_file.exists():
+
+def inspect_eval(tag):
+    d = Path(f'data/exports/signal_eval_{tag}')
+    if not d.exists(): return print(f'Not found: {d}')
+
+    # IC summary
+    ic_f = d / 'ic_summary.parquet'
+    if ic_f.exists():
+        df = pl.read_parquet(ic_f)
+        print(f'\n=== IC SUMMARY ({tag}) ===')
+        print(df.sort('ir', descending=True).head(15).to_string())
+
+    # FDR
+    fdr_f = d / 'fdr_report.parquet'
+    if fdr_f.exists():
+        df = pl.read_parquet(fdr_f)
+        print(f'\n=== FDR ({tag}) ===')
+        print(f'BH: {df["survives_bh"].sum()}, BY: {df["survives_by"].sum()}, q-value: {df["survives_q"].sum()}')
+        print(df.filter(pl.col('survives_q')).select(['signal', 'p_value', 'q_value']).to_string())
+
+    # Selected
+    sel_f = d / 'selected_signals.json'
+    if sel_f.exists():
         import json
-        with open(summary_file) as f:
-            summaries = json.load(f)
-        print(f'\nCluster Summary: {len(summaries)} rebalance dates')
-        print(f'Date range: {summaries[0]["date"]} to {summaries[-1]["date"]}')
+        with open(sel_f) as f:
+            print(f'\n=== SELECTED FOR COMBINER ===')
+            print(json.load(f)['signals'])
 
-        # Stats
-        n_clusters = [s['n_clusters'] for s in summaries]
-        n_tickers = [s['n_tickers'] for s in summaries]
-        print(f'Avg tickers: {np.mean(n_tickers):.0f} (min={min(n_tickers)}, max={max(n_tickers)})')
-        print(f'Avg clusters: {np.mean(n_clusters):.1f} (min={min(n_clusters)}, max={max(n_clusters)})')
 
-        # Show last few
-        print('\nLast 5 rebalances:')
-        for s in summaries[-5:]:
-            print(f'  {s["date"]}: {s["n_tickers"]} tickers, {s["n_clusters"]} clusters, '
-                  f'q={s["q_ratio"]:.3f}, λ_max={s["lambda_max"]:.3f}')
-            print(f'    Sizes: {s["cluster_sizes"]}')
-    else:
-        print('  cluster_summary.json not found')
+def inspect_risk(tag):
+    d = Path(f'data/exports/risk_model_{tag}')
+    if not d.exists(): return print(f'Not found: {d}')
+
+    # Summary
+    sum_f = d / 'summary.json'
+    if sum_f.exists():
+        import json
+        with open(sum_f) as f:
+            s = json.load(f)
+        print(f'\n=== RISK MODEL ({tag}) ===')
+        print(f'Rebalances: {len(s)}')
+        print(f'Date range: {s[0]["date"]} to {s[-1]["date"]}')
+        n_cl = [x['n_clusters'] for x in s]
+        n_tk = [x['n_tickers'] for x in s]
+        print(f'Avg tickers: {np.mean(n_tk):.0f}, Avg clusters: {np.mean(n_cl):.1f}')
+        print(f'Last: {s[-1]["date"]} - {s[-1]["n_tickers"]} tickers, {s[-1]["n_clusters"]} clusters, sizes: {s[-1]["cluster_sizes"]}')
 
     # Eigenvalues
-    eigen_file = RISK_DIR / 'eigenvalues.parquet'
-    if eigen_file.exists():
-        df = pl.read_parquet(eigen_file)
-        print(f'\nEigenvalues: {len(df):,} records, {df["date"].n_unique()} dates')
-
-        # Last date eigenvalues
-        last_date = df['date'].max()
-        last_eigs = df.filter(pl.col('date') == last_date).sort('component')
-        print(f'\nLast date ({last_date}) eigenvalues (top 10):')
-        for row in last_eigs.head(10).iter_rows(named=True):
-            print(f'  Component {row["component"]:2d}: {row["eigenvalue"]:.4f}')
-    else:
-        print('  eigenvalues.parquet not found')
-
-    # Correlation matrices (sample)
-    corr_file = RISK_DIR / 'correlation_clean.parquet'
-    if corr_file.exists():
-        df = pl.read_parquet(corr_file)
-        print(f'\nCleaned correlation: {len(df):,} records, {df["date"].n_unique()} dates')
-
-        # Sample: diagonal and off-diagonal stats for last date
-        last_date = df['date'].max()
-        last_corr = df.filter(pl.col('date') == last_date)
-        diag = last_corr.filter(pl.col('ticker_i') == pl.col('ticker_j'))['corr']
-        offdiag = last_corr.filter(pl.col('ticker_i') != pl.col('ticker_j'))['corr']
-        print(f'  {last_date}: diag mean={diag.mean():.4f}, off-diag mean={offdiag.mean():.4f}, '
-              f'off-diag std={offdiag.std():.4f}, range=[{offdiag.min():.4f}, {offdiag.max():.4f}]')
-    else:
-        print('  correlation_clean.parquet not found')
-
-    # Covariance
-    cov_file = RISK_DIR / 'covariance.parquet'
-    if cov_file.exists():
-        df = pl.read_parquet(cov_file)
-        print(f'\nCovariance: {len(df):,} records, {df["date"].n_unique()} dates')
-    else:
-        print('  covariance.parquet not found')
-
-    # Clusters
-    clus_file = RISK_DIR / 'clusters.parquet'
-    if clus_file.exists():
-        df = pl.read_parquet(clus_file)
-        print(f'\nClusters: {len(df):,} records, {df["date"].n_unique()} dates')
-
-        # Last date cluster distribution
-        last_date = df['date'].max()
-        last_clus = df.filter(pl.col('date') == last_date)
-        print(f'  {last_date}: {last_clus["cluster_id"].n_unique()} clusters')
-        dist = last_clus.group_by('cluster_id').len().sort('cluster_id')
-        print(f'  Distribution: {dict(zip(dist["cluster_id"].to_list(), dist["len"].to_list()))}')
-    else:
-        print('  clusters.parquet not found')
+    eig_f = d / 'eigenvalues.parquet'
+    if eig_f.exists():
+        df = pl.read_parquet(eig_f)
+        last = df['date'].max()
+        last_eigs = df.filter(pl.col('date') == last).sort('component')
+        print(f'\nEigenvalues ({last}):')
+        for r in last_eigs.head(10).iter_rows(named=True):
+            print(f'  PC{r["component"]:2d}: {r["eigenvalue"]:.4f}')
 
 
-def inspect_phase2():
-    '''Inspect portfolio weights'''
-    print('=' * 70)
-    print('PHASE 2 INSPECTION: Portfolio Weights')
-    print('=' * 70)
+def inspect_weights(tag):
+    f = Path(f'data/exports/weights_{tag}.parquet')
+    if not f.exists(): return print(f'Not found: {f}')
+    df = pl.read_parquet(f)
+    print(f'\n=== WEIGHTS ({tag}) ===')
+    print(f'Rows: {len(df):,}, Dates: {df["date"].n_unique()}')
 
-    weights_file = EXPORTS_DIR / 'weights_pre_backtest.parquet'
-    diag_file = EXPORTS_DIR / 'weights_diagnostics.parquet'
+    # Gross exposure over time
+    gross = df.group_by('date').agg(
+        pl.sum(pl.col('weight').abs()).alias('gross'),
+        pl.sum(pl.col('weight') > 0).alias('long'),
+        pl.sum(pl.col('weight') < 0).alias('short'),
+    ).sort('date')
+    print(f'Avg gross: {gross["gross"].mean():.4f} (std {gross["gross"].std():.4f})')
+    print(f'Last 5:')
+    for r in gross.tail(5).iter_rows(named=True):
+        print(f'  {r["date"]}: gross={r["gross"]:.4f}, L={r["long"]}, S={r["short"]}')
 
-    if weights_file.exists():
-        df = pl.read_parquet(weights_file)
-        print(f'\nWeights: {len(df):,} records, {df["date"].n_unique()} dates, {df["ticker"].n_unique()} tickers')
-
-        # Gross exposure over time
-        gross = df.group_by('date').agg(
-            pl.sum(pl.col('weight').abs()).alias('gross'),
-            pl.sum(pl.col('weight') > 0).alias('n_long'),
-            pl.sum(pl.col('weight') < 0).alias('n_short'),
-        ).sort('date')
-
-        print(f'\nGross exposure stats:')
-        print(f'  Mean: {gross["gross"].mean():.4f}')
-        print(f'  Std:  {gross["gross"].std():.4f}')
-        print(f'  Min:  {gross["gross"].min():.4f}')
-        print(f'  Max:  {gross["gross"].max():.4f}')
-
-        print(f'\nLast 10 rebalances:')
-        for row in gross.tail(10).iter_rows(named=True):
-            print(f'  {row["date"]}: gross={row["gross"]:.4f}, long={row["n_long"]}, short={row["n_short"]}')
-
-        # Cluster exposure
-        print(f'\nCluster exposure (last date):')
-        last_date = df['date'].max()
-        last = df.filter(pl.col('date') == last_date)
-        clus_exp = last.group_by('cluster_id').agg(
-            pl.sum(pl.col('weight').abs()).alias('gross'),
-            pl.count().alias('n_names'),
-        ).sort('cluster_id')
-        for row in clus_exp.iter_rows(named=True):
-            print(f'  Cluster {row["cluster_id"]}: {row["n_names"]} names, gross={row["gross"]:.4f}')
-
-        # Weight stats
-        print(f'\nWeight statistics (all dates):')
-        w = df['weight']
-        print(f'  Mean: {w.mean():.6f}, Std: {w.std():.6f}')
-        print(f'  Min: {w.min():.6f}, Max: {w.max():.6f}')
-        print(f'  Non-zero: {(w.abs() > 1e-6).sum()} / {len(w)} ({(w.abs() > 1e-6).mean():.1%})')
-
-    else:
-        print('  weights_pre_backtest.parquet not found')
-
-    if diag_file.exists():
-        df = pl.read_parquet(diag_file)
-        print(f'\nDiagnostics: {len(df)} records')
-        print(f'  Avg max cluster exposure: {df["max_cluster_exposure"].mean():.2%}')
-        print(f'  Max cluster exposure:     {df["max_cluster_exposure"].max():.2%}')
-    else:
-        print('  weights_diagnostics.parquet not found')
+    # Cluster exposure (last date)
+    last = df['date'].max()
+    last_df = df.filter(pl.col('date') == last)
+    clus = last_df.group_by('cluster_id').agg(
+        pl.sum(pl.col('weight').abs()).alias('gross'),
+        pl.count().alias('n'),
+    ).sort('cluster_id')
+    print(f'\nCluster exposure ({last}):')
+    for r in clus.iter_rows(named=True):
+        print(f'  Cluster {r["cluster_id"]}: {r["n"]} names, gross={r["gross"]:.4f}')
 
 
-def inspect_phase3():
-    '''Inspect backtest results'''
-    print('=' * 70)
-    print('PHASE 3 INSPECTION: Backtest Results')
-    print('=' * 70)
+def inspect_backtest(tag):
+    d = Path(f'data/exports/backtest_{tag}')
+    if not d.exists(): return print(f'Not found: {d}')
 
-    metrics_file = EXPORTS_DIR / 'metrics.json'
-    returns_file = EXPORTS_DIR / 'returns.parquet'
-    weights_file = EXPORTS_DIR / 'weights.parquet'
-
-    if metrics_file.exists():
+    met_f = d / 'metrics.json'
+    if met_f.exists():
         import json
-        with open(metrics_file) as f:
-            metrics = json.load(f)
-        print('\nMetrics:')
-        for k, v in metrics.items():
-            if isinstance(v, float):
-                print(f'  {k}: {v:.4f}')
-            else:
-                print(f'  {k}: {v}')
+        with open(met_f) as f:
+            m = json.load(f)
+        print(f'\n=== BACKTEST METRICS ({tag}) ===')
+        for k, v in m.items():
+            print(f'  {k}: {v:.4f}' if isinstance(v, float) else f'  {k}: {v}')
 
-    if returns_file.exists():
-        df = pl.read_parquet(returns_file)
-        print(f'\nReturns: {len(df):,} daily records')
-        print(f'  Date range: {df["date"].min()} to {df["date"].max()}')
-
+    ret_f = d / 'returns.parquet'
+    if ret_f.exists():
+        df = pl.read_parquet(ret_f)
+        print(f'\nReturns: {len(df):,} days')
         if 'net_return' in df.columns:
             net = df['net_return']
-            gross = df.get_column('gross_return') if 'gross_return' in df.columns else None
-            cost = df.get_column('cost') if 'cost' in df.columns else None
-
-            print(f'\nReturn stats (daily):')
-            print(f'  Net:   mean={net.mean():.6f}, std={net.std():.6f}, Sharpe={net.mean()/net.std()*np.sqrt(252):.3f}')
-            if gross is not None:
-                print(f'  Gross: mean={gross.mean():.6f}, std={gross.std():.6f}, Sharpe={gross.mean()/gross.std()*np.sqrt(252):.3f}')
-            if cost is not None:
-                print(f'  Cost:  mean={cost.mean():.6f}, total={cost.sum():.2f}')
-
-    if weights_file.exists():
-        df = pl.read_parquet(weights_file)
-        print(f'\nFinal weights: {len(df):,} records, {df["date"].n_unique()} dates')
-
-        # Turnover
-        turnover = df.group_by('date').agg(
-            pl.sum(pl.col('weight').abs()).alias('gross'),
-        ).sort('date')
-        print(f'  Avg gross: {turnover["gross"].mean():.4f}')
+            print(f'  Net: mean={net.mean():.6f}, std={net.std():.6f}, Sharpe={net.mean()/net.std()*np.sqrt(252):.3f}')
+        if 'gross_return' in df.columns:
+            gross = df['gross_return']
+            print(f'  Gross: mean={gross.mean():.6f}, std={gross.std():.6f}, Sharpe={gross.mean()/gross.std()*np.sqrt(252):.3f}')
+        if 'cost' in df.columns:
+            cost = df['cost']
+            print(f'  Cost: total={cost.sum():.2f}, mean={cost.mean():.6f}')
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Inspect pipeline intermediate results')
-    parser.add_argument('--phase', type=int, choices=[1, 2, 3], help='Phase to inspect')
-    parser.add_argument('--all', action='store_true', help='Inspect all phases')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--phase', choices=['signals', 'eval', 'risk', 'weights', 'backtest', 'all'])
+    parser.add_argument('--tag', type=str, default='default')
+    parser.add_argument('--all', action='store_true')
     args = parser.parse_args()
 
-    if args.all or args.phase == 1:
-        inspect_phase1()
+    if args.all or args.phase == 'signals':
+        inspect_signals(args.tag)
+    if args.all or args.phase == 'eval':
+        inspect_eval(args.tag)
+    if args.all or args.phase == 'risk':
+        inspect_risk(args.tag)
+    if args.all or args.phase == 'weights':
+        inspect_weights(args.tag)
+    if args.all or args.phase == 'backtest':
+        inspect_backtest(args.tag)
 
-    if args.all or args.phase == 2:
-        inspect_phase2()
-
-    if args.all or args.phase == 3:
-        inspect_phase3()
-
-    if not args.all and args.phase is None:
+    if not args.phase and not args.all:
         parser.print_help()
 
 
