@@ -13,14 +13,14 @@ dependencies=[
     #     to make sure this file is well written before running pip install -e .
     # Note: it will create the *.egg-info/ file, which is needed then for pip and python to recognize my editable package. Added to .gitignore though.
     "matplotlib==3.11.1",
-    "networkx==3.6.1",
-    "numpy==2.5.2",
-    "pandas==3.0.5",
+    "networkx==3.2.1",
+    "numpy==2.0.2",
+    "pandas==2.2.3",
     "polars==1.43.1",
-    "pytest==9.1.1",
-    "scikit-learn==1.7.2",
-    "scipy==1.18.0",
-    "Requests==2.34.2",
+    "pytest==8.4.2",
+    "scikit-learn==1.6.1",
+    "scipy==1.13.1",
+    "requests==2.32.4",
     "tqdm==4.70.0",
     "yfinance==1.5.2",
 ]

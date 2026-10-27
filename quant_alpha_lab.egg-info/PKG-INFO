@@ -2,3 +2,14 @@ Metadata-Version: 2.4
 Name: quant-alpha-lab
 Version: 0.1.0
 Requires-Python: >=3.11
+Requires-Dist: matplotlib==3.11.1
+Requires-Dist: networkx==3.2.1
+Requires-Dist: numpy==2.0.2
+Requires-Dist: pandas==2.2.3
+Requires-Dist: polars==1.43.1
+Requires-Dist: pytest==8.4.2
+Requires-Dist: scikit-learn==1.6.1
+Requires-Dist: scipy==1.13.1
+Requires-Dist: requests==2.32.4
+Requires-Dist: tqdm==4.70.0
+Requires-Dist: yfinance==1.5.2
