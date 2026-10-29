@@ -25,3 +25,5 @@ data/processed/
 *.egg-info/
 
 CLAUDE.md
+
+tmp/
