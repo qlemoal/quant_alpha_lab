@@ -12,7 +12,7 @@ Inputs:
   data/processed/signals/{run_id}/config.json
 
 Outputs:
-  data/exports/signal_eval_{run_id}/
+  data/exports/signal_eval/{run_id}/
     ├── ic_summary.parquet      # Per-signal IC stats
     ├── ic_decay.parquet        # IC vs horizon
     ├── fdr_report.parquet      # BH, BY, q-value per signal
@@ -20,8 +20,8 @@ Outputs:
     └── selected_signals.json   # List of signals passing FDR (for combiner)
 
 Usage:
-  python scripts/pipeline/04b_evaluate_signals.py --signal-dir data/processed/signals/2026-10-29_default
-  python scripts/pipeline/04b_evaluate_signals.py --signal-dir data/processed/signals/2026-10-29_default --horizon 20 --alpha 0.2
+  python scripts/pipeline/04b_evaluate_signals.py --signal_dir data/processed/signals/2026-10-29_default
+  python scripts/pipeline/04b_evaluate_signals.py --signal_dir data/processed/signals/2026-10-29_default --horizon 20 --alpha 0.2
 '''
 
 import argparse
@@ -30,12 +30,13 @@ from pathlib import Path
 import polars as pl
 import numpy as np
 
-from src.evaluation.signals.ic.core import compute_ic, summarize_ic, ic_decay
+from src.evaluation.signals.ic.core import compute_ic, summarize_ic
+from src.evaluation.signals.ic.metrics import ic_decay
 from src.evaluation.signals.ic.metrics import newey_west_ic_tstat
 from src.evaluation.signals.fdr import fdr_report
 
 
-def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ic_ir: float = 0.0):
+def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0):
     signal_dir = Path(signal_dir)
     if not signal_dir.exists():
         raise FileNotFoundError(f'Signal directory not found: {signal_dir}')
@@ -53,13 +54,13 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ic_ir: floa
     run_id = signal_dir.name  # e.g., "2026-10-29_default"
     signal_tag = config.get('signal_tag', 'unknown')
 
-    OUTPUT_DIR = Path(f'data/exports/signal_eval_{run_id}')
+    OUTPUT_DIR = Path(f'data/exports/signal_eval/{run_id}')
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     FWD_RET_COL = f'fwdret{horizon}'
 
     print('=' * 70)
-    print('PHASE 0b: EVALUATE SIGNALS')
+    print('PHASE 04b: EVALUATE SIGNALS')
     print('=' * 70)
     print(f'Run ID:        {run_id}')
     print(f'Signal tag:    {signal_tag}')
@@ -67,7 +68,7 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ic_ir: floa
     print(f'Output dir:    {OUTPUT_DIR}')
     print(f'FWD_RET_COL:   {FWD_RET_COL}')
     print(f'FDR alpha:     {alpha}')
-    print(f'Min IC IR:     {min_ic_ir}')
+    print(f'Min IC IR:     {min_ir}')
     print('=' * 70)
 
     # Load signals
@@ -93,7 +94,11 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ic_ir: floa
     for col in signal_cols:
         ic_series = compute_ic(df.lazy(), col, FWD_RET_COL)
         summary = summarize_ic(ic_series)
-        nw_tstat = newey_west_ic_tstat(ic_series)
+        # Extract IC values for Newey-West (collect LazyFrame and get 'ic' column)
+        ic_df = ic_series.collect()
+        ic_values = ic_df['ic'].to_numpy()
+        nw_result = newey_west_ic_tstat(ic_values)
+        nw_tstat = nw_result.get('t_stat')
 
         ic_results.append({
             'signal': col,
@@ -101,7 +106,7 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ic_ir: floa
             'std_ic': summary['std'],
             'ir': summary['ir'],
             'hit_rate': summary['hit_rate'],
-            'n_obs': summary['n'],
+            'n_obs': summary['n_days'],
             'nw_tstat': nw_tstat,
         })
 
@@ -115,15 +120,18 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ic_ir: floa
     # --- IC Decay ---
     print('\n[3/5] Computing IC decay...')
     decay_horizons = [1, 5, 10, 20, 60]  # Extended horizons
-    decay_cols = [f'fwdret{h}' for h in decay_horizons if f'fwdret{h}' in df.columns]
+    # Filter to only horizons that exist in the data
+    available_horizons = [h for h in decay_horizons if f'fwdret{h}' in df.columns]
     decay_results = []
     for col in signal_cols:
-        decay = ic_decay(df.lazy(), col, decay_cols)
-        decay_results.append({'signal': col, **decay})
+        decay_df = ic_decay(df.lazy(), col, available_horizons)
+        # Add signal column to decay DataFrame
+        decay_df = decay_df.with_columns(pl.lit(col).alias('signal'))
+        decay_results.append(decay_df)
 
-    decay_df = pl.DataFrame(decay_results)
+    decay_df = pl.concat(decay_results)
     decay_df.write_parquet(OUTPUT_DIR / 'ic_decay.parquet')
-    print(f'  Decay computed for {len(signal_cols)} signals across {len(decay_cols)} horizons')
+    print(f'  Decay computed for {len(signal_cols)} signals across {len(available_horizons)} horizons')
 
     # --- FDR ---
     print('\n[4/5] Computing FDR...')
@@ -132,22 +140,28 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ic_ir: floa
     # Two-sided p-value from t-stat approximation
     ic_df_pd['p_value'] = 2 * (1 - stats.norm.cdf(abs(ic_df_pd['ir'] * (ic_df_pd['n_obs'] ** 0.5))))
 
-    fdr_df = fdr_report(ic_df_pd, pval_col='p_value', alpha=alpha)
-    fdr_pl = pl.from_pandas(fdr_df)
+    fdr_df = fdr_report(
+        signal_names=ic_df_pd['signal'].tolist(),
+        tstats=ic_df_pd['ir'].tolist(),
+        pvalues=ic_df_pd['p_value'].tolist(),
+        alpha=alpha
+    )
+    fdr_pl = fdr_df  # fdr_report already returns polars DataFrame
     fdr_pl.write_parquet(OUTPUT_DIR / 'fdr_report.parquet')
 
     n_bh = int(fdr_pl['survives_bh'].sum())
     n_by = int(fdr_pl['survives_by'].sum())
-    n_q = int(fdr_pl['survives_q'].sum())
+    # fdr_report returns 'qvalue' column, not 'survives_q'
+    n_q = int((fdr_pl['qvalue'] < alpha).sum())
     print(f'  BH survivors:     {n_bh:3d} / {len(fdr_pl)}')
     print(f'  BY survivors:     {n_by:3d} / {len(fdr_pl)}')
     print(f'  q-value survivors: {n_q:3d} / {len(fdr_pl)} (q < {alpha})')
 
     # --- Select signals for combiner ---
-    selected = fdr_pl.filter(pl.col('survives_q'))['signal'].to_list()
-    if min_ic_ir > 0:
+    selected = fdr_pl.filter(pl.col('qvalue') < alpha)['signal'].to_list()
+    if min_ir > 0:
         before = len(selected)
-        selected = [s for s in selected if ic_df.filter(pl.col('signal') == s)['ir'][0] >= min_ic_ir]
+        selected = [s for s in selected if ic_df.filter(pl.col('signal') == s)['ir'][0] >= min_ir]
         print(f'  After min_ic_ir filter: {len(selected)} (removed {before - len(selected)})')
 
     print(f'\n  Selected for combiner: {selected}')
@@ -161,7 +175,7 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ic_ir: floa
         'horizon': horizon,
         'n_signals': len(signal_cols),
         'fdr_alpha': alpha,
-        'min_ic_ir': min_ic_ir,
+        'min_ic_ir': min_ir,
         'selected_signals': selected,
         'ic_summary': ic_df.to_dicts(),
         'fdr_summary': {
@@ -184,9 +198,9 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ic_ir: floa
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate signals for combiner selection')
-    parser.add_argument('--signal-dir', required=True, help='Signal run directory (e.g., data/processed/signals/2026-10-29_default)')
+    parser.add_argument('--signal_dir', required=True, help='Signal run directory (e.g., data/processed/signals/2026-10-29_default)')
     parser.add_argument('--horizon', type=int, default=20, help='Forward return horizon for evaluation')
     parser.add_argument('--alpha', type=float, default=0.2, help='FDR alpha threshold')
-    parser.add_argument('--min-ic-ir', type=float, default=0.0, help='Minimum IC IR for signal selection')
+    parser.add_argument('--min_ir', type=float, default=0.0, help='Minimum IC IR for signal selection')
     args = parser.parse_args()
-    main(args.signal_dir, args.horizon, args.alpha, args.min_ic_ir)
+    main(args.signal_dir, args.horizon, args.alpha, args.min_ir)

@@ -93,12 +93,18 @@ def ic_decay(lf, signal_col, horizons=(1, 5, 10, 20)):
         a signal that only shows IC at horizon 1 wants daily rebalancing (expensive),
         one that holds up to horizon 20 can rebalance far less often.
     Note: No Newey-West compensation for autocorrelation is used here. TODO?
+    Uses pre-computed fwdret{h} columns from the signals file.
     '''
 
+    # Get column names once to avoid repeated schema resolution
+    available_cols = set(lf.collect_schema().names())
     rows = []
     for h in horizons:
-        lf_h = add_fwdret_horizon(lf, horizon=h)
-        ic_lf = compute_ic(lf_h, signal_col, f'fwd_ret_{h}')
+        fwd_col = f'fwdret{h}'
+        # Check if column exists in the data
+        if fwd_col not in available_cols:
+            continue
+        ic_lf = compute_ic(lf, signal_col, fwd_col)
         stats = summarize_ic(ic_lf)  # returns a dict
         stats['horizon'] = h
         rows.append(stats)
