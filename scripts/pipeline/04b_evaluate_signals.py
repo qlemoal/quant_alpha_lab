@@ -137,8 +137,8 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ir: float =
     print('\n[4/5] Computing FDR...')
     from scipy import stats
     ic_df_pd = ic_df.to_pandas()
-    # Two-sided p-value from t-stat approximation
-    ic_df_pd['p_value'] = 2 * (1 - stats.norm.cdf(abs(ic_df_pd['ir'] * (ic_df_pd['n_obs'] ** 0.5))))
+    # Two-sided p-value from Newey-West t-stat (corrects for IC autocorrelation)
+    ic_df_pd['p_value'] = 2 * (1 - stats.norm.cdf(abs(ic_df_pd['nw_tstat'])))
 
     fdr_df = fdr_report(
         signal_names=ic_df_pd['signal'].tolist(),
@@ -193,7 +193,11 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ir: float =
 
     print(f'\n✓ Evaluation complete. Results in {OUTPUT_DIR}/')
     print(f'  Selected signals saved to {OUTPUT_DIR}/selected_signals.json')
-    print(f'\nNext: python scripts/pipeline/04c_fit_combiner.py --signal-dir {signal_dir}')
+    print(f'\nNext: python scripts/pipeline/04c_fit_combiner.py --signal_dir {signal_dir}')
+
+
+
+
 
 
 if __name__ == '__main__':
