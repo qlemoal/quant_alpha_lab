@@ -1,0 +1,19 @@
+{
+  "n_days": 238939,
+  "total_return_gross": 310.5749422546113,
+  "total_return_net": 310.2832852481005,
+  "annual_return_gross": 0.32755174102244333,
+  "annual_return_net": 0.3272441413185826,
+  "annual_vol_gross": 0.3288966549658965,
+  "annual_vol_net": 0.32889008300216255,
+  "sharpe_gross": 0.99591083118923,
+  "sharpe_net": 0.9949954657539214,
+  "sortino_net": 1.2866969294550816,
+  "calmar_net": 0.19323320368659072,
+  "max_drawdown": -1.6935192041288474,
+  "hit_rate": 0.4186842666956838,
+  "profit_factor": 1.2097926270413157,
+  "total_cost": 0.2916570065110417,
+  "avg_daily_cost_bps": 1.2206337454791461e-08,
+  "cost_drag_annual_bps": 3.0759970386074483e-06
+}

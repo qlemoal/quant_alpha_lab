@@ -8,12 +8,12 @@ Thin wrapper calling src/risk functions.
 Estimates correlation, cleans with RMT, runs Louvain, builds covariance.
 
 Inputs:
-  data/processed/en_scores/{date}_{tag}/en_scores.parquet (for ticker universe + dates)
-  data/processed/ohlcv/{date}_{tag}/ohlcv.parquet
-  data/processed/features/{date}_{tag}/features.parquet (for vol, ADV)
+  data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet (for ticker universe + dates)
+  data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet
+  data/clean/equities/US/SP500/daily/features/features.parquet (for vol, ADV)
 
 Outputs:
-  data/processed/risk_model/{date}_{tag}/
+  data/clean/equities/US/SP500/daily/risk_model/{run_id}/
     ├── corr_raw.parquet       # [date, ticker_i, ticker_j, corr]
     ├── corr_clean.parquet     # RMT-cleaned
     ├── cov.parquet            # [date, ticker_i, ticker_j, cov]
@@ -23,7 +23,7 @@ Outputs:
     └── config.json            # Run configuration
 
 Usage:
-  python scripts/pipeline/04d_estimate_risk_model.py --signal-tag default --run-id 2026-10-29_default
+  python scripts/pipeline/04d_estimate_risk_model.py --date 2026-10-29 --tag default
 '''
 
 import argparse
@@ -110,17 +110,19 @@ def save_eigenvalues(eigenvals, date_str, file_path):
     df.write_parquet(temp_path)
 
 
-def main(signal_tag: str, run_id: str = None):
+def main(date: str, tag: str = 'default'):
+    run_id = f'{date}_{tag}'
     print('=' * 70)
     print('PHASE 1: ESTIMATE RISK MODEL')
     print('=' * 70)
-    print(f'Signal tag:    {signal_tag}')
     print(f'Run ID:        {run_id}')
+    print(f'Date:          {date}')
+    print(f'Tag:           {tag}')
     print(f'Config:        {RISK_CONFIG}')
     print('=' * 70)
 
-    # Output dir - new structure: data/processed/risk_model/{run_id}/
-    out_dir = Path(f'data/processed/risk_model/{run_id}')
+    # Output dir - new structure: data/clean/equities/US/SP500/daily/risk_model/{run_id}/
+    out_dir = Path(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}')
     out_dir.mkdir(parents=True, exist_ok=True)
 
     corr_raw_file = out_dir / 'corr_raw.parquet'
@@ -133,23 +135,22 @@ def main(signal_tag: str, run_id: str = None):
     # Load data
     print('\n[1/4] Loading data...')
     # Find the ohlcv file for this run
-    ohlcv_files = list(Path('data/processed/ohlcv').glob(f'*_{signal_tag}/ohlcv.parquet'))
+    ohlcv_files = list(Path('data/clean/equities/US/SP500/daily/ohlcv').glob('ohlcv.parquet'))
     if not ohlcv_files:
-        raise FileNotFoundError(f'No ohlcv file found for tag {signal_tag}')
+        raise FileNotFoundError(f'No ohlcv file found for tag {tag}')
     ohlcv_file = sorted(ohlcv_files)[-1]
     print(f'  Using OHLCV: {ohlcv_file}')
     price_lf = pl.scan_parquet(ohlcv_file)
 
-    # Find features file for this run
-    features_files = list(Path('data/processed/features').glob(f'*_{signal_tag}/features.parquet'))
-    if not features_files:
-        raise FileNotFoundError(f'No features file found for tag {signal_tag}')
-    features_file = sorted(features_files)[-1]
+    # Use single features file (no date/tag)
+    features_file = Path('data/clean/equities/US/SP500/daily/features/features.parquet')
+    if not features_file.exists():
+        raise FileNotFoundError(f'No features file found: {features_file}')
     print(f'  Using features: {features_file}')
     features_lf = pl.scan_parquet(features_file)
 
     # Find en_scores file for this run
-    en_scores_file = f'data/processed/en_scores/{run_id}/en_scores.parquet'
+    en_scores_file = f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet'
     if not Path(en_scores_file).exists():
         raise FileNotFoundError(f'No en_scores file found: {en_scores_file}')
     print(f'  Using en_scores: {en_scores_file}')
@@ -306,7 +307,7 @@ def main(signal_tag: str, run_id: str = None):
     # Save config
     config = {
         'run_id': run_id,
-        'signal_tag': signal_tag,
+        'tag': tag,
         'risk_config': RISK_CONFIG,
         'start_date': str(start_date),
         'end_date': str(end_date),
@@ -320,13 +321,14 @@ def main(signal_tag: str, run_id: str = None):
     print(f'    clusters.parquet, eigenvalues.parquet, summary.json, config.json')
 
     print('\nDone!')
-    print(f'\nNext: python scripts/pipeline/04e_construct_weights.py --run-id {run_id}')
+    print(f'\nNext: python scripts/pipeline/04e_construct_weights.py --date {date} --tag {tag}')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--signal-tag', type=str, required=True)
-    parser.add_argument('--run-id', type=str, required=True,
-                        help='Run ID in format YYYY-MM-DD_tag (e.g., 2026-10-29_default)')
+    parser.add_argument('--date', type=str, required=True,
+                        help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
+    parser.add_argument('--tag', type=str, default='default',
+                        help='Signal tag (default: default)')
     args = parser.parse_args()
-    main(args.signal_tag, args.run_id)
+    main(args.date, args.tag)

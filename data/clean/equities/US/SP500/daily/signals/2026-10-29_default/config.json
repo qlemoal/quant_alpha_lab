@@ -1,0 +1,111 @@
+{
+  "signal_tag": "default",
+  "run_date": "2026-10-29",
+  "run_timestamp": "2026-10-29T11:15:45.435963",
+  "signal_specs": [
+    [
+      "mom5",
+      "zscore_tanh",
+      {}
+    ],
+    [
+      "mom20",
+      "zscore_tanh",
+      {}
+    ]
+  ],
+  "horizons": [
+    1,
+    5,
+    10,
+    20
+  ],
+  "date_start": null,
+  "date_end": null,
+  "n_signals": 2,
+  "n_rows": 2913104,
+  "output_cols": [
+    "date",
+    "ticker",
+    "mom5_zscore_tanh",
+    "mom20_zscore_tanh",
+    "fwdret1",
+    "fwdret5",
+    "fwdret10",
+    "fwdret20"
+  ],
+  "git_commit": "733e3fd79148f74b1155d990c78050e6dda23812",
+  "git_diff": null,
+  "features_file": "data/processed/features.parquet",
+  "features_hash": "sha256:6a925ffa3b86ebff",
+  "params_hash": "sha256:bea5104dc3e8d17e",
+  "script_path": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/scripts/pipeline/04a_generate_signals.py",
+  "signal_stats": {
+    "mom5_zscore_tanh": {
+      "mean": -0.0091115884186042,
+      "std": 0.5622577221646997,
+      "min": -0.9999999999999827,
+      "max": 1.0,
+      "null_count": 2505,
+      "null_pct": 0.08599075075932751
+    },
+    "mom20_zscore_tanh": {
+      "mean": -0.013626899118368568,
+      "std": 0.5754183541334599,
+      "min": -0.9999999994465526,
+      "max": 1.0,
+      "null_count": 10016,
+      "null_pct": 0.3438256924572552
+    }
+  },
+  "cross_sectional_stats": {
+    "mom5_zscore_tanh": {
+      "avg_cs_mean": -0.00928255259191906,
+      "avg_cs_std": 0.5607320002546747
+    },
+    "mom20_zscore_tanh": {
+      "avg_cs_mean": -0.013552519907711785,
+      "avg_cs_std": 0.5738658319028853
+    }
+  },
+  "ic_stats": {
+    "mom5_zscore_tanh": {
+      "mean": -0.014138477253374825,
+      "std": 0.14782685774781748,
+      "ir": -0.09564214154841943,
+      "t_stat": -7.7946878444147325,
+      "hit_rate": 0.4664257753688648,
+      "n_days": 6642.0
+    },
+    "mom20_zscore_tanh": {
+      "mean": -0.014724339268268976,
+      "std": 0.15597864598316175,
+      "ir": -0.09439971205967837,
+      "t_stat": -7.684739582840063,
+      "hit_rate": 0.4766862833861476,
+      "n_days": 6627.0
+    }
+  },
+  "performance_stats": {
+    "mom5_zscore_tanh": {
+      "spread_mean": -0.004394207332642639,
+      "spread_std": 0.05786150611031944,
+      "sharpe": -1.2056570122568997,
+      "max_dd": -34.97861375736163,
+      "n_days": 6662,
+      "turnover_mean": 0.27438481180590973,
+      "turnover_std": 0.05203601528603815,
+      "turnover_median": 0.2683346328173965
+    },
+    "mom20_zscore_tanh": {
+      "spread_mean": -0.002944557170683209,
+      "spread_std": 0.062052424824711135,
+      "sharpe": -0.7533456305546192,
+      "max_dd": -34.95591003454675,
+      "n_days": 6647,
+      "turnover_mean": 0.1378277073581808,
+      "turnover_std": 0.03088469764507729,
+      "turnover_median": 0.13356691749937058
+    }
+  }
+}

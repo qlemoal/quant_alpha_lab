@@ -1,0 +1,18 @@
+{
+  "run_id": "2026-11-03_default",
+  "signal_tag": "default",
+  "backtest_config": {
+    "notional": 1000000,
+    "cost_model": "sqrt",
+    "commission_bps": 1.0,
+    "execution_lag": 1,
+    "adv_col": "adv60",
+    "vol_col": "std60"
+  },
+  "rebalance_freq": "weekly",
+  "lookback_window": 252,
+  "min_obs": 60,
+  "score_col": "combined_score",
+  "start_date": "2000-01-03",
+  "end_date": "2026-07-08"
+}

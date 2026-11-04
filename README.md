@@ -67,10 +67,19 @@ quant_alpha_lab/
 │   ├── constants.py            # Trading days, windows, thresholds
 │   └── settings.py             # Global settings
 ├── data/                       # Git-ignored
-│   ├── raw/                    # Original downloads (prices, fundamentals)
-│   ├── processed/              # Clean, research-ready data
-│   ├── intermediate/           # Scratch data
-│   └── exports/                # Figures, backtest results
+│   ├── raw/                    # Immutable, source-format (yfinance, polygon, etc.)
+│   │   └── {source}/{asset}/{region}/{universe}/{freq}/{type}/
+│   └── clean/                  # Research-ready, single parquet per base table
+│       └── {asset}/{region}/{universe}/{freq}/
+│           ├── ohlcv/          # ohlcv.parquet
+│           ├── features/       # features.parquet
+│           ├── signals/        # {run_id}/signals.parquet + config.json
+│           ├── signal_eval/    # {run_id}/ic_summary.parquet, fdr_report.parquet...
+│           ├── en_scores/      # {run_id}/en_scores.parquet + config.json
+│           ├── en_model/       # {run_id}/model.json + stability.parquet
+│           ├── risk_model/     # {run_id}/corr_clean.parquet, cov.parquet...
+│           ├── weights/        # {run_id}/weights.parquet + weights_diag.parquet
+│           └── backtest/       # {run_id}/returns.parquet, metrics.json...
 ├── notebooks/                  # Exploration, plotting, hypothesis generation ONLY
 ├── scripts/
 │   ├── pipeline/               # Executable pipeline steps
@@ -97,7 +106,7 @@ quant_alpha_lab/
 │   │   ├── transforms.py       # zscore, tanh, clip
 │   │   ├── ranking.py          # rank, decile
 │   │   ├── normalize.py        # zscore_expr
-│   │   └── thresholds.py       # thresholding
+│   │   └── thresholds.py       # Thresholding
 │   ├── evaluation/
 │   │   ├── signals/
 │   │   │   ├── ic/             # Rank IC, Newey-West, IC decay
@@ -139,6 +148,41 @@ quant_alpha_lab/
     ├── findings.md               # Dated research log
     └── tips_and_tricks.md        # Practical notes
 ```
+
+### Data Folder Structure — Key Principles
+
+```
+data/
+  raw/                          # Immutable, source-format
+    {source}/                   # e.g., yfinance, polygon, ibkr
+      {asset_class}/            # equities, futures, crypto
+        {region}/               # US, EU, ASIA
+          {universe}/           # SP500, Russell3000, SP500_2010, custom_universe
+            {frequency}/        # daily, 1min, 5min, 30min
+              {data_type}/      # ohlcv, fundamentals, etc.
+
+  clean/                        # Research-ready, single parquet per base table
+    {asset_class}/
+      {region}/
+        {universe}/
+          {frequency}/
+            {base}/             # ohlcv, features (one file each)
+            {pipeline_stage}/   # signals, signal_eval, en_scores, en_model, risk_model, weights, backtest
+              {run_id}/         # versioned by date_tag (e.g., 2026-10-29_default)
+```
+
+| Level | Pattern | Example |
+|-------|---------|---------|
+| **Raw** | `raw/{source}/{asset}/{region}/{universe}/{freq}/{type}` | `raw/yfinance/equities/US/SP500/daily/ohlcv/*.csv` |
+| **Clean base** | `clean/{asset}/{region}/{universe}/{freq}/{base}` | `clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet` |
+| **Pipeline outputs** | `clean/.../{stage}/{run_id}/` | `clean/equities/US/SP500/daily/signals/2026-10-29_default/signals.parquet` |
+
+**Why this scales:**
+- New sources → add under `raw/{source}/` without touching existing data
+- New universes → add under same region/frequency
+- New frequencies → parallel tree under same universe
+- Pipeline outputs are **versioned by run_id** (date + tag), never overwrite
+- Base tables (ohlcv, features) are **single files**, shared across all runs
 
 ---
 

@@ -23,7 +23,7 @@ METHOD = 'zscore_tanh'
 DESCENDING = False
 
 
-INPUT = 'data/processed/features.parquet'
+INPUT = 'data/clean/equities/US/SP500/daily/features/features.parquet'
 
 if __name__ == '__main__':
     lf = pl.scan_parquet(INPUT).sort(['ticker', 'date'])

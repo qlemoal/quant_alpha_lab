@@ -1,0 +1,36 @@
+{
+  "run_date": "2026-11-03",
+  "signal_tag": "default",
+  "input_file": "data/processed/ohlcv/2026-11-03_default/ohlcv.parquet",
+  "output_file": "features.parquet",
+  "feature_windows": {
+    "beta": [
+      60,
+      252
+    ],
+    "momentum": [
+      5,
+      10,
+      20,
+      60,
+      120,
+      252
+    ],
+    "volatility": [
+      5,
+      10,
+      20,
+      60,
+      120,
+      252
+    ],
+    "adv": [
+      5,
+      10,
+      20,
+      60,
+      120,
+      252
+    ]
+  }
+}

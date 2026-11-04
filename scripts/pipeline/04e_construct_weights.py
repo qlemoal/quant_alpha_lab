@@ -8,16 +8,16 @@ Thin wrapper calling src/risk/portfolio_construction.py functions.
 Loads risk model + scores, constructs weights at each rebalance.
 
 Inputs:
-  data/processed/en_scores/{run_id}/en_scores.parquet
-  data/processed/risk_model/{run_id}/
+  data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet
+  data/clean/equities/US/SP500/daily/risk_model/{run_id}/
 
 Outputs:
-  data/processed/weights/{run_id}/weights.parquet    # [date, ticker, weight, cluster_id, signal, raw_w, capped_w]
-  data/processed/weights/{run_id}/weights_diag.parquet
-  data/processed/weights/{run_id}/config.json
+  data/clean/equities/US/SP500/daily/weights/{run_id}/weights.parquet    # [date, ticker, weight, cluster_id, signal, raw_w, capped_w]
+  data/clean/equities/US/SP500/daily/weights/{run_id}/weights_diag.parquet
+  data/clean/equities/US/SP500/daily/weights/{run_id}/config.json
 
 Usage:
-  python scripts/pipeline/04e_construct_weights.py --run-id 2026-10-29_default
+  python scripts/pipeline/04e_construct_weights.py --date 2026-10-29 --tag default
 '''
 
 import argparse
@@ -84,28 +84,48 @@ def load_clusters(clusters_file, reb_date, tickers):
     return {row['ticker']: row['cluster_id'] for row in df.iter_rows(named=True) if row['ticker'] in tickers}
 
 
-def main(run_id: str):
+def main(date: str, tag: str = 'default'):
+    run_id = f'{date}_{tag}'
     print('=' * 70)
     print('PHASE 2: CONSTRUCT PORTFOLIO WEIGHTS')
     print('=' * 70)
     print(f'Run ID:        {run_id}')
+    print(f'Date:          {date}')
+    print(f'Tag:           {tag}')
     print(f'Config:        {PORTFOLIO_CONFIG}')
     print('=' * 70)
 
-    # Paths - new structure
-    risk_dir = Path(f'data/processed/risk_model/{run_id}')
+    # Input files
+    en_scores_file = f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet'
+    risk_dir = Path(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}')
     cov_file = risk_dir / 'cov.parquet'
     clusters_file = risk_dir / 'clusters.parquet'
     summary_file = risk_dir / 'summary.json'
-    
-    en_scores_file = f'data/processed/en_scores/{run_id}/en_scores.parquet'
-    if not Path(en_scores_file).exists():
-        raise FileNotFoundError(f'No en_scores file found: {en_scores_file}')
-    print(f'  Using {en_scores_file}')
 
-    for f in [cov_file, clusters_file, summary_file, en_scores_file]:
-        if not Path(f).exists():
-            raise FileNotFoundError(f'Missing: {f}. Run previous phases.')
+    if not Path(en_scores_file).exists():
+        raise FileNotFoundError(f'No en_scores file: {en_scores_file}')
+    if not cov_file.exists():
+        raise FileNotFoundError(f'No cov file: {cov_file}')
+    if not clusters_file.exists():
+        raise FileNotFoundError(f'No clusters file: {clusters_file}')
+    if not summary_file.exists():
+        raise FileNotFoundError(f'No summary file: {summary_file}')
+
+    # Find OHLCV for this tag (not run_id since ohlcv is per tag)
+    ohlcv_files = list(Path('data/clean/equities/US/SP500/daily/ohlcv').glob('ohlcv.parquet'))
+    if not ohlcv_files:
+        raise FileNotFoundError(f'No ohlcv file found for tag {tag}')
+    ohlcv_file = sorted(ohlcv_files)[-1]
+    print(f'  Using OHLCV: {ohlcv_file}')
+
+    # Use single features file (no date/tag)
+    features_file = Path('data/clean/equities/US/SP500/daily/features/features.parquet')
+    if not features_file.exists():
+        raise FileNotFoundError(f'No features file found: {features_file}')
+    print(f'  Using features: {features_file}')
+
+    out_dir = Path(f'data/clean/equities/US/SP500/daily/weights/{run_id}')
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load rebalance dates from risk model
     with open(summary_file) as f:
@@ -114,21 +134,27 @@ def main(run_id: str):
 
     # Prepare backtest data (aligns dates, gets returns panel)
     print('\n[1/3] Preparing data...')
-    # Find the ohlcv file for this run
-    ohlcv_files = list(Path('data/processed/ohlcv').glob(f'*_{run_id.split("_", 1)[1]}/ohlcv.parquet'))
-    if not ohlcv_files:
-        raise FileNotFoundError(f'No ohlcv file found for run {run_id}')
-    ohlcv_file = sorted(ohlcv_files)[-1]
-    print(f'  Using OHLCV: {ohlcv_file}')
     price_lf = pl.scan_parquet(ohlcv_file)
-
-    # Find features file for this run
-    features_files = list(Path('data/processed/features').glob(f'*_{run_id.split("_", 1)[1]}/features.parquet'))
-    if not features_files:
-        raise FileNotFoundError(f'No features file found for run {run_id}')
-    features_file = sorted(features_files)[-1]
-    print(f'  Using features: {features_file}')
     features_lf = pl.scan_parquet(features_file)
+    
+    # Add adv60 and std60 from features
+    features_lf = features_lf.with_columns([
+        pl.col('log_adv60').exp().alias('adv60'),
+        pl.col('vol60').alias('std60'),
+        pl.col('logret'),
+    ]).select(['date', 'ticker', 'logret', 'adv60', 'std60'])
+    
+    # Join prices with features
+    complete_price_lf = price_lf.join(features_lf, on=['date', 'ticker'], how='left')
+    
+    signal_lf = pl.scan_parquet(en_scores_file).select(['date', 'ticker', SCORE_COL])
+
+    # Get date range from data
+    date_range = complete_price_lf.select(
+        pl.col('date').min().alias('min_date'),
+        pl.col('date').max().alias('max_date')
+    ).collect()
+    start_date = date_range['min_date'][0]
     
     # Add adv60 and std60 from features
     features_lf = features_lf.with_columns([
@@ -334,7 +360,7 @@ def main(run_id: str):
 
     # Save
     print('\n[3/3] Saving...')
-    out_dir = Path(f'data/processed/weights/{run_id}')
+    out_dir = Path(f'data/clean/equities/US/SP500/daily/weights/{run_id}')
     out_dir.mkdir(parents=True, exist_ok=True)
     
     weights_df = pl.DataFrame(all_weights)
@@ -348,7 +374,7 @@ def main(run_id: str):
     # Save config
     config = {
         'run_id': run_id,
-        'signal_tag': run_id.split('_', 1)[1] if '_' in run_id else 'default',
+        'tag': tag,
         'portfolio_config': PORTFOLIO_CONFIG,
         'score_col': SCORE_COL,
         'lookback_window': LOOKBACK_WINDOW,
@@ -367,12 +393,14 @@ def main(run_id: str):
     print(f'  Avg names: {diag_df["n_tickers"].mean():.0f}')
 
     print('\nDone!')
-    print(f'\nNext: python scripts/pipeline/04f_run_backtest.py --run-id {run_id}')
+    print(f'\nNext: python scripts/pipeline/04f_run_backtest.py --date {date} --tag {tag}')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--run-id', type=str, required=True,
-                        help='Run ID in format YYYY-MM-DD_tag (e.g., 2026-10-29_default)')
+    parser.add_argument('--date', type=str, required=True,
+                        help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
+    parser.add_argument('--tag', type=str, default='default',
+                        help='Signal tag (default: default)')
     args = parser.parse_args()
-    main(args.run_id)
+    main(args.date, args.tag)

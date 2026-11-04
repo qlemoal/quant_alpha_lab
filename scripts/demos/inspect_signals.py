@@ -51,13 +51,14 @@ from src.evaluation.signals.performance import (
 from src.utils.helpers import file_hash
 
 
-# New structure: processed/{step}/{run_id}/{data_file}.parquet + config.json
-SIGNALS_BASE = Path('data/processed/signals')
-SIGNAL_EVAL_BASE = Path('data/processed/signal_eval')
-EN_SCORES_BASE = Path('data/processed/en_scores')
-RISK_MODEL_BASE = Path('data/processed/risk_model')
-WEIGHTS_BASE = Path('data/processed/weights')
-BACKTEST_BASE = Path('data/processed/backtest')
+# New structure: clean/equities/US/SP500/daily/{step}/{run_id}/{data_file}.parquet + config.json
+BASE = Path('data/clean/equities/US/SP500/daily')
+SIGNALS_BASE = BASE / 'signals'
+SIGNAL_EVAL_BASE = BASE / 'signal_eval'
+EN_SCORES_BASE = BASE / 'en_scores'
+RISK_MODEL_BASE = BASE / 'risk_model'
+WEIGHTS_BASE = BASE / 'weights'
+BACKTEST_BASE = BASE / 'backtest'
 
 
 def list_runs():

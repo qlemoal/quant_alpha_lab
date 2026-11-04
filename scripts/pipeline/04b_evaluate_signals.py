@@ -8,11 +8,11 @@ Evaluates generated signals: Rank IC, Newey-West, IC decay, FDR (BH/BY/q-value).
 Produces a report and a filtered signal list for the combiner.
 
 Inputs:
-  data/processed/signals/{run_id}/signals.parquet
-  data/processed/signals/{run_id}/config.json
+  data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet
+  data/clean/equities/US/SP500/daily/signals/{run_id}/config.json
 
 Outputs:
-  data/exports/signal_eval/{run_id}/
+  data/clean/equities/US/SP500/daily/signal_eval/{run_id}/
     ├── ic_summary.parquet      # Per-signal IC stats
     ├── ic_decay.parquet        # IC vs horizon
     ├── fdr_report.parquet      # BH, BY, q-value per signal
@@ -20,8 +20,10 @@ Outputs:
     └── selected_signals.json   # List of signals passing FDR (for combiner)
 
 Usage:
-  python scripts/pipeline/04b_evaluate_signals.py --run-id 2026-10-29_default
-  python scripts/pipeline/04b_evaluate_signals.py --run-id 2026-10-29_default --horizon 20 --alpha 0.2
+    Previous runs:
+        python scripts/pipeline/04a_generate_signals.py --date 2026-10-29 --tag default
+        
+  python scripts/pipeline/04b_evaluate_signals.py --date 2026-10-29 --tag default --horizon 20 --alpha 0.2
 '''
 
 import argparse
@@ -36,8 +38,9 @@ from src.evaluation.signals.ic.metrics import newey_west_ic_tstat
 from src.evaluation.signals.fdr import fdr_report
 
 
-def main(run_id: str, horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0):
-    signal_dir = Path(f'data/processed/signals/{run_id}')
+def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0):
+    run_id = f'{date}_{tag}'
+    signal_dir = Path(f'data/clean/equities/US/SP500/daily/signals/{run_id}')
     if not signal_dir.exists():
         raise FileNotFoundError(f'Signal directory not found: {signal_dir}')
 
@@ -51,10 +54,9 @@ def main(run_id: str, horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0
     with open(config_file) as f:
         config = json.load(f)
 
-    run_id = signal_dir.name  # e.g., "2026-10-29_default"
     signal_tag = config.get('signal_tag', 'unknown')
 
-    OUTPUT_DIR = Path(f'data/processed/signal_eval/{run_id}')
+    OUTPUT_DIR = Path(f'data/clean/equities/US/SP500/daily/signal_eval/{run_id}')
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     FWD_RET_COL = f'fwdret{horizon}'
@@ -63,6 +65,8 @@ def main(run_id: str, horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0
     print('PHASE 04b: EVALUATE SIGNALS')
     print('=' * 70)
     print(f'Run ID:        {run_id}')
+    print(f'Date:          {date}')
+    print(f'Tag:           {tag}')
     print(f'Signal tag:    {signal_tag}')
     print(f'Input:         {signals_file}')
     print(f'Output dir:    {OUTPUT_DIR}')
@@ -193,7 +197,7 @@ def main(run_id: str, horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0
 
     print(f'\n✓ Evaluation complete. Results in {OUTPUT_DIR}/')
     print(f'  Selected signals saved to {OUTPUT_DIR}/selected_signals.json')
-    print(f'\nNext: python scripts/pipeline/04c_fit_combiner.py --signal_dir {signal_dir}')
+    print(f'\nNext: python scripts/pipeline/04c_fit_combiner.py --date {date} --tag {tag}')
 
 
 
@@ -202,9 +206,10 @@ def main(run_id: str, horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate signals for combiner selection')
-    parser.add_argument('--run-id', required=True, help='Signal run ID (e.g., 2026-10-29_default)')
+    parser.add_argument('--date', required=True, help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
+    parser.add_argument('--tag', type=str, default='default', help='Signal tag (default: default)')
     parser.add_argument('--horizon', type=int, default=20, help='Forward return horizon for evaluation')
     parser.add_argument('--alpha', type=float, default=0.2, help='FDR alpha threshold')
     parser.add_argument('--min_ir', type=float, default=0.0, help='Minimum IC IR for signal selection')
     args = parser.parse_args()
-    main(args.run_id, args.horizon, args.alpha, args.min_ir)
+    main(args.date, args.tag, args.horizon, args.alpha, args.min_ir)

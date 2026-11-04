@@ -3,10 +3,10 @@ from datetime import date
 
 import duckdb
 
-RAW_DIR = Path('data/raw/ohlcv')
+RAW_DIR = Path('data/raw/yfinance/equities/US/SP500/daily/ohlcv')
 RUN_DATE = date.today().isoformat()
 SIGNAL_TAG = 'default'
-OUT_DIR = Path(f'data/processed/ohlcv/{RUN_DATE}_{SIGNAL_TAG}')
+OUT_DIR = Path(f'data/clean/equities/US/SP500/daily/ohlcv')
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 print(f'Aggregating all prices from {RAW_DIR}')

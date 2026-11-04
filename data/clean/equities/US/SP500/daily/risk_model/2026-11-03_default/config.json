@@ -1,0 +1,14 @@
+{
+  "run_id": "2026-11-03_default",
+  "signal_tag": "default",
+  "risk_config": {
+    "rebalance_freq": "weekly",
+    "lookback_window": 252,
+    "min_obs": 60,
+    "cov_method": "ledoit_wolf",
+    "cluster_resolution": 1.0,
+    "n_factors": 5
+  },
+  "start_date": "2000-01-03",
+  "end_date": "2026-07-08"
+}

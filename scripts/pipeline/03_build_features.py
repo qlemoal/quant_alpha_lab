@@ -2,6 +2,7 @@ import polars as pl
 from polars import col as c
 from datetime import date
 import json
+import pathlib
 
 from src.features.returns import *
 from src.features.momentum import *
@@ -15,11 +16,10 @@ print('--> Start')
 
 RUN_DATE = date.today().isoformat()
 SIGNAL_TAG = 'default'
-INPUT = f'data/processed/ohlcv/{RUN_DATE}_{SIGNAL_TAG}/ohlcv.parquet'
-OUTPUT_DIR = f'data/processed/features/{RUN_DATE}_{SIGNAL_TAG}'
+INPUT = 'data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet'
+OUTPUT_DIR = 'data/clean/equities/US/SP500/daily/features'
 OUTPUT = f'{OUTPUT_DIR}/features.parquet'
 
-import pathlib
 pathlib.Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
 print(f'    Importing prices from {INPUT}')
@@ -63,7 +63,7 @@ lf.sink_parquet(OUTPUT) #  Note that sink_parquet does not keep the order, it wi
 config = {
     'run_date': RUN_DATE,
     'signal_tag': SIGNAL_TAG,
-    'input_file': INPUT,
+    'source_ohlcv': INPUT,
     'output_file': 'features.parquet',
     'feature_windows': {
         'beta': [60, 252],

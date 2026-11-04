@@ -1,0 +1,18 @@
+{
+  "run_id": "2026-11-03_default",
+  "signal_tag": "default",
+  "portfolio_config": {
+    "target_vol": 0.1,
+    "max_gross": 1.0,
+    "max_cluster_multiple": 2.0,
+    "signal_method": "proportional",
+    "cap_method": "cap",
+    "vol_method": "scale"
+  },
+  "score_col": "combined_score",
+  "lookback_window": 252,
+  "min_obs": 60,
+  "rebalance_freq": "weekly",
+  "start_date": "2000-01-03",
+  "end_date": "2026-07-08"
+}

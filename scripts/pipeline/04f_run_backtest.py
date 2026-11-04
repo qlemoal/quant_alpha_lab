@@ -8,13 +8,13 @@ Thin wrapper calling src/portfolio/backtest.py and src/portfolio/costs.py.
 Executes walk-forward backtest on pre-constructed weights.
 
 Inputs:
-  data/processed/weights/{run_id}/weights.parquet
-  data/processed/en_scores/{run_id}/en_scores.parquet
-  data/processed/ohlcv/{run_id}/ohlcv.parquet (has open, close, logret, dollar_volume)
-  data/processed/features/{run_id}/features.parquet (has log_adv60, vol60)
+  data/clean/equities/US/SP500/daily/weights/{run_id}/weights.parquet
+  data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet
+  data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet (has open, close, logret, dollar_volume)
+  data/clean/equities/US/SP500/daily/features/features.parquet (has log_adv60, vol60)
 
 Outputs:
-  data/processed/backtest/{run_id}/
+  data/clean/equities/US/SP500/daily/backtest/{run_id}/
     ├── weights.parquet        # Final weights with execution lag applied
     ├── returns.parquet        # [date, gross_ret, net_ret, cost, turnover]
     ├── diagnostics.parquet    # Per-rebalance details
@@ -22,7 +22,7 @@ Outputs:
     └── config.json            # Run configuration
 
 Usage:
-  python scripts/pipeline/04f_run_backtest.py --run-id 2026-10-29_default
+  python scripts/pipeline/04f_run_backtest.py --date 2026-10-29 --tag default
 '''
 
 import argparse
@@ -54,40 +54,41 @@ MIN_OBS = 60
 SCORE_COL = 'combined_score'
 
 
-def main(run_id: str):
+def main(date: str, tag: str = 'default'):
+    run_id = f'{date}_{tag}'
     print('=' * 70)
     print('PHASE 3: RUN BACKTEST')
     print('=' * 70)
-    signal_tag = run_id.split('_', 1)[1] if '_' in run_id else 'default'
-    print(f'Signal tag:    {signal_tag}')
     print(f'Run ID:        {run_id}')
+    print(f'Date:          {date}')
+    print(f'Tag:           {tag}')
     print(f'Config:        {BACKTEST_CONFIG}')
     print(f'Rebalance:     {REBALANCE_FREQ}')
     print('=' * 70)
 
-    # Paths - new structure
-    en_scores_file = f'data/processed/en_scores/{run_id}/en_scores.parquet'
-    weights_file = f'data/processed/weights/{run_id}/weights.parquet'
-    ohlcv_files = list(Path('data/processed/ohlcv').glob(f'*_{signal_tag}/ohlcv.parquet'))
-    features_files = list(Path('data/processed/features').glob(f'*_{signal_tag}/features.parquet'))
+    # Paths
+    en_scores_file = f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet'
+    weights_file = f'data/clean/equities/US/SP500/daily/weights/{run_id}/weights.parquet'
+    ohlcv_files = list(Path('data/clean/equities/US/SP500/daily/ohlcv').glob('ohlcv.parquet'))
     
     for f, name in [(en_scores_file, 'en_scores'), (weights_file, 'weights')]:
         if not Path(f).exists():
             raise FileNotFoundError(f'Missing {name}: {f}')
     
     if not ohlcv_files:
-        raise FileNotFoundError(f'No ohlcv file found for tag {signal_tag}')
+        raise FileNotFoundError(f'No ohlcv file found for tag {tag}')
     ohlcv_file = sorted(ohlcv_files)[-1]
     
-    if not features_files:
-        raise FileNotFoundError(f'No features file found for tag {signal_tag}')
-    features_file = sorted(features_files)[-1]
+    # Use single features file
+    features_file = Path('data/clean/equities/US/SP500/daily/features/features.parquet')
+    if not features_file.exists():
+        raise FileNotFoundError(f'No features file found: {features_file}')
     
     print(f'  Using OHLCV: {ohlcv_file}')
     print(f'  Using features: {features_file}')
 
-    # Output dir - new structure
-    out_dir = Path(f'data/processed/backtest/{run_id}')
+    # Output dir
+    out_dir = Path(f'data/clean/equities/US/SP500/daily/backtest/{run_id}')
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load EN scores (signals with combined_score)
@@ -170,7 +171,7 @@ def main(run_id: str):
     print('\n[4/4] Running backtest...')
     
     # Path to pre-computed risk model from 04d
-    risk_model_files = list(Path('data/processed/risk_model').glob(f'*_{signal_tag}/'))
+    risk_model_files = list(Path('data/clean/equities/US/SP500/daily/risk_model').glob(f'*_{signal_tag}/'))
     risk_model_dir = str(sorted(risk_model_files)[-1]) if risk_model_files else None
     if risk_model_dir:
         print(f'  Using pre-computed risk model: {risk_model_dir}')
@@ -229,7 +230,7 @@ def main(run_id: str):
     # Save config
     config = {
         'run_id': run_id,
-        'signal_tag': signal_tag,
+        'tag': tag,
         'backtest_config': BACKTEST_CONFIG,
         'rebalance_freq': REBALANCE_FREQ,
         'lookback_window': LOOKBACK_WINDOW,
@@ -269,7 +270,9 @@ def main(run_id: str):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--run-id', type=str, required=True,
-                        help='Run ID in format YYYY-MM-DD_tag (e.g., 2026-10-29_default)')
+    parser.add_argument('--date', type=str, required=True,
+                        help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
+    parser.add_argument('--tag', type=str, default='default',
+                        help='Signal tag (default: default)')
     args = parser.parse_args()
-    main(args.run_id)
+    main(args.date, args.tag)

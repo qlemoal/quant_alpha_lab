@@ -151,7 +151,7 @@ def select_embargo_from_autocorrelation( lf:pl.LazyFrame, col_name:str, max_lag:
 
 
 if __name__ == '__main__':
-    lf = pl.scan_parquet('data/processed/features.parquet')
+    lf = pl.scan_parquet('data/clean/equities/US/SP500/daily/features/features.parquet')
     market_lf = equal_weighted_market_return(lf, ret_col='logret')
     result = select_embargo_from_autocorrelation(
         market_lf, 'logret', max_lag=252, alpha=0.05, criterion='survives_by',rule='largest_surviving_lag',

@@ -6,7 +6,7 @@ import yfinance as yf
 from tqdm import tqdm
 import requests
 
-RAW_DIR = Path('data/raw/ohlcv')
+RAW_DIR = Path('data/raw/yfinance/equities/US/SP500/daily/ohlcv')
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
 print('Downloading SP500 tickers one by one, using wikipedia to stay up-to-date')

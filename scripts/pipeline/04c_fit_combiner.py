@@ -8,18 +8,22 @@ Fits Elastic Net on selected signals from Phase 0b using CPCV search + holdout.
 Produces combined_score for all dates.
 
 Inputs:
-  data/processed/signals/{date}_{tag}/signals.parquet
-  data/processed/signal_eval/{date}_{tag}/selected_signals.json
-  data/processed/signal_eval/{date}_{tag}/fdr_report.parquet (for q-values)
+  data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet
+  data/clean/equities/US/SP500/daily/signal_eval/{run_id}/selected_signals.json
+  data/clean/equities/US/SP500/daily/signal_eval/{run_id}/fdr_report.parquet (for q-values)
 
 Outputs:
-  data/processed/en_scores/{date}_{tag}/en_scores.parquet   # [date, ticker, combined_score, <signal_cols>]
-  data/processed/en_scores/{date}_{tag}/config.json
-  data/processed/en_model/{date}_{tag}/model.json           # Model coefficients, CV results, holdout report
-  data/processed/en_model/{date}_{tag}/stability.parquet    # Per-fold coefficient stability
+  data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet   # [date, ticker, combined_score, <signal_cols>]
+  data/clean/equities/US/SP500/daily/en_scores/{run_id}/config.json
+  data/clean/equities/US/SP500/daily/en_model/{run_id}/model.json           # Model coefficients, CV results, holdout report
+  data/clean/equities/US/SP500/daily/en_model/{run_id}/stability.parquet    # Per-fold coefficient stability
 
 Usage:
-  python scripts/pipeline/04c_fit_combiner.py --signal-dir data/processed/signals/2026-10-29_default
+    Previous runs:
+        python scripts/pipeline/04a_generate_signals.py --date 2026-10-29 --tag default
+        python scripts/pipeline/04b_evaluate_signals.py --date 2026-10-29 --tag default --horizon 20 --alpha 0.2
+        
+  python scripts/pipeline/04c_fit_combiner.py --date 2026-10-29 --tag default
 '''
 
 import argparse
@@ -58,11 +62,11 @@ def main(run_id: str):
     print('=' * 70)
 
     # Derived paths
-    signal_dir = f'data/processed/signals/{run_id}'
+    signal_dir = f'data/clean/equities/US/SP500/daily/signals/{run_id}'
     signal_tag = run_id.split('_', 1)[1] if '_' in run_id else 'default'
 
     # Load selected signals from evaluation
-    eval_dir = f'data/processed/signal_eval/{run_id}'
+    eval_dir = f'data/clean/equities/US/SP500/daily/signal_eval/{run_id}'
     selected_file = f'{eval_dir}/selected_signals.json'
     if not Path(selected_file).exists():
         raise FileNotFoundError(f'Selected signals not found: {selected_file}. Run 04b_evaluate_signals.py first.')
@@ -88,7 +92,7 @@ def main(run_id: str):
             print(f'  Loaded q-values for {len(q_values)} signals: {q_values}')
 
     # Load signal data (versioned path)
-    signal_file = Path(f'data/processed/signals/{run_id}/signals.parquet')
+    signal_file = Path(f'data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet')
     print(f'\nLoading {signal_file}...')
     lf = pl.scan_parquet(signal_file)
 
@@ -130,7 +134,7 @@ def main(run_id: str):
     print(stability_df)
     
     # Save stability
-    stability_dir = f'data/processed/en_model/{run_id}'
+    stability_dir = f'data/clean/equities/US/SP500/daily/en_model/{run_id}'
     Path(stability_dir).mkdir(parents=True, exist_ok=True)
     stability_file = f'{stability_dir}/stability.parquet'
     stability_df.write_parquet(stability_file)
@@ -147,7 +151,7 @@ def main(run_id: str):
     print(f'  Score stats: mean={full_df["combined_score"].mean():.6f}, std={full_df["combined_score"].std():.6f}')
 
     # Save scores
-    en_scores_dir = f'data/processed/en_scores/{run_id}'
+    en_scores_dir = f'data/clean/equities/US/SP500/daily/en_scores/{run_id}'
 
     Path(en_scores_dir).mkdir(parents=True, exist_ok=True)
     output_file = f'{en_scores_dir}/en_scores.parquet'
@@ -191,7 +195,7 @@ def main(run_id: str):
         'fwd_ret_col': fwd_ret_col,
         'holdout_report': holdout_report,
     }
-    model_dir = f'data/processed/en_model/{run_id}'
+    model_dir = f'data/clean/equities/US/SP500/daily/en_model/{run_id}'
     Path(model_dir).mkdir(parents=True, exist_ok=True)
     model_file = f'{model_dir}/model.json'
     with open(model_file, 'w') as f:
@@ -214,7 +218,12 @@ def main(run_id: str):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--run-id', type=str, required=True,
-                        help='Run ID (e.g., 2026-10-29_default)')
+    parser.add_argument('--date', type=str, required=True,
+                        help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
+    parser.add_argument('--tag', type=str, default='default',
+                        help='Signal tag (default: default)')
     args = parser.parse_args()
-    main(args.run_id)
+    
+    # Construct run_id from date + tag
+    run_id = f'{args.date}_{args.tag}'
+    main(run_id)

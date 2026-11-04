@@ -8,10 +8,10 @@ Sequentially runs phases 0a -> 0b -> 0c -> 1 -> 2 -> 3.
 Each phase is a separate script you can also run manually.
 
 Usage:
-  python scripts/pipeline/04_run_all.py --run-id 2026-10-29_default  # Run all
-  python scripts/pipeline/04_run_all.py --run-id 2026-10-29_default --from 1  # Run from phase 1
-  python scripts/pipeline/04_run_all.py --run-id 2026-10-29_default --only 2  # Run only phase 2
-  python scripts/pipeline/04_run_all.py --run-id 2026-10-29_default --check   # Check prerequisites only
+  python scripts/pipeline/04_run_all.py --date 2026-10-29 --tag default  # Run all
+  python scripts/pipeline/04_run_all.py --date 2026-10-29 --tag default --from 1  # Run from phase 1
+  python scripts/pipeline/04_run_all.py --date 2026-10-29 --tag default --only 2  # Run only phase 2
+  python scripts/pipeline/04_run_all.py --date 2026-10-29 --tag default --check   # Check prerequisites only
 '''
 
 import argparse
@@ -29,12 +29,12 @@ PHASES = [
     ('3',  '04f_run_backtest.py', 'Run backtest with costs'),
 ]
 
-# New structure: processed/{step}/{run_id}/{data_file}.parquet + config.json
+# New structure: clean/equities/US/SP500/daily/{step}/{run_id}/{data_file}.parquet + config.json
 # run_id format: YYYY-MM-DD_tag (e.g., 2026-10-29_default)
 
-def find_run_dir(step: str, run_id: str) -> Path | None:
+def find_run_dir(step: str, run_id: str) -> "Path | None":
     """Find the run directory for a given step and run_id."""
-    base = Path(f'data/processed/{step}')
+    base = Path(f'data/clean/equities/US/SP500/daily/{step}')
     if not base.exists():
         return None
     # Look for exact match first
@@ -54,74 +54,73 @@ def check_prereqs(phase_id: str, run_id: str):
     missing = []
     tag = run_id.split('_', 1)[1] if '_' in run_id else run_id
     
+    # Fixed paths for single-file base tables
+    ohlcv_file = Path('data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet')
+    features_file = Path('data/clean/equities/US/SP500/daily/features/features.parquet')
+    
     if phase_id == '0a':
         # Need features and OHLCV
-        features_dir = find_run_dir('features', run_id)
-        ohlcv_dir = find_run_dir('ohlcv', run_id)
-        if not features_dir or not (features_dir / 'features.parquet').exists():
-            missing.append(f'data/processed/features/{run_id}/features.parquet')
-        if not ohlcv_dir or not (ohlcv_dir / 'ohlcv.parquet').exists():
-            missing.append(f'data/processed/ohlcv/{run_id}/ohlcv.parquet')
+        if not features_file.exists():
+            missing.append('data/clean/equities/US/SP500/daily/features/features.parquet')
+        if not ohlcv_file.exists():
+            missing.append('data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet')
     
     elif phase_id == '0b':
         # Need signals directory
         signals_dir = find_run_dir('signals', run_id)
         if not signals_dir or not (signals_dir / 'signals.parquet').exists():
-            missing.append(f'data/processed/signals/{run_id}/signals.parquet')
+            missing.append(f'data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet')
     
     elif phase_id == '0c':
         # Need signals and signal_eval
         signals_dir = find_run_dir('signals', run_id)
         signal_eval_dir = find_run_dir('signal_eval', run_id)
         if not signals_dir or not (signals_dir / 'signals.parquet').exists():
-            missing.append(f'data/processed/signals/{run_id}/signals.parquet')
+            missing.append(f'data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet')
         if not signal_eval_dir or not (signal_eval_dir / 'selected_signals.json').exists():
-            missing.append(f'data/processed/signal_eval/{run_id}/selected_signals.json')
+            missing.append(f'data/clean/equities/US/SP500/daily/signal_eval/{run_id}/selected_signals.json')
     
     elif phase_id == '1':
         # Need en_scores, ohlcv, features
         en_scores_dir = find_run_dir('en_scores', run_id)
-        ohlcv_dir = find_run_dir('ohlcv', run_id)
-        features_dir = find_run_dir('features', run_id)
         if not en_scores_dir or not (en_scores_dir / 'en_scores.parquet').exists():
-            missing.append(f'data/processed/en_scores/{run_id}/en_scores.parquet')
-        if not ohlcv_dir or not (ohlcv_dir / 'ohlcv.parquet').exists():
-            missing.append(f'data/processed/ohlcv/{run_id}/ohlcv.parquet')
-        if not features_dir or not (features_dir / 'features.parquet').exists():
-            missing.append(f'data/processed/features/{run_id}/features.parquet')
+            missing.append(f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet')
+        if not ohlcv_file.exists():
+            missing.append('data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet')
+        if not features_file.exists():
+            missing.append('data/clean/equities/US/SP500/daily/features/features.parquet')
     
     elif phase_id == '2':
         # Need risk_model, en_scores
         risk_dir = find_run_dir('risk_model', run_id)
         en_scores_dir = find_run_dir('en_scores', run_id)
         if not risk_dir or not (risk_dir / 'cov.parquet').exists():
-            missing.append(f'data/processed/risk_model/{run_id}/cov.parquet')
+            missing.append(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}/cov.parquet')
         if not risk_dir or not (risk_dir / 'clusters.parquet').exists():
-            missing.append(f'data/processed/risk_model/{run_id}/clusters.parquet')
+            missing.append(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}/clusters.parquet')
         if not risk_dir or not (risk_dir / 'summary.json').exists():
-            missing.append(f'data/processed/risk_model/{run_id}/summary.json')
+            missing.append(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}/summary.json')
         if not en_scores_dir or not (en_scores_dir / 'en_scores.parquet').exists():
-            missing.append(f'data/processed/en_scores/{run_id}/en_scores.parquet')
+            missing.append(f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet')
     
     elif phase_id == '3':
         # Need weights, en_scores, ohlcv, features
         weights_dir = find_run_dir('weights', run_id)
         en_scores_dir = find_run_dir('en_scores', run_id)
-        ohlcv_dir = find_run_dir('ohlcv', run_id)
-        features_dir = find_run_dir('features', run_id)
         if not weights_dir or not (weights_dir / 'weights.parquet').exists():
-            missing.append(f'data/processed/weights/{run_id}/weights.parquet')
+            missing.append(f'data/clean/equities/US/SP500/daily/weights/{run_id}/weights.parquet')
         if not en_scores_dir or not (en_scores_dir / 'en_scores.parquet').exists():
-            missing.append(f'data/processed/en_scores/{run_id}/en_scores.parquet')
-        if not ohlcv_dir or not (ohlcv_dir / 'ohlcv.parquet').exists():
-            missing.append(f'data/processed/ohlcv/{run_id}/ohlcv.parquet')
-        if not features_dir or not (features_dir / 'features.parquet').exists():
-            missing.append(f'data/processed/features/{run_id}/features.parquet')
+            missing.append(f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet')
+        if not ohlcv_file.exists():
+            missing.append('data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet')
+        if not features_file.exists():
+            missing.append('data/clean/equities/US/SP500/daily/features/features.parquet')
     
     return missing
 
 
-def run_phase(phase_id: str, script: str, run_id: str):
+def run_phase(phase_id: str, script: str, date: str, tag: str):
+    run_id = f'{date}_{tag}'
     print(f'\n{"="*60}')
     print(f'RUNNING PHASE {phase_id}: {script}')
     print(f'{"="*60}')
@@ -133,7 +132,8 @@ def run_phase(phase_id: str, script: str, run_id: str):
             print(f'  - {m}')
         return False
 
-    cmd = [sys.executable, f'scripts/pipeline/{script}', f'--run-id={run_id}']
+    # All pipeline scripts now use --date and --tag
+    cmd = [sys.executable, f'scripts/pipeline/{script}', f'--date={date}', f'--tag={tag}']
     print(f'Command: {" ".join(cmd)}')
 
     result = subprocess.run(cmd, cwd=Path(__file__).parent.parent.parent)
@@ -147,8 +147,10 @@ def run_phase(phase_id: str, script: str, run_id: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--run-id', type=str, required=True,
-                        help='Run ID in format YYYY-MM-DD_tag (e.g., 2026-10-29_default)')
+    parser.add_argument('--date', type=str, required=True,
+                        help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
+    parser.add_argument('--tag', type=str, default='default',
+                        help='Signal tag (default: default)')
     parser.add_argument('--from', dest='from_phase', type=str, default='0a',
                         choices=[p[0] for p in PHASES], help='Start from phase')
     parser.add_argument('--only', dest='only_phase', type=str,
@@ -156,10 +158,11 @@ def main():
     parser.add_argument('--check', action='store_true', help='Check prerequisites only')
     args = parser.parse_args()
 
+    run_id = f'{args.date}_{args.tag}'
     print('=' * 60)
     print('PIPELINE RUNNER')
     print('=' * 60)
-    print(f'Run ID: {args.run_id}')
+    print(f'Run ID: {run_id}')
 
     # Determine phases to run
     if args.only_phase:
@@ -173,7 +176,7 @@ def main():
     if args.check:
         print('\nPrerequisite check:')
         for pid in phases_to_run:
-            missing = check_prereqs(pid, args.run_id)
+            missing = check_prereqs(pid, run_id)
             status = '✓' if not missing else '✗'
             print(f'  {pid}: {status}')
             for m in missing:
@@ -184,14 +187,14 @@ def main():
     success = True
     for pid in phases_to_run:
         script = next(s for p, s, _ in PHASES if p == pid)
-        if not run_phase(pid, script, args.run_id):
+        if not run_phase(pid, script, args.date, args.tag):
             success = False
             break
 
     print('\n' + '=' * 60)
     if success:
         print('✓ ALL PHASES COMPLETED')
-        print(f'Results in data/processed/backtest/{args.run_id}/')
+        print(f'Results in data/clean/equities/US/SP500/daily/backtest/{run_id}/')
     else:
         print('✗ PIPELINE FAILED')
     print('=' * 60)

@@ -8,11 +8,11 @@ Generates signals from features using make_signal().
 No persistent signals.parquet - signals are created fresh each run.
 
 Outputs:
-  data/processed/signals/{run_id}/signals.parquet   # [date, ticker, <signal_cols>, fwd_ret_<H>d]
-  data/processed/signals/{run_id}/config.json       # full config for reproducibility
+  data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet   # [date, ticker, <signal_cols>, fwd_ret_<H>d]
+  data/clean/equities/US/SP500/daily/signals/{run_id}/config.json       # full config for reproducibility
 
 Usage:
-  python scripts/pipeline/04a_generate_signals.py --run-id 2026-11-03_default
+  python scripts/pipeline/04a_generate_signals.py --date 2026-10-29 --tag default
 '''
 
 import argparse
@@ -31,23 +31,25 @@ from datetime import datetime
 # ARGUMENT PARSING
 # =============================================================================
 parser = argparse.ArgumentParser()
-parser.add_argument('--run-id', type=str, required=True,
-                    help='Run ID in format YYYY-MM-DD_tag (e.g., 2026-10-29_default)')
+parser.add_argument('--date', type=str, required=True,
+                    help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
+parser.add_argument('--tag', type=str, default='default',
+                    help='Signal tag (default: default)')
 args = parser.parse_args()
 
-run_id = args.run_id
-RUN_DATE = run_id.split('_')[0]
-SIGNAL_TAG = run_id.split('_', 1)[1] if '_' in run_id else run_id
+RUN_DATE = args.date
+SIGNAL_TAG = args.tag
+run_id = f'{RUN_DATE}_{SIGNAL_TAG}'
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
 # Input
-FEATURES_FILE = f'data/processed/features/{run_id}/features.parquet'
+FEATURES_FILE = 'data/clean/equities/US/SP500/daily/features/features.parquet'
 
 # Output (tagged so you can keep multiple signal sets)
-OUTPUT_DIR = f'data/processed/signals/{run_id}'
+OUTPUT_DIR = f'data/clean/equities/US/SP500/daily/signals/{run_id}'
 OUTPUT_FILE = f'{OUTPUT_DIR}/signals.parquet'
 
 # Signal specifications: list of (feature_col, method, params)
@@ -74,13 +76,13 @@ SIGNAL_SPECS = [
     ('vol120', 'zscore_clip', {'low': -3, 'high': 3}),
     ('vol252', 'zscore_clip', {'low': -3, 'high': 3}),
     
-    # ADV family - liquidity signal (higher ADV = more liquid = lower returns?)
-    ('log_adv5', 'zscore_tanh', {}),
-    ('log_adv10', 'zscore_tanh', {}),
-    ('log_adv20', 'zscore_tanh', {}),
-    ('log_adv60', 'zscore_tanh', {}),
-    ('log_adv120', 'zscore_tanh', {}),
-    ('log_adv252', 'zscore_tanh', {}),
+    # # ADV family - liquidity signal (higher ADV = more liquid = lower returns?)
+    # ('log_adv5', 'zscore_tanh', {}),
+    # ('log_adv10', 'zscore_tanh', {}),
+    # ('log_adv20', 'zscore_tanh', {}),
+    # ('log_adv60', 'zscore_tanh', {}),
+    # ('log_adv120', 'zscore_tanh', {}),
+    # ('log_adv252', 'zscore_tanh', {}),
     
     # Beta family (rank - robust to outliers)
     ('beta60', 'rank', {'descending': True}),
@@ -297,7 +299,7 @@ print('\nDone!')
 print(f'\nOutput directory: {OUTPUT_DIR}')
 print(f'  signals.parquet  - the signal data')
 print(f'  config.json      - full config for reproducibility')
-print(f'\nNext: python scripts/pipeline/04b_evaluate_signals.py --signal-dir {OUTPUT_DIR}')
+print(f'\nNext: python scripts/pipeline/04b_evaluate_signals.py --date {RUN_DATE} --tag {SIGNAL_TAG}')
 
 
 

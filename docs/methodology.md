@@ -59,6 +59,47 @@ The methodology follows practices used at systematic investment firms (Millenniu
 
 ---
 
+### 1.4 Data Folder Structure — Key Principles
+
+The data lake follows a **source → clean → pipeline stages** hierarchy with explicit versioning at the pipeline output level.
+
+```
+data/
+  raw/                          # Immutable, source-format
+    {source}/                   # e.g., yfinance, polygon, ibkr
+      {asset_class}/            # equities, futures, crypto
+        {region}/               # US, EU, ASIA
+          {universe}/           # SP500, Russell3000, SP500_2010, custom_universe
+            {frequency}/        # daily, 1min, 5min, 30min
+              {data_type}/      # ohlcv, fundamentals, etc.
+
+  clean/                        # Research-ready, single parquet per base table
+    {asset_class}/
+      {region}/
+        {universe}/
+          {frequency}/
+            {base}/             # ohlcv, features (one file each)
+            {pipeline_stage}/   # signals, signal_eval, en_scores, en_model, risk_model, weights, backtest
+              {run_id}/         # versioned by date_tag (e.g., 2026-10-29_default)
+```
+
+**Principles:**
+
+| Level | Pattern | Example |
+|-------|---------|---------|
+| **Raw** | `raw/{source}/{asset}/{region}/{universe}/{freq}/{type}` | `raw/yfinance/equities/US/SP500/daily/ohlcv/*.csv` |
+| **Clean base** | `clean/{asset}/{region}/{universe}/{freq}/{base}` | `clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet` |
+| **Pipeline outputs** | `clean/.../{stage}/{run_id}/` | `clean/equities/US/SP500/daily/signals/2026-10-29_default/signals.parquet` |
+
+**Why this scales:**
+- New sources → add under `raw/{source}/` without touching existing data
+- New universes → add under same region/frequency
+- New frequencies → parallel tree under same universe
+- Pipeline outputs are **versioned by run_id** (date + tag), never overwrite
+- Base tables (ohlcv, features) are **single files**, shared across all runs
+
+---
+
 ## 2. Feature Engineering
 
 All features computed per-ticker, sorted by `[ticker, date]`, using **Polars lazy evaluation** (memory efficient, no collect until needed).
