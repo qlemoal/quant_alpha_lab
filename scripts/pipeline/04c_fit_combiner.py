@@ -57,6 +57,10 @@ def main(run_id: str):
     print(f'EN config:     {EN_CONFIG}')
     print('=' * 70)
 
+    # Derived paths
+    signal_dir = f'data/processed/signals/{run_id}'
+    signal_tag = run_id.split('_', 1)[1] if '_' in run_id else 'default'
+
     # Load selected signals from evaluation
     eval_dir = f'data/processed/signal_eval/{run_id}'
     selected_file = f'{eval_dir}/selected_signals.json'
@@ -144,7 +148,6 @@ def main(run_id: str):
 
     # Save scores
     en_scores_dir = f'data/processed/en_scores/{run_id}'
-    signal_tag = run_id.split('_', 1)[1] if '_' in run_id else 'default'
 
     Path(en_scores_dir).mkdir(parents=True, exist_ok=True)
     output_file = f'{en_scores_dir}/en_scores.parquet'

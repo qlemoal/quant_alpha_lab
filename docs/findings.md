@@ -319,6 +319,51 @@ Once design settled, make CPCV search the default in `fit_elastic_net_combiner()
 
 ---
 
+## 2026-11-04: ADV Signal Survivorship Bias — Apparent Strong Predictor is Universe Artifact
+
+### Test
+Cross-sectional IC of `log_adv{5,10,20,60,120,252}_zscore_tanh` vs `fwdret20` (20-day open-to-open forward returns) across full panel (2000-2026, 501 tickers). FDR: BY, α=0.2.
+
+### Finding
+**All ADV signals show highly significant negative IC** (mean IC ≈ -0.033, IR ≈ -0.31, Newey-West t ≈ -8.9), but this is a **survivorship bias artifact**:
+
+| Signal | mean_IC | IR | NW_tstat | q-value |
+|--------|---------|-----|----------|---------|
+| log_adv5 | -0.033 | -0.32 | -8.95 | 0.0* |
+| log_adv10 | -0.033 | -0.32 | -8.85 | 0.0* |
+| log_adv20 | -0.033 | -0.31 | -8.70 | 0.0* |
+| log_adv60 | -0.032 | -0.30 | -8.30 | 0.0* |
+| log_adv120 | -0.032 | -0.30 | -8.20 | 0.0* |
+| log_adv252 | -0.030 | -0.28 | -7.60 | 0.0* |
+
+*q-values collapsed to 0.0 due to p-value underflow from extreme t-stats (fixed in fdr.py: clip p-values at machine eps)*
+
+### Root Cause
+`scripts/pipeline/01_download_data.py` downloads **only current S&P 500 constituents** from Wikipedia and backfills their history from 2000-01-01. This means:
+- **No delisted/removed stocks** (bankruptcies, acquisitions, demotions from index)
+- **Recent IPOs** only appear from their listing date
+- Universe = **501 survivors** — all large, liquid, successful companies
+
+The "ADV effect" is actually: **"among S&P 500 survivors, mega-caps (higher ADV) underperform large-caps"**. This does not generalize to a tradable universe because the illiquid tail (where liquidity premium would manifest) is systematically absent.
+
+### Evidence
+- By-year IC: negative in 2000-2022, flips positive in 2023-2026 (regime change / survivor composition shift)
+- Cross-section: ADV range ~18 to ~25 (log-dollar-volume), no truly illiquid stocks
+- 501 tickers all survive to 2026-07-08; recent additions (PLTR, DDOG, etc.) only have post-IPO data
+
+### Implication
+**Do not use ADV as a standalone alpha signal in this universe.** The signal is real within the survivor set but not portable. Options:
+1. Obtain point-in-time historical constituents (expensive, e.g., CRSP, Compustat)
+2. Use broader universe filter (e.g., all stocks > $2B market cap, > $5M daily volume)
+3. Accept limitation: ADV only ranks *within* survivor universe, not a general liquidity factor
+
+### Files
+- `scripts/pipeline/01_download_data.py` (line 17-24: current S&P 500 only)
+- `src/evaluation/signals/fdr.py` (p-value underflow fix needed)
+- `docs/findings.md` (this entry)
+
+---
+
 ## Summary of Open Questions
 
 | # | Question | Priority | Owner |
