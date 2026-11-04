@@ -381,48 +381,24 @@ def combined_score_column( lf:pl.LazyFrame, fit_result:dict, out_col:str='combin
 def run_en_combiner(
     lf: pl.LazyFrame,
     signal_cols: list[str],
-    horizon: int,
-    embargo_window: int,
+    horizon: int = 20,
+    embargo_window: int = EMBARGO_WINDOW,
     n_blocks: int = 10,
     n_test_blocks: int = 2,
     holdout_dates: int = 200,
     q_values: dict[str, float] | None = None,
-    l1_ratio_grid: list[float] = [.1, .5, .7, .9, .95, .99, 1],
+    l1_ratio_grid: list[float] | None = None,
+    fwdret_col: str | None = None,
 ) -> dict:
     '''
-    Instead of passing a fwdret_col in lf, we compute on the fly the 
-    foward returns at wanted horizon, which becomes the response of
-    our regression. 
+    High-level wrapper: CPCV search + holdout evaluation.
+    Uses the pre-computed forward return columns (fwdret{h}) from signals.parquet
+    instead of recomputing them (which requires 'open' column not available).
 
-    Single entry point, horizon is the one thing everything else derives
-    from, set once here, not passed as several separately-typed strings/
-    numbers that have to be kept in sync by hand (fwdret column name,
-    purge, the y column fed to ElasticNet, all downstream of horizon
-    alone, and previously each computed or typed out separately by the
-    caller, exactly the kind of drift that produced the fwd_ret_col vs
-    fwdret_col mismatch fixed alongside this).
-
-    Computes fwdret AT horizon internally: add_fwd_returns() for
-    horizon=1 (its own literal 'fwdret' column name), then derives
-    purge_w=horizon+1 from it (structural minimum since we use 
-    the more realistic open prices, see methodology.md
-    Section 1.7), combines with embargo_window (the autocorrelation-
-    derived component, from scripts/research/embargo_selection.py, NOT
-    computed here, but stored in config.constants.EMARGO_WINDOW previously).
-
-    Builds the CPCV search region and a genuinely untouched holdout
-    (holdout_dates most recent dates, excluded from search with an
-    embargo_w gap), fits via fit_elastic_net_combiner(), and evaluates
-    the fixed, already-chosen model on the holdout, all in one call, one
-    returned dict. fit_result's own keys (model, cv_folds, signal_cols,
-    q_values, fwdret_col) are included via **fit_result, not duplicated.
+    If fwdret_col is provided, uses that column directly. Otherwise, infers
+    from horizon as 'fwdret{horizon}'.
     '''
-    print(f'    Computing returns at horizon {horizon}')
-    if horizon == 1:
-        lf = add_fwd_returns(lf)
-        fwdret_col = 'fwdret'
-    else:
-        lf = add_fwdret_horizon(lf, horizon)
+    if fwdret_col is None:
         fwdret_col = f'fwdret{horizon}'
 
     purge_w = horizon + 1

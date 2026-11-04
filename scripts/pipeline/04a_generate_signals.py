@@ -8,12 +8,14 @@ Generates signals from features using make_signal().
 No persistent signals.parquet - signals are created fresh each run.
 
 Outputs:
-  data/processed/signals_<tag>.parquet   # [date, ticker, <signal_cols>, fwd_ret_<H>d]
+  data/processed/signals/{run_id}/signals.parquet   # [date, ticker, <signal_cols>, fwd_ret_<H>d]
+  data/processed/signals/{run_id}/config.json       # full config for reproducibility
 
 Usage:
-  python scripts/pipeline/04a_generate_signals.py
+  python scripts/pipeline/04a_generate_signals.py --run-id 2026-11-03_default
 '''
 
+import argparse
 from src.signals.combine import make_signal
 from src.features.returns import add_fwdret_horizon
 from src.evaluation.signals.ic.core import compute_ic, summarize_ic
@@ -26,16 +28,26 @@ import numpy as np
 from datetime import datetime
 
 # =============================================================================
+# ARGUMENT PARSING
+# =============================================================================
+parser = argparse.ArgumentParser()
+parser.add_argument('--run-id', type=str, required=True,
+                    help='Run ID in format YYYY-MM-DD_tag (e.g., 2026-10-29_default)')
+args = parser.parse_args()
+
+run_id = args.run_id
+RUN_DATE = run_id.split('_')[0]
+SIGNAL_TAG = run_id.split('_', 1)[1] if '_' in run_id else run_id
+
+# =============================================================================
 # CONFIGURATION
 # =============================================================================
 
 # Input
-FEATURES_FILE = 'data/processed/features.parquet'
+FEATURES_FILE = f'data/processed/features/{run_id}/features.parquet'
 
 # Output (tagged so you can keep multiple signal sets)
-SIGNAL_TAG = 'default'  # e.g., 'mom_rev', 'all_zscore', 'rank_beta', 'no_beta', 'winsorized'
-RUN_DATE = datetime.now().strftime('%Y-%m-%d')
-OUTPUT_DIR = f'data/processed/signals/{RUN_DATE}_{SIGNAL_TAG}'
+OUTPUT_DIR = f'data/processed/signals/{run_id}'
 OUTPUT_FILE = f'{OUTPUT_DIR}/signals.parquet'
 
 # Signal specifications: list of (feature_col, method, params)
@@ -46,27 +58,35 @@ OUTPUT_FILE = f'{OUTPUT_DIR}/signals.parquet'
 #   rank: descending (default False)
 #   decile: n_buckets (default 10)
 SIGNAL_SPECS = [
-    # Momentum family
+    # Momentum family - multiple horizons
     ('mom5', 'zscore_tanh', {}),
+    ('mom10', 'zscore_tanh', {}),
     ('mom20', 'zscore_tanh', {}),
+    ('mom60', 'zscore_tanh', {}),
+    ('mom120', 'zscore_tanh', {}),
+    ('mom252', 'zscore_tanh', {}),
+    
+    # Volatility family (inverse signal - low vol tends to outperform)
+    ('vol5', 'zscore_clip', {'low': -3, 'high': 3}),
+    ('vol10', 'zscore_clip', {'low': -3, 'high': 3}),
+    ('vol20', 'zscore_clip', {'low': -3, 'high': 3}),
+    ('vol60', 'zscore_clip', {'low': -3, 'high': 3}),
+    ('vol120', 'zscore_clip', {'low': -3, 'high': 3}),
+    ('vol252', 'zscore_clip', {'low': -3, 'high': 3}),
+    
+    # ADV family - liquidity signal (higher ADV = more liquid = lower returns?)
+    ('log_adv5', 'zscore_tanh', {}),
+    ('log_adv10', 'zscore_tanh', {}),
+    ('log_adv20', 'zscore_tanh', {}),
+    ('log_adv60', 'zscore_tanh', {}),
+    ('log_adv120', 'zscore_tanh', {}),
+    ('log_adv252', 'zscore_tanh', {}),
+    
+    # Beta family (rank - robust to outliers)
+    ('beta60', 'rank', {'descending': True}),
+    ('beta120', 'rank', {'descending': True}),
+    ('beta252', 'rank', {'descending': True}),
 ]
-# ('mom60', 'zscore_tanh', {}),
-#     ('mom126', 'zscore_tanh', {}),
-#     ('mom252', 'zscore_tanh', {}),
-#     # Volatility family
-#     ('std20', 'zscore_tanh', {}),
-#     ('std60', 'zscore_tanh', {}),
-#     ('std126', 'zscore_tanh', {}),
-#     ('std252', 'zscore_tanh', {}),
-#     # ADV family
-#     ('log_adv20', 'zscore_tanh', {}),
-#     ('log_adv60', 'zscore_tanh', {}),
-#     ('log_adv126', 'zscore_tanh', {}),
-#     # Beta family (use rank - not fully trusted yet)
-#     ('beta60', 'rank', {}),
-#     ('beta126', 'rank', {}),
-#     ('beta252', 'rank', {}),
-# ]
 
 # Forward return horizons to compute
 HORIZONS = [1, 5, 10, 20]

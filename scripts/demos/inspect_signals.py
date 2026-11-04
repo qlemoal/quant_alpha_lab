@@ -6,31 +6,31 @@ Inspect Pipeline Outputs - Signal Analysis
 
 Comprehensive inspection of signal runs with visualization and comparison.
 
-Usage (with 2026-10-29_default as signals tag):
+Usage (with 2026-10-29_default as run ID):
 
     # List all runs
-    python scripts/pipeline/04_inspect.py list
+    python scripts/demos/inspect_signals.py list
 
     # Signal overview
-    python scripts/pipeline/04_inspect.py signals --run 2026-10-29_default
+    python scripts/demos/inspect_signals.py signals --run 2026-10-29_default
 
     # Detailed stats from config
-    python scripts/pipeline/04_inspect.py stats --run 2026-10-29_default
+    python scripts/demos/inspect_signals.py stats --run 2026-10-29_default
 
     # IC analysis (with optional plots)
-    python scripts/pipeline/04_inspect.py ic --run 2026-10-29_default --horizon 20 --plot
+    python scripts/demos/inspect_signals.py ic --run 2026-10-29_default --horizon 20 --plot
 
     # Decile long-short performance
-    python scripts/pipeline/04_inspect.py perf --run 2026-10-29_default --horizon 20 --plot
+    python scripts/demos/inspect_signals.py perf --run 2026-10-29_default --horizon 20 --plot
 
     # Turnover/stability
-    python scripts/pipeline/04_inspect.py turnover --run 2026-10-29_default --plot
+    python scripts/demos/inspect_signals.py turnover --run 2026-10-29_default --plot
 
     # Compare runs side-by-side
-    python scripts/pipeline/04_inspect.py compare --runs 2026-10-29_default 2026-10-29_mom_rev
+    python scripts/demos/inspect_signals.py compare --runs 2026-10-29_default 2026-10-29_mom_rev
 
     # Everything at once
-    python scripts/pipeline/04_inspect.py all --run 2026-10-29_default --horizon 20 --plot
+    python scripts/demos/inspect_signals.py all --run 2026-10-29_default --horizon 20 --plot
 '''
 
 import argparse
@@ -51,8 +51,13 @@ from src.evaluation.signals.performance import (
 from src.utils.helpers import file_hash
 
 
+# New structure: processed/{step}/{run_id}/{data_file}.parquet + config.json
 SIGNALS_BASE = Path('data/processed/signals')
-EVAL_BASE = Path('data/exports')
+SIGNAL_EVAL_BASE = Path('data/processed/signal_eval')
+EN_SCORES_BASE = Path('data/processed/en_scores')
+RISK_MODEL_BASE = Path('data/processed/risk_model')
+WEIGHTS_BASE = Path('data/processed/weights')
+BACKTEST_BASE = Path('data/processed/backtest')
 
 
 def list_runs():
@@ -89,20 +94,55 @@ def list_runs():
         print(f'{r["run_id"]:<25} {r["tag"]:<15} {r["date"]:<12} {sigs:<20} {r["n_rows"]:>10,} {r["git_commit"]:<10}')
 
 
-def load_run(run_id):
+def find_run_dir(base: Path, run_id: str) -> Path | None:
+    """Find the run directory for a given base path and run_id."""
+    if not base.exists():
+        return None
+    exact = base / run_id
+    if exact.exists():
+        return exact
+    # Fallback: find by tag suffix
+    tag = run_id.split('_', 1)[1] if '_' in run_id else run_id
+    matches = list(base.glob(f'*_{tag}'))
+    if matches:
+        return sorted(matches)[-1]
+    return None
+
+
+def load_run(run_id: str):
     '''Load signals data and config for a run.'''
-    run_dir = SIGNALS_BASE / run_id
-    if not run_dir.exists():
-        raise ValueError(f'Run not found: {run_id}')
+    run_dir = find_run_dir(SIGNALS_BASE, run_id)
+    if not run_dir:
+        raise ValueError(f'Run not found: {run_id} in {SIGNALS_BASE}')
     
     config_file = run_dir / 'config.json'
     signals_file = run_dir / 'signals.parquet'
+    
+    if not config_file.exists():
+        raise ValueError(f'Config not found: {config_file}')
+    if not signals_file.exists():
+        raise ValueError(f'Signals file not found: {signals_file}')
     
     with open(config_file) as f:
         config = json.load(f)
     
     df = pl.read_parquet(signals_file)
     return config, df
+
+
+def load_signal_eval(run_id: str):
+    '''Load signal evaluation data for a run.'''
+    run_dir = find_run_dir(SIGNAL_EVAL_BASE, run_id)
+    if not run_dir:
+        raise ValueError(f'Signal eval run not found: {run_id} in {SIGNAL_EVAL_BASE}')
+    
+    config_file = run_dir / 'config.json'
+    # Could also load IC data, FDR data, decay data
+    if config_file.exists():
+        with open(config_file) as f:
+            config = json.load(f)
+        return config
+    return {}
 
 
 def get_signal_cols(df):
@@ -187,7 +227,11 @@ def cmd_ic(args):
         return
     
     print(f'\n=== IC Analysis (horizon={args.horizon}d) ===')
-    lf = pl.scan_parquet(SIGNALS_BASE / args.run / 'signals.parquet')
+    run_dir = find_run_dir(SIGNALS_BASE, args.run)
+    if not run_dir:
+        print(f'Run directory not found: {args.run}')
+        return
+    lf = pl.scan_parquet(run_dir / 'signals.parquet')
     
     for sig in sig_cols:
         ic_lf = compute_ic(lf, sig, forward_return_col=fwd_col)
@@ -231,7 +275,11 @@ def cmd_perf(args):
         return
     
     print(f'\n=== Decile Long-Short Performance (horizon={args.horizon}d) ===')
-    lf = pl.scan_parquet(SIGNALS_BASE / args.run / 'signals.parquet')
+    run_dir = find_run_dir(SIGNALS_BASE, args.run)
+    if not run_dir:
+        print(f'Run directory not found: {args.run}')
+        return
+    lf = pl.scan_parquet(run_dir / 'signals.parquet')
     
     for sig in sig_cols:
         ls_lf = decile_longshort_returns(lf, sig, fwd_ret_col=fwd_col)
@@ -272,7 +320,11 @@ def cmd_turnover(args):
     sig_cols = get_signal_cols(df)
     
     print(f'\n=== Signal Turnover (Stability) ===')
-    lf = pl.scan_parquet(SIGNALS_BASE / args.run / 'signals.parquet')
+    run_dir = find_run_dir(SIGNALS_BASE, args.run)
+    if not run_dir:
+        print(f'Run directory not found: {args.run}')
+        return
+    lf = pl.scan_parquet(run_dir / 'signals.parquet')
     
     for sig in sig_cols:
         turnover_lf = compute_stability(lf, sig)

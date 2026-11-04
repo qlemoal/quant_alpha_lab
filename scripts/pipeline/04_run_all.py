@@ -8,16 +8,17 @@ Sequentially runs phases 0a -> 0b -> 0c -> 1 -> 2 -> 3.
 Each phase is a separate script you can also run manually.
 
 Usage:
-  python scripts/pipeline/04_run_all.py --tag default           # Run all
-  python scripts/pipeline/04_run_all.py --tag default --from 2  # Run from phase 2
-  python scripts/pipeline/04_run_all.py --tag default --only 1  # Run only phase 1
-  python scripts/pipeline/04_run_all.py --tag default --check   # Check prerequisites only
+  python scripts/pipeline/04_run_all.py --run-id 2026-10-29_default  # Run all
+  python scripts/pipeline/04_run_all.py --run-id 2026-10-29_default --from 1  # Run from phase 1
+  python scripts/pipeline/04_run_all.py --run-id 2026-10-29_default --only 2  # Run only phase 2
+  python scripts/pipeline/04_run_all.py --run-id 2026-10-29_default --check   # Check prerequisites only
 '''
 
 import argparse
 import subprocess
 import sys
 from pathlib import Path
+from datetime import date
 
 PHASES = [
     ('0a', '04a_generate_signals.py', 'Generate signals (make_signal)'),
@@ -28,39 +29,111 @@ PHASES = [
     ('3',  '04f_run_backtest.py', 'Run backtest with costs'),
 ]
 
-PREREQS = {
-    '0a': ['data/processed/features.parquet', 'data/processed/prices.parquet'],
-    '0b': ['data/processed/signals_{tag}.parquet'],
-    '0c': ['data/processed/signals_{tag}.parquet', 'data/exports/signal_eval_{tag}/selected_signals.json'],
-    '1':  ['data/processed/en_scores_{tag}.parquet', 'data/processed/prices.parquet', 'data/processed/features.parquet'],
-    '2':  ['data/exports/risk_model_{tag}/cov.parquet', 'data/exports/risk_model_{tag}/clusters.parquet',
-           'data/exports/risk_model_{tag}/summary.json', 'data/processed/en_scores_{tag}.parquet'],
-    '3':  ['data/exports/weights_{tag}.parquet', 'data/processed/prices.parquet', 'data/processed/features.parquet'],
-}
+# New structure: processed/{step}/{run_id}/{data_file}.parquet + config.json
+# run_id format: YYYY-MM-DD_tag (e.g., 2026-10-29_default)
+
+def find_run_dir(step: str, run_id: str) -> Path | None:
+    """Find the run directory for a given step and run_id."""
+    base = Path(f'data/processed/{step}')
+    if not base.exists():
+        return None
+    # Look for exact match first
+    exact = base / run_id
+    if exact.exists():
+        return exact
+    # Fallback: find by tag suffix
+    tag = run_id.split('_', 1)[1] if '_' in run_id else run_id
+    matches = list(base.glob(f'*_{tag}'))
+    if matches:
+        return sorted(matches)[-1]  # latest
+    return None
 
 
-def check_prereqs(phase_id, tag):
+def check_prereqs(phase_id: str, run_id: str):
+    """Check if prerequisites for a phase exist."""
     missing = []
-    for pattern in PREREQS.get(phase_id, []):
-        f = Path(pattern.format(tag=tag))
-        if not f.exists():
-            missing.append(str(f))
+    tag = run_id.split('_', 1)[1] if '_' in run_id else run_id
+    
+    if phase_id == '0a':
+        # Need features and OHLCV
+        features_dir = find_run_dir('features', run_id)
+        ohlcv_dir = find_run_dir('ohlcv', run_id)
+        if not features_dir or not (features_dir / 'features.parquet').exists():
+            missing.append(f'data/processed/features/{run_id}/features.parquet')
+        if not ohlcv_dir or not (ohlcv_dir / 'ohlcv.parquet').exists():
+            missing.append(f'data/processed/ohlcv/{run_id}/ohlcv.parquet')
+    
+    elif phase_id == '0b':
+        # Need signals directory
+        signals_dir = find_run_dir('signals', run_id)
+        if not signals_dir or not (signals_dir / 'signals.parquet').exists():
+            missing.append(f'data/processed/signals/{run_id}/signals.parquet')
+    
+    elif phase_id == '0c':
+        # Need signals and signal_eval
+        signals_dir = find_run_dir('signals', run_id)
+        signal_eval_dir = find_run_dir('signal_eval', run_id)
+        if not signals_dir or not (signals_dir / 'signals.parquet').exists():
+            missing.append(f'data/processed/signals/{run_id}/signals.parquet')
+        if not signal_eval_dir or not (signal_eval_dir / 'selected_signals.json').exists():
+            missing.append(f'data/processed/signal_eval/{run_id}/selected_signals.json')
+    
+    elif phase_id == '1':
+        # Need en_scores, ohlcv, features
+        en_scores_dir = find_run_dir('en_scores', run_id)
+        ohlcv_dir = find_run_dir('ohlcv', run_id)
+        features_dir = find_run_dir('features', run_id)
+        if not en_scores_dir or not (en_scores_dir / 'en_scores.parquet').exists():
+            missing.append(f'data/processed/en_scores/{run_id}/en_scores.parquet')
+        if not ohlcv_dir or not (ohlcv_dir / 'ohlcv.parquet').exists():
+            missing.append(f'data/processed/ohlcv/{run_id}/ohlcv.parquet')
+        if not features_dir or not (features_dir / 'features.parquet').exists():
+            missing.append(f'data/processed/features/{run_id}/features.parquet')
+    
+    elif phase_id == '2':
+        # Need risk_model, en_scores
+        risk_dir = find_run_dir('risk_model', run_id)
+        en_scores_dir = find_run_dir('en_scores', run_id)
+        if not risk_dir or not (risk_dir / 'cov.parquet').exists():
+            missing.append(f'data/processed/risk_model/{run_id}/cov.parquet')
+        if not risk_dir or not (risk_dir / 'clusters.parquet').exists():
+            missing.append(f'data/processed/risk_model/{run_id}/clusters.parquet')
+        if not risk_dir or not (risk_dir / 'summary.json').exists():
+            missing.append(f'data/processed/risk_model/{run_id}/summary.json')
+        if not en_scores_dir or not (en_scores_dir / 'en_scores.parquet').exists():
+            missing.append(f'data/processed/en_scores/{run_id}/en_scores.parquet')
+    
+    elif phase_id == '3':
+        # Need weights, en_scores, ohlcv, features
+        weights_dir = find_run_dir('weights', run_id)
+        en_scores_dir = find_run_dir('en_scores', run_id)
+        ohlcv_dir = find_run_dir('ohlcv', run_id)
+        features_dir = find_run_dir('features', run_id)
+        if not weights_dir or not (weights_dir / 'weights.parquet').exists():
+            missing.append(f'data/processed/weights/{run_id}/weights.parquet')
+        if not en_scores_dir or not (en_scores_dir / 'en_scores.parquet').exists():
+            missing.append(f'data/processed/en_scores/{run_id}/en_scores.parquet')
+        if not ohlcv_dir or not (ohlcv_dir / 'ohlcv.parquet').exists():
+            missing.append(f'data/processed/ohlcv/{run_id}/ohlcv.parquet')
+        if not features_dir or not (features_dir / 'features.parquet').exists():
+            missing.append(f'data/processed/features/{run_id}/features.parquet')
+    
     return missing
 
 
-def run_phase(phase_id, script, tag):
+def run_phase(phase_id: str, script: str, run_id: str):
     print(f'\n{"="*60}')
     print(f'RUNNING PHASE {phase_id}: {script}')
     print(f'{"="*60}')
 
-    missing = check_prereqs(phase_id, tag)
+    missing = check_prereqs(phase_id, run_id)
     if missing:
         print(f'✗ Prerequisites not met:')
         for m in missing:
             print(f'  - {m}')
         return False
 
-    cmd = [sys.executable, f'scripts/pipeline/{script}', f'--signal-tag={tag}']
+    cmd = [sys.executable, f'scripts/pipeline/{script}', f'--run-id={run_id}']
     print(f'Command: {" ".join(cmd)}')
 
     result = subprocess.run(cmd, cwd=Path(__file__).parent.parent.parent)
@@ -74,7 +147,8 @@ def run_phase(phase_id, script, tag):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--tag', type=str, default='default', help='Signal tag')
+    parser.add_argument('--run-id', type=str, required=True,
+                        help='Run ID in format YYYY-MM-DD_tag (e.g., 2026-10-29_default)')
     parser.add_argument('--from', dest='from_phase', type=str, default='0a',
                         choices=[p[0] for p in PHASES], help='Start from phase')
     parser.add_argument('--only', dest='only_phase', type=str,
@@ -85,7 +159,7 @@ def main():
     print('=' * 60)
     print('PIPELINE RUNNER')
     print('=' * 60)
-    print(f'Tag: {args.tag}')
+    print(f'Run ID: {args.run_id}')
 
     # Determine phases to run
     if args.only_phase:
@@ -99,7 +173,7 @@ def main():
     if args.check:
         print('\nPrerequisite check:')
         for pid in phases_to_run:
-            missing = check_prereqs(pid, args.tag)
+            missing = check_prereqs(pid, args.run_id)
             status = '✓' if not missing else '✗'
             print(f'  {pid}: {status}')
             for m in missing:
@@ -110,14 +184,14 @@ def main():
     success = True
     for pid in phases_to_run:
         script = next(s for p, s, _ in PHASES if p == pid)
-        if not run_phase(pid, script, args.tag):
+        if not run_phase(pid, script, args.run_id):
             success = False
             break
 
     print('\n' + '=' * 60)
     if success:
         print('✓ ALL PHASES COMPLETED')
-        print(f'Results in data/exports/backtest_{args.tag}/')
+        print(f'Results in data/processed/backtest/{args.run_id}/')
     else:
         print('✗ PIPELINE FAILED')
     print('=' * 60)

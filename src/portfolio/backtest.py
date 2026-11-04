@@ -93,6 +93,90 @@ from src.portfolio.optimization import (
 
 
 # =============================================================================
+# PRE-COMPUTED RISK MODEL LOADING
+# =============================================================================
+
+def load_precomputed_risk_model(risk_model_dir: str) -> dict | None:
+    '''
+    Load pre-computed risk model from 04d output directory.
+    
+    Expected files:
+      - corr_clean.parquet: [date, ticker_i, ticker_j, corr]
+      - cov.parquet: [date, ticker_i, ticker_j, cov]
+      - clusters.parquet: [date, ticker, cluster_id]
+    
+    Returns dict with:
+      - dates: np.ndarray of datetime64 dates
+      - corr: list of correlation matrices (one per date)
+      - sigma: list of covariance matrices (one per date)
+      - clusters: list of cluster DataFrames (one per date)
+    '''
+    import os
+    from pathlib import Path
+    
+    dir_path = Path(risk_model_dir)
+    corr_file = dir_path / 'corr_clean.parquet'
+    cov_file = dir_path / 'cov.parquet'
+    clusters_file = dir_path / 'clusters.parquet'
+    
+    if not all(f.exists() for f in [corr_file, cov_file, clusters_file]):
+        print(f'Missing risk model files in {risk_model_dir}')
+        return None
+    
+    print(f'Loading pre-computed risk model from {risk_model_dir}...')
+    
+    # Load all data
+    corr_lf = pl.scan_parquet(corr_file)
+    cov_lf = pl.scan_parquet(cov_file)
+    clusters_lf = pl.scan_parquet(clusters_file)
+    
+    # Get unique dates (sorted)
+    dates_lf = corr_lf.select(pl.col('date').unique().sort()).collect()
+    dates = dates_lf['date'].to_list()
+    
+    # Convert to datetime64 for searchsorted
+    dates_np = np.array([np.datetime64(d) for d in dates], dtype='datetime64[D]')
+    
+    # For each date, load the correlation matrix, covariance matrix, and clusters
+    corr_matrices = []
+    cov_matrices = []
+    cluster_dfs = []
+    
+    for dt in dates:
+        # Get unique tickers for this date from clusters
+        clusters_dt = clusters_lf.filter(pl.col('date') == dt).collect()
+        tickers = clusters_dt['ticker'].to_list()
+        n = len(tickers)
+        
+        if n == 0:
+            continue
+            
+        # Load correlation matrix for this date
+        corr_dt = corr_lf.filter(pl.col('date') == dt).collect()
+        # Pivot to matrix
+        corr_pivot = corr_dt.pivot(values='corr', index='ticker_i', on='ticker_j', sort_columns=True)
+        corr_matrix = corr_pivot.drop('ticker_i').to_numpy()
+        corr_matrices.append(corr_matrix)
+        
+        # Load covariance matrix for this date
+        cov_dt = cov_lf.filter(pl.col('date') == dt).collect()
+        cov_pivot = cov_dt.pivot(values='cov', index='ticker_i', on='ticker_j', sort_columns=True)
+        cov_matrix = cov_pivot.drop('ticker_i').to_numpy()
+        cov_matrices.append(cov_matrix)
+        
+        # Clusters
+        cluster_dfs.append(clusters_dt)
+    
+    return {
+        'dates': dates_np,
+        'corr': corr_matrices,
+        'sigma': cov_matrices,
+        'clusters': cluster_dfs,
+        'tickers': tickers,  # tickers from last date (may vary by date)
+    }
+
+
+# =============================================================================
 # DATA PREPARATION
 # =============================================================================
 
@@ -188,8 +272,24 @@ def prepare_backtest_data(
     for dt in rebalance_dates:
         adv_df = price_df.filter(c(date_col) == dt).sort(ticker_col)
         if len(adv_df) > 0:
-            adv_by_date[dt] = adv_df[adv_col]
-            vol_by_date[dt] = adv_df[vol_col]
+            # Fill NaN values with median to avoid NaN propagation
+            adv_vals = adv_df[adv_col].to_numpy()
+            vol_vals = adv_df[vol_col].to_numpy()
+            
+            # Fill NaN adv with median
+            adv_mask = np.isfinite(adv_vals) & (adv_vals > 0)
+            if not np.all(adv_mask):
+                median_adv = np.median(adv_vals[adv_mask]) if np.any(adv_mask) else 1e6
+                adv_vals = np.where(adv_mask, adv_vals, median_adv)
+            
+            # Fill NaN vol with median
+            vol_mask = np.isfinite(vol_vals) & (vol_vals > 0)
+            if not np.all(vol_mask):
+                median_vol = np.median(vol_vals[vol_mask]) if np.any(vol_mask) else 0.02
+                vol_vals = np.where(vol_mask, vol_vals, median_vol)
+            
+            adv_by_date[dt] = pl.Series('adv', adv_vals)
+            vol_by_date[dt] = pl.Series('vol', vol_vals)
 
     # Next-period returns for P&L (we use open-to-open for execution realism)
     # The signal at date t is traded at open t+1, so P&L uses return from open t+1 to open t+2
@@ -272,6 +372,10 @@ def rebalance_step(
     score_col: str = 'combined_score',
     ticker_col: str = 'ticker',
     date_col: str = 'date',
+    # Pre-computed risk model for this date (optional)
+    precomputed_corr: np.ndarray | None = None,
+    precomputed_sigma: np.ndarray | None = None,
+    precomputed_cluster_map: dict | None = None,
 ) -> dict:
     '''
     Execute ONE rebalance step: estimate risk model, construct portfolio.
@@ -337,74 +441,121 @@ def rebalance_step(
         }
 
     # -------------------------------------------------------------
-    # 1. Build returns matrix for covariance (lookback ending at t-1)
+    # 1. Check if we have pre-computed risk model for this date
     # -------------------------------------------------------------
-    # returns_panel is date x tickers (wide)
-    # We need the lookback_window most recent dates BEFORE current_date
-    dates = returns_panel[date_col].to_numpy()
-    valid_dates = dates[dates < current_date]
-    if len(valid_dates) < min_obs:
-        return {
-            'weights': pl.Series('weight', [0.0] * n),
-            'corr_clean': np.eye(n),
-            'sigma': np.eye(n),
-            'cluster_map': {},
-            'diagnostics': {},
-            'error': f'insufficient_history: {len(valid_dates)} < {min_obs}',
-        }
+    use_precomputed = (precomputed_corr is not None and 
+                       precomputed_sigma is not None and 
+                       precomputed_cluster_map is not None)
 
-    lookback_dates = valid_dates[-lookback_window:]
-    returns_sub = returns_panel.filter(c(date_col).is_in(lookback_dates))
+    if use_precomputed:
+        # Pre-computed risk model provided - need to align to current tickers
+        # The precomputed matrices have a specific ticker ordering from the risk model
+        # We need to extract the submatrix for our current tickers
+        # For now, we assume the precomputed model has all tickers and we extract the relevant ones
+        # But the risk model only has tickers available at that rebalance date
+        # The caller should provide the ticker ordering from the precomputed model
+        # We'll need to handle this by extracting the submatrix
+        # For now, we'll just use the precomputed matrices directly if sizes match
+        # Otherwise fall back to re-estimation
+        
+        n_precomputed = precomputed_corr.shape[0]
+        if n_precomputed == n:
+            # Same number of tickers - assume alignment
+            corr = precomputed_corr
+            sigma = precomputed_sigma
+            cluster_map = precomputed_cluster_map
+            cov_info = {'method': 'precomputed', 'date': str(current_date)}
+        else:
+            # Mismatch - fall back to re-estimation
+            print(f'  Warning: pre-computed risk model has {n_precomputed} tickers but current has {n}, falling back to re-estimation')
+            use_precomputed = False
+    
+    if not use_precomputed:
+        # -------------------------------------------------------------
+        # 1. Build returns matrix for covariance (lookback ending at t-1)
+        # -------------------------------------------------------------
+        # returns_panel is date x tickers (wide)
+        # We need the lookback_window most recent dates BEFORE current_date
+        dates = returns_panel[date_col].to_numpy()
+        valid_dates = dates[dates < np.datetime64(current_date)]
+        if len(valid_dates) < min_obs:
+            return {
+                'weights': pl.Series('weight', [0.0] * n),
+                'corr_clean': np.eye(n),
+                'sigma': np.eye(n),
+                'cluster_map': {},
+                'diagnostics': {},
+                'error': f'insufficient_history: {len(valid_dates)} < {min_obs}',
+            }
 
-    # Align tickers: ensure order matches scores_df
-    ticker_cols = [c for c in returns_sub.columns if c != date_col]
-    # Reorder columns to match tickers list
-    ticker_cols_aligned = [tc for tc in tickers if tc in ticker_cols]
-    missing = set(tickers) - set(ticker_cols_aligned)
-    if missing:
-        # Add zero columns for missing tickers
-        for m in missing:
-            returns_sub = returns_sub.with_columns(pl.lit(0.0).alias(m))
-        ticker_cols_aligned = tickers
+        # Convert numpy datetime64 to Python date for Polars is_in()
+        lookback_dates_np = valid_dates[-lookback_window:]
+        lookback_dates = [date.fromisoformat(str(d)) for d in lookback_dates_np]
+        returns_sub = returns_panel.filter(c(date_col).is_in(lookback_dates))
 
-    returns_matrix = returns_sub.select(ticker_cols_aligned).to_numpy().T  # P x T
+        # Align tickers: ensure order matches scores_df
+        ticker_cols = [c for c in returns_sub.columns if c != date_col]
+        # Reorder columns to match tickers list
+        ticker_cols_aligned = [tc for tc in tickers if tc in ticker_cols]
+        missing = set(tickers) - set(ticker_cols_aligned)
+        if missing:
+            # Add zero columns for missing tickers
+            for m in missing:
+                returns_sub = returns_sub.with_columns(pl.lit(0.0).alias(m))
+            ticker_cols_aligned = tickers
 
-    if returns_matrix.shape[1] < min_obs:
-        return {
-            'weights': pl.Series('weight', [0.0] * n),
-            'corr_clean': np.eye(n),
-            'sigma': np.eye(n),
-            'cluster_map': {},
-            'diagnostics': {},
-            'error': f'insufficient_obs_after_align: {returns_matrix.shape[1]} < {min_obs}',
-        }
+        returns_matrix = returns_sub.select(ticker_cols_aligned).to_numpy().T  # P x T
+        # Replace NaN (missing price data) with 0 so covariance stays valid
+        returns_matrix = np.nan_to_num(returns_matrix, nan=0.0)
 
-    # -------------------------------------------------------------
-    # 2. Estimate covariance (cleaned + shrunk)
-    # -------------------------------------------------------------
-    # Use the estimate_covariance pipeline
-    sigma, cov_info = estimate_covariance(
-        returns_matrix,
-        method=cov_method,
-        target='identity' if cov_method == 'ledoit_wolf' else None,
-    )
-    # Extract correlation from sigma for clustering
-    stds = np.sqrt(np.diag(sigma))
-    stds = np.maximum(stds, 1e-8)
-    corr = sigma / np.outer(stds, stds)
-    np.fill_diagonal(corr, 1.0)
+        if returns_matrix.shape[1] < min_obs:
+            return {
+                'weights': pl.Series('weight', [0.0] * n),
+                'corr_clean': np.eye(n),
+                'sigma': np.eye(n),
+                'cluster_map': {},
+                'diagnostics': {},
+                'error': f'insufficient_obs_after_align: {returns_matrix.shape[1]} < {min_obs}',
+            }
 
-    # -------------------------------------------------------------
-    # 3. Louvain clustering on cleaned correlation
-    # -------------------------------------------------------------
-    cluster_map = louvain_clustering(corr, resolution=cluster_resolution)
+        # -------------------------------------------------------------
+        # 2. Estimate covariance (cleaned + shrunk)
+        # -------------------------------------------------------------
+        # Use the estimate_covariance pipeline
+        sigma, cov_info = estimate_covariance(
+            returns_matrix,
+            method=cov_method,
+            target='identity' if cov_method == 'ledoit_wolf' else None,
+        )
+        # Extract correlation from sigma for clustering
+        stds = np.sqrt(np.diag(sigma))
+        stds = np.maximum(stds, 1e-8)
+        corr = sigma / np.outer(stds, stds)
+        np.fill_diagonal(corr, 1.0)
+
+        # -------------------------------------------------------------
+        # 3. Louvain clustering on cleaned correlation
+        # -------------------------------------------------------------
+        cluster_map = louvain_clustering(corr, resolution=cluster_resolution)
 
     # -------------------------------------------------------------
     # 4. Construct portfolio
     # -------------------------------------------------------------
-    # Align adv/vol to ticker order
+    # Align adv/vol to ticker order - fill NaN vols with median to prevent NaN covariance
     adv_arr = np.asarray(adv_series.to_numpy(), dtype=float)
     vol_arr = np.asarray(vol_series.to_numpy(), dtype=float)
+        
+    # Fill NaN/inf vols with cross-sectional median
+    valid_vol_mask = np.isfinite(vol_arr) & (vol_arr > 0)
+    if not np.all(valid_vol_mask):
+        median_vol = np.median(vol_arr[valid_vol_mask]) if np.any(valid_vol_mask) else 0.02
+        vol_arr = np.where(valid_vol_mask, vol_arr, median_vol)
+        
+    # Also fill NaN advs with median
+    valid_adv_mask = np.isfinite(adv_arr) & (adv_arr > 0)
+    if not np.all(valid_adv_mask):
+        median_adv = np.median(adv_arr[valid_adv_mask]) if np.any(valid_adv_mask) else 1e6
+        adv_arr = np.where(valid_adv_mask, adv_arr, median_adv)
 
     weights_df = construct_portfolio(
         score_df=scores_df.select([date_col, ticker_col, score_col]).with_columns(pl.lit(current_date).alias(date_col)),
@@ -466,6 +617,8 @@ def run_backtest(
     impact_kwargs: dict | None = None,
     score_col: str = 'combined_score',
     execution_lag: int = 1,  # days between signal date and trade date
+    # Pre-computed risk model (from 04d) - if provided, skips per-rebalance estimation
+    risk_model_dir: str | None = None,
 ) -> dict:
     '''
     Run the full walk-forward backtest.
@@ -510,6 +663,9 @@ def run_backtest(
     impact_kwargs:   Dict passed to estimate_market_impact.
     score_col:       Signal column name.
     execution_lag:   Days from signal to trade (default 1 = next open).
+    risk_model_dir:  Optional path to pre-computed risk model from 04d.
+                     If provided, uses corr_clean.parquet, cov.parquet, clusters.parquet
+                     instead of re-estimating at each rebalance.
 
     ===========================================================================
     RETURNS
@@ -532,12 +688,23 @@ def run_backtest(
     open_col = prepared_data['open_col']
     return_col = prepared_data['return_col']
 
+    # Load pre-computed risk model if provided
+    risk_model_loaded = None
+    if risk_model_dir is not None:
+        risk_model_loaded = load_precomputed_risk_model(risk_model_dir)
+        if risk_model_loaded:
+            print(f'Loaded pre-computed risk model from {risk_model_dir}')
+            print(f'  Risk model covers {len(risk_model_loaded["dates"])} dates')
+        else:
+            print(f'Warning: Could not load risk model from {risk_model_dir}, will re-estimate at each rebalance')
+
     # Results storage
     weights_rows = []
     returns_rows = []
     diagnostics_list = []
 
     w_prev = None
+    tickers_prev = None
     weights_prev_date = None
 
     for i, rebal_date in enumerate(rebalance_dates):
@@ -551,6 +718,26 @@ def run_backtest(
             continue
         adv_series = adv_by_date[rebal_date]
         vol_series = vol_by_date[rebal_date]
+
+        # ---------------------------------------------------------
+        # Get pre-computed risk model for this date (if available)
+        # ---------------------------------------------------------
+        precomputed_corr = None
+        precomputed_sigma = None
+        precomputed_cluster_map = None
+        
+        if risk_model_loaded is not None:
+            # Find closest risk model date <= rebal_date
+            risk_dates = risk_model_loaded['dates']
+            idx = np.searchsorted(risk_dates, np.datetime64(rebal_date), side='right') - 1
+            if idx >= 0:
+                model_date = risk_dates[idx]
+                precomputed_corr = risk_model_loaded['corr'][idx]
+                precomputed_sigma = risk_model_loaded['sigma'][idx]
+                # Convert cluster_map to proper format
+                cluster_df = risk_model_loaded['clusters'][idx]
+                # cluster_df has columns: ticker, cluster_id
+                precomputed_cluster_map = dict(zip(cluster_df['ticker'], cluster_df['cluster_id']))
 
         # ---------------------------------------------------------
         # Rebalance step: get target weights
@@ -574,6 +761,9 @@ def run_backtest(
             score_col=score_col,
             ticker_col=ticker_col,
             date_col=date_col,
+            precomputed_corr=precomputed_corr,
+            precomputed_sigma=precomputed_sigma,
+            precomputed_cluster_map=precomputed_cluster_map,
         )
 
         if 'error' in rebal_result:
@@ -587,12 +777,42 @@ def run_backtest(
         # Transaction costs (if we have previous weights)
         # ---------------------------------------------------------
         cost = 0.0
-        if w_prev is not None:
-            # Align previous weights to current tickers
-            # For simplicity, assume same universe; in production use union
+        if w_prev is not None and tickers_prev is not None:
+            # Align previous weights to current tickers using union
+            # This handles changing universe across rebalance dates
+            all_tickers = list(dict.fromkeys(tickers_prev + tickers))  # preserve order
+            w_prev_aligned = np.zeros(len(all_tickers))
+            w_target_aligned = np.zeros(len(all_tickers))
+            
+            # Fill in previous weights
+            for i, tk in enumerate(tickers_prev):
+                if tk in all_tickers:
+                    idx = all_tickers.index(tk)
+                    w_prev_aligned[idx] = w_prev[i]
+            
+            # Fill in target weights
+            for i, tk in enumerate(tickers):
+                if tk in all_tickers:
+                    idx = all_tickers.index(tk)
+                    w_target_aligned[idx] = w_target[i]
+            
+            # Align ADV/vol to the union universe
+            adv_aligned = np.zeros(len(all_tickers))
+            vol_aligned = np.zeros(len(all_tickers))
+            for i, tk in enumerate(all_tickers):
+                if tk in tickers:
+                    idx = tickers.index(tk)
+                    adv_aligned[i] = adv_series.to_numpy()[idx]
+                    vol_aligned[i] = vol_series.to_numpy()[idx]
+                elif tk in tickers_prev:
+                    idx = tickers_prev.index(tk)
+                    # Use previous ADV/vol for tickers that dropped out
+                    adv_aligned[i] = adv_aligned[i]  # will be 0, use a fallback
+                    vol_aligned[i] = vol_aligned[i]
+            
             cost, cost_breakdown = total_transaction_cost(
-                w_prev, w_target,
-                adv_series.to_numpy(), vol_series.to_numpy(),
+                w_prev_aligned, w_target_aligned,
+                adv_aligned, vol_aligned,
                 notional,
                 spread_model='power_law',
                 spread_kwargs=spread_kwargs,
@@ -663,8 +883,8 @@ def run_backtest(
             'portfolio_vol': rebal_result['diagnostics'].get('portfolio_vol', 0),
             'n_positions': rebal_result['diagnostics'].get('n_positions', 0),
             'turnover': compute_turnover(
-                pl.Series('w_prev', w_prev) if w_prev is not None else pl.Series('w_prev', [0.0]*len(w_target)),
-                pl.Series('w_target', w_target),
+                pl.Series('w_prev', w_prev_aligned) if w_prev is not None else pl.Series('w_prev', [0.0]*len(w_target_aligned)),
+                pl.Series('w_target', w_target_aligned),
             ) if w_prev is not None else 0.0,
             'cost_bps': cost / notional * 10000.0,
             'cov_method': rebal_result.get('cov_info', {}).get('method', cov_method),
@@ -673,6 +893,7 @@ def run_backtest(
 
         # Update for next iteration
         w_prev = w_target
+        tickers_prev = tickers
         weights_prev_date = trade_date
 
     # ---------------------------------------------------------

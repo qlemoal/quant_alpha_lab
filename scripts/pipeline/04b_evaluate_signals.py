@@ -20,8 +20,8 @@ Outputs:
     └── selected_signals.json   # List of signals passing FDR (for combiner)
 
 Usage:
-  python scripts/pipeline/04b_evaluate_signals.py --signal_dir data/processed/signals/2026-10-29_default
-  python scripts/pipeline/04b_evaluate_signals.py --signal_dir data/processed/signals/2026-10-29_default --horizon 20 --alpha 0.2
+  python scripts/pipeline/04b_evaluate_signals.py --run-id 2026-10-29_default
+  python scripts/pipeline/04b_evaluate_signals.py --run-id 2026-10-29_default --horizon 20 --alpha 0.2
 '''
 
 import argparse
@@ -36,8 +36,8 @@ from src.evaluation.signals.ic.metrics import newey_west_ic_tstat
 from src.evaluation.signals.fdr import fdr_report
 
 
-def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0):
-    signal_dir = Path(signal_dir)
+def main(run_id: str, horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0):
+    signal_dir = Path(f'data/processed/signals/{run_id}')
     if not signal_dir.exists():
         raise FileNotFoundError(f'Signal directory not found: {signal_dir}')
 
@@ -54,7 +54,7 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ir: float =
     run_id = signal_dir.name  # e.g., "2026-10-29_default"
     signal_tag = config.get('signal_tag', 'unknown')
 
-    OUTPUT_DIR = Path(f'data/exports/signal_eval/{run_id}')
+    OUTPUT_DIR = Path(f'data/processed/signal_eval/{run_id}')
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     FWD_RET_COL = f'fwdret{horizon}'
@@ -202,9 +202,9 @@ def main(signal_dir: str, horizon: int = 20, alpha: float = 0.2, min_ir: float =
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate signals for combiner selection')
-    parser.add_argument('--signal_dir', required=True, help='Signal run directory (e.g., data/processed/signals/2026-10-29_default)')
+    parser.add_argument('--run-id', required=True, help='Signal run ID (e.g., 2026-10-29_default)')
     parser.add_argument('--horizon', type=int, default=20, help='Forward return horizon for evaluation')
     parser.add_argument('--alpha', type=float, default=0.2, help='FDR alpha threshold')
     parser.add_argument('--min_ir', type=float, default=0.0, help='Minimum IC IR for signal selection')
     args = parser.parse_args()
-    main(args.signal_dir, args.horizon, args.alpha, args.min_ir)
+    main(args.run_id, args.horizon, args.alpha, args.min_ir)

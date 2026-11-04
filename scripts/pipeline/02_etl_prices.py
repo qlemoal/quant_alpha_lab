@@ -1,16 +1,18 @@
 from pathlib import Path
+from datetime import date
 
 import duckdb
 
-RAW_DIR = Path('data/raw/prices')
-OUT_DIR = Path('data/processed')
-
-OUT_DIR.parent.mkdir(exist_ok = True)
+RAW_DIR = Path('data/raw/ohlcv')
+RUN_DATE = date.today().isoformat()
+SIGNAL_TAG = 'default'
+OUT_DIR = Path(f'data/processed/ohlcv/{RUN_DATE}_{SIGNAL_TAG}')
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 print(f'Aggregating all prices from {RAW_DIR}')
 
 
-#  Agggregate all the CSVs into one prices table
+#  Aggregate all the CSVs into one prices table
 con = duckdb.connect()
 con.execute(f'''
 CREATE OR REPLACE TABLE prices AS
@@ -60,8 +62,22 @@ COPY(
     ORDER BY 
         ticker, date
 )
-TO '{OUT_DIR}/prices.parquet'
+TO '{OUT_DIR}/ohlcv.parquet'
 (FORMAT PARQUET);
 ''')
 
-print("Saved.")
+# Save config
+import json
+config = {
+    'run_date': RUN_DATE,
+    'signal_tag': SIGNAL_TAG,
+    'source': 'yfinance',
+    'start_date': '2000-01-01',
+    'raw_dir': str(RAW_DIR),
+    'output_file': 'ohlcv.parquet',
+}
+with open(OUT_DIR / 'config.json', 'w') as f:
+    json.dump(config, f, indent=2)
+
+print(f"Saved to {OUT_DIR}/ohlcv.parquet")
+print(f"Config saved to {OUT_DIR}/config.json")

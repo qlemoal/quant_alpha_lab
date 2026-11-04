@@ -1,11 +1,12 @@
 from pathlib import Path
+from datetime import date
 
 import pandas as pd
 import yfinance as yf
 from tqdm import tqdm
 import requests
 
-RAW_DIR = Path('data/raw/prices')
+RAW_DIR = Path('data/raw/ohlcv')
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
 print('Downloading SP500 tickers one by one, using wikipedia to stay up-to-date')
@@ -47,4 +48,4 @@ for ticker in tqdm(tickers[:]):
     except Exception:
         print(f'failed: {ticker}')
 
-print( 'Done')
+print('Done')
