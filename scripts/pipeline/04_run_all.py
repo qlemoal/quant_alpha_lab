@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from config.paths import get_data_config, run_id_from_args
+from config.paths import get_paths, run_id_from_args
 
 PHASES = [
     ('0a', '04a_generate_signals.py', 'Generate signals (make_signal)'),
@@ -94,7 +94,7 @@ def run_phase(phase_id: str, script: str, date: str, tag: str):
     print(f'RUNNING PHASE {phase_id}: {script}')
     print(f'{"="*60}')
 
-    cfg = get_data_config(run_id=run_id)
+    cfg = get_paths(run_id=run_id)
     missing = check_prereqs(phase_id, cfg)
     if missing:
         print(f'✗ Prerequisites not met:')
@@ -143,7 +143,7 @@ def main():
 
     if args.check:
         print('\nPrerequisite check:')
-        cfg = get_data_config(run_id=run_id)
+        cfg = get_paths(run_id=run_id)
         for pid in phases_to_run:
             missing = check_prereqs(pid, cfg)
             status = '✓' if not missing else '✗'
@@ -163,7 +163,7 @@ def main():
     print('\n' + '=' * 60)
     if success:
         print('✓ ALL PHASES COMPLETED')
-        cfg = get_data_config(run_id=run_id)
+        cfg = get_paths(run_id=run_id)
         print(f'Results in {cfg.backtest_dir}/')
     else:
         print('✗ PIPELINE FAILED')

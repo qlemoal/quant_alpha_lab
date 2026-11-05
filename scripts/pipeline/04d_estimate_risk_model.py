@@ -33,7 +33,7 @@ from datetime import date
 import numpy as np
 import polars as pl
 
-from config.paths import get_data_config, run_id_from_args
+from config.paths import get_paths, run_id_from_args
 from src.risk.correlation_cleaning import clean_correlation_matrix as clean_correlation_rmt, marchenko_pastur_bounds
 from src.risk.clustering import louvain_clustering
 from src.risk.covariance import (
@@ -106,7 +106,7 @@ def main(date: str, tag: str = 'default'):
     run_id = run_id_from_args(date, tag)
     
     # Use centralized config
-    cfg = get_data_config(run_id=run_id)
+    cfg = get_paths(run_id=run_id)
     
     print('=' * 70)
     print('PHASE 04d: ESTIMATE RISK MODEL')

@@ -41,9 +41,11 @@ def add_fwdret_horizon(lf:pl.LazyFrame, horizon=1) -> pl.LazyFrame:
         Using log-returns, we just need to add the log-returns until horizon days in the future.
     '''
     open_logret = c('open').log().diff().over('ticker')
-    return lf.sort(['ticker', 'date']).with_columns(
-        open_logret.rolling_sum(horizon).over('ticker').shift(-(horizon+1)).alias(f'fwdret{horizon}')
-    )
+    # Two-step to avoid Polars 1.36+ "window expression not allowed in aggregation" error
+    return (lf.sort(['ticker', 'date'])
+                .with_columns(_fwd_roll = open_logret.rolling_sum(horizon).over('ticker'))
+                .with_columns(**{f'fwdret{horizon}': c('_fwd_roll').shift(-(horizon+1)).over('ticker')})
+                .drop('_fwd_roll'))
     # Previous version using Close prices
     # '''
     # Adds forward log-returns, horizon trading days ahead, per ticker.

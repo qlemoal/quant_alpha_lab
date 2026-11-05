@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from config.paths import get_data_config, run_id_from_args
+from config.paths import get_paths, run_id_from_args
 from src.models.elastic_net_combiner import run_en_combiner, coefficient_stability_by_fold
 from config.constants import EMBARGO_WINDOW
 
@@ -50,7 +50,7 @@ def main(date: str, tag: str = 'default'):
     run_id = run_id_from_args(date, tag)
     
     # Use centralized config
-    cfg = get_data_config(run_id=run_id)
+    cfg = get_paths(run_id=run_id)
     
     print('=' * 70)
     print('PHASE 04c: FIT ELASTIC NET COMBINER (CPCV + Holdout)')
@@ -165,7 +165,7 @@ def main(date: str, tag: str = 'default'):
     model_info = {
         'signal_tag': signal_tag,
         'run_id': run_id,
-        'signal_dir': str(cfg.signals_dir),
+        'signal_dir': str(cfg.stage_dir('signals')),
         'alpha': float(alpha_used),
         'l1_ratio': float(l1_ratio_used),
         'signals': signal_cols,
@@ -184,10 +184,10 @@ def main(date: str, tag: str = 'default'):
         'fwd_ret_col': fwd_ret_col,
         'holdout_report': holdout_report,
     }
-    cfg.en_model_dir.mkdir(parents=True, exist_ok=True)
-    with open(cfg.en_model_file, 'w') as f:
+    cfg.stage_dir('en_model').mkdir(parents=True, exist_ok=True)
+    with open(cfg.stage_dir('en_model') / 'model.json', 'w') as f:
         json.dump(model_info, f, indent=2, default=str)
-    print(f'  Model info: {cfg.en_model_file}')
+    print(f'  Model info: {cfg.stage_dir("en_model") / "model.json"}')
 
     # Print holdout summary
     if holdout_report:

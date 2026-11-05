@@ -32,7 +32,7 @@ from pathlib import Path
 import polars as pl
 import numpy as np
 
-from config.paths import get_data_config, run_id_from_args
+from config.paths import get_paths, run_id_from_args
 from src.evaluation.signals.ic.core import compute_ic, summarize_ic
 from src.evaluation.signals.ic.metrics import ic_decay
 from src.evaluation.signals.ic.metrics import newey_west_ic_tstat
@@ -43,7 +43,7 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
     run_id = run_id_from_args(date, tag)
     
     # Use centralized config
-    cfg = get_data_config(run_id=run_id)
+    cfg = get_paths(run_id=run_id)
     
     signals_file = cfg.stage_dir('signals') / 'signals.parquet'
     config_file = cfg.stage_dir('signals') / 'config.json'
@@ -57,6 +57,7 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
 
     signal_tag = config.get('signal_tag', 'unknown')
 
+    signals_dir = cfg.stage_dir('signals')
     OUTPUT_DIR = cfg.stage_dir('signal_eval')
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -175,7 +176,7 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
     report = {
         'run_id': run_id,
         'signal_tag': signal_tag,
-        'input_dir': str(signal_dir),
+        'input_dir': str(signals_dir),
         'fwd_ret_col': FWD_RET_COL,
         'horizon': horizon,
         'n_signals': len(signal_cols),

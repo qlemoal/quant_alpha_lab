@@ -27,7 +27,7 @@ from datetime import date
 import numpy as np
 import polars as pl
 
-from config.paths import get_data_config, run_id_from_args
+from config.paths import get_paths, run_id_from_args
 from src.risk.portfolio_construction import (
     raw_weights_from_score,
     apply_cluster_caps,
@@ -87,7 +87,7 @@ def main(date: str, tag: str = 'default'):
     run_id = run_id_from_args(date, tag)
     
     # Use centralized config
-    cfg = get_data_config(run_id=run_id)
+    cfg = get_paths(run_id=run_id)
     
     print('=' * 70)
     print('PHASE 04e: CONSTRUCT PORTFOLIO WEIGHTS')

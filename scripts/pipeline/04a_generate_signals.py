@@ -12,8 +12,9 @@ Outputs:
   data/clean/{asset}/{region}/{universe}/{freq}/signals/{run_id}/config.json
 
 Usage:
-  python scripts/pipeline/04a_generate_signals.py --date 2026-10-29 --tag default
-  # Dataset defined in config/dataset_config.json
+    -> Dataset defined in config/dataset_config.json
+    python scripts/pipeline/04a_generate_signals.py --date 2026-11-05 --tag default
+  
 '''
 
 import argparse
@@ -32,7 +33,7 @@ from pathlib import Path
 # Import centralized paths
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'config'))
-from config.paths import get_data_config, run_id_from_args
+from config.paths import get_paths, run_id_from_args
 
 # =============================================================================
 # ARGUMENT PARSING
@@ -49,14 +50,14 @@ SIGNAL_TAG = args.tag
 run_id = run_id_from_args(RUN_DATE, SIGNAL_TAG)
 
 # Create data config from dataset_config.json (no CLI args needed)
-cfg = get_data_config(run_id=run_id)
+cfg = get_paths(run_id=run_id)
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
 # Input (from config)
-FEATURES_FILE = cfg.clean_features_file
+FEATURES_FILE = cfg.features_file
 
 # Output (tagged so you can keep multiple signal sets)
 OUTPUT_DIR = cfg.stage_dir('signals')
@@ -295,7 +296,7 @@ config = {
     'ic_stats': ic_stats,
     'performance_stats': perf_stats,
 }
-config_file = cfg.signals_config_file
+config_file = cfg.stage_dir('signals') / 'config.json'
 with open(config_file, 'w') as f:
     json.dump(config, f, indent=2, default=str)
 print(f'  Config saved to {config_file}')

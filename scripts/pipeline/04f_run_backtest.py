@@ -31,7 +31,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from config.paths import get_data_config, run_id_from_args
+from config.paths import get_paths, run_id_from_args
 from src.portfolio.costs import estimate_costs
 from src.portfolio.backtest import backtest_weights
 
@@ -52,7 +52,7 @@ def main(date: str, tag: str = 'default'):
     run_id = run_id_from_args(date, tag)
     
     # Use centralized config
-    cfg = get_data_config(run_id=run_id)
+    cfg = get_paths(run_id=run_id)
     
     print('=' * 70)
     print('PHASE 04f: RUN BACKTEST')

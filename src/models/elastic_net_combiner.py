@@ -386,8 +386,8 @@ def run_en_combiner(
     n_blocks: int = 10,
     n_test_blocks: int = 2,
     holdout_dates: int = 200,
-    q_values: dict[str, float] | None = None,
-    l1_ratio_grid: list[float] | None = None,
+    q_values: "dict[str, float] | None" = None,
+    l1_ratio_grid: "list[float] | None" = None,
     fwdret_col: "str | None" = None,
 ) -> dict:
     '''
