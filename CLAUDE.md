@@ -83,6 +83,15 @@ python scripts/pipeline/04_run_all.py
 - Python 3.11+ (uses `str|list` union syntax)
 - Key deps: polars, numpy, scipy, sklearn, matplotlib, networkx
 - Run `pip install -e .` in venv
+- **Conda env:** `quantlab311` (path: `/Users/lemoal/miniforge3/envs/quantlab311`)
+- **For terminal commands:** Each `run_in_terminal` call starts a fresh shell. Use:
+  ```bash
+  /Users/lemoal/miniforge3/envs/quantlab311/bin/python scripts/pipeline/04a_generate_signals.py ...
+  ```
+  or inline activation:
+  ```bash
+  conda activate quantlab311 && python scripts/pipeline/04a_generate_signals.py ...
+  ```
 
 ## Gotchas
 - Polars 1.x: `df.head(n).to_string()` doesn't exist; use `print(df.head(n))` or `str(df.head(n))`
