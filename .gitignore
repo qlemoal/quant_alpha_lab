@@ -8,12 +8,6 @@ __pycache__/
 
 .env
 
-data/raw/
-
-data/intermediate/
-
-data/processed/
-
 *.duckdb
 
 *.parquet

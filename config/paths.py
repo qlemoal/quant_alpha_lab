@@ -1,6 +1,8 @@
 """
 Centralized path configuration for the quant_alpha_lab pipeline.
 
+To redo -> it is too complicated right now.
+
 Structure:
   data/
     raw/      # Immutable, source-format
