@@ -1,0 +1,493 @@
+{
+  "signal_tag": "test_config",
+  "run_date": "2026-11-04",
+  "run_timestamp": "2026-11-04T17:58:11.246764",
+  "signal_specs": [
+    [
+      "mom5",
+      "zscore_tanh",
+      {}
+    ],
+    [
+      "mom10",
+      "zscore_tanh",
+      {}
+    ],
+    [
+      "mom20",
+      "zscore_tanh",
+      {}
+    ],
+    [
+      "mom60",
+      "zscore_tanh",
+      {}
+    ],
+    [
+      "mom120",
+      "zscore_tanh",
+      {}
+    ],
+    [
+      "mom252",
+      "zscore_tanh",
+      {}
+    ],
+    [
+      "vol5",
+      "zscore_clip",
+      {
+        "low": -3,
+        "high": 3
+      }
+    ],
+    [
+      "vol10",
+      "zscore_clip",
+      {
+        "low": -3,
+        "high": 3
+      }
+    ],
+    [
+      "vol20",
+      "zscore_clip",
+      {
+        "low": -3,
+        "high": 3
+      }
+    ],
+    [
+      "vol60",
+      "zscore_clip",
+      {
+        "low": -3,
+        "high": 3
+      }
+    ],
+    [
+      "vol120",
+      "zscore_clip",
+      {
+        "low": -3,
+        "high": 3
+      }
+    ],
+    [
+      "vol252",
+      "zscore_clip",
+      {
+        "low": -3,
+        "high": 3
+      }
+    ],
+    [
+      "beta60",
+      "rank",
+      {
+        "descending": true
+      }
+    ],
+    [
+      "beta120",
+      "rank",
+      {
+        "descending": true
+      }
+    ],
+    [
+      "beta252",
+      "rank",
+      {
+        "descending": true
+      }
+    ]
+  ],
+  "horizons": [
+    1,
+    5,
+    10,
+    20
+  ],
+  "date_start": null,
+  "date_end": null,
+  "n_signals": 14,
+  "n_rows": 2913104,
+  "output_cols": [
+    "date",
+    "ticker",
+    "mom5_zscore_tanh",
+    "mom10_zscore_tanh",
+    "mom20_zscore_tanh",
+    "mom60_zscore_tanh",
+    "mom120_zscore_tanh",
+    "mom252_zscore_tanh",
+    "vol5_zscore_clip",
+    "vol10_zscore_clip",
+    "vol20_zscore_clip",
+    "vol60_zscore_clip",
+    "vol120_zscore_clip",
+    "vol252_zscore_clip",
+    "beta60_rank",
+    "beta252_rank",
+    "fwdret1",
+    "fwdret5",
+    "fwdret10",
+    "fwdret20"
+  ],
+  "source": "yfinance",
+  "asset": "equities",
+  "region": "US",
+  "universe": "SP500",
+  "freq": "daily",
+  "git_commit": "d7c9f5b76ac12c29704587c65359e734692fe5f0",
+  "git_diff": "8 files changed, 238 insertions(+), 21 deletions(-)",
+  "features_file": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/clean/equities/US/SP500/daily/features/features.parquet",
+  "features_hash": "sha256:e418976e250c356d",
+  "params_hash": "sha256:cb2d3e8ef8cfa0d4",
+  "script_path": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/scripts/pipeline/04a_generate_signals.py",
+  "signal_stats": {
+    "mom5_zscore_tanh": {
+      "mean": -0.009111588418604202,
+      "std": 0.5622577221647009,
+      "min": -0.9999999999999827,
+      "max": 1.0,
+      "null_count": 2505,
+      "null_pct": 0.08599075075932751
+    },
+    "mom10_zscore_tanh": {
+      "mean": -0.011223353409156164,
+      "std": 0.5695408820659329,
+      "min": -0.9999999999956743,
+      "max": 1.0,
+      "null_count": 5010,
+      "null_pct": 0.17198150151865502
+    },
+    "mom20_zscore_tanh": {
+      "mean": -0.013626899118368568,
+      "std": 0.5754183541334607,
+      "min": -0.9999999994465526,
+      "max": 1.0,
+      "null_count": 10016,
+      "null_pct": 0.3438256924572552
+    },
+    "mom60_zscore_tanh": {
+      "mean": -0.02208624429914513,
+      "std": 0.5768134928840831,
+      "min": -0.9999998284420859,
+      "max": 0.9999999999999994,
+      "null_count": 29985,
+      "null_pct": 1.0293144357359023
+    },
+    "mom120_zscore_tanh": {
+      "mean": -0.03451647876903151,
+      "std": 0.5649951618842186,
+      "min": -0.9999918938281516,
+      "max": 1.0,
+      "null_count": 59925,
+      "null_pct": 2.057084127446188
+    },
+    "mom252_zscore_tanh": {
+      "mean": -0.05044637564891239,
+      "std": 0.5419019753768232,
+      "min": -0.9998379387294841,
+      "max": 1.0,
+      "null_count": 125715,
+      "null_pct": 4.315499892897748
+    },
+    "vol5_zscore_clip": {
+      "mean": -0.025729348545576743,
+      "std": 0.8659763539668027,
+      "min": -3.0,
+      "max": 3.0,
+      "null_count": 2505,
+      "null_pct": 0.08599075075932751
+    },
+    "vol10_zscore_clip": {
+      "mean": -0.02460859274102077,
+      "std": 0.8747974875543946,
+      "min": -2.919598612235928,
+      "max": 3.0,
+      "null_count": 5010,
+      "null_pct": 0.17198150151865502
+    },
+    "vol20_zscore_clip": {
+      "mean": -0.022749133103764477,
+      "std": 0.88701129025518,
+      "min": -2.7673811976011073,
+      "max": 3.0,
+      "null_count": 10016,
+      "null_pct": 0.3438256924572552
+    },
+    "vol60_zscore_clip": {
+      "mean": -0.019973302626496197,
+      "std": 0.9053446732665702,
+      "min": -2.62699402830279,
+      "max": 3.0,
+      "null_count": 29985,
+      "null_pct": 1.0293144357359023
+    },
+    "vol120_zscore_clip": {
+      "mean": -0.01839258234073065,
+      "std": 0.916097216693503,
+      "min": -2.3802276830063542,
+      "max": 3.0,
+      "null_count": 59925,
+      "null_pct": 2.057084127446188
+    },
+    "vol252_zscore_clip": {
+      "mean": -0.01683140306108051,
+      "std": 0.9254161192714968,
+      "min": -2.083334484140099,
+      "max": 3.0,
+      "null_count": 125715,
+      "null_pct": 4.315499892897748
+    },
+    "beta60_rank": {
+      "mean": -0.0032148704632832255,
+      "std": 0.5768267479168995,
+      "min": -1.0,
+      "max": 1.0,
+      "null_count": 29985,
+      "null_pct": 1.0293144357359023
+    },
+    "beta252_rank": {
+      "mean": -0.013312887381749149,
+      "std": 0.5710574388053745,
+      "min": -1.0,
+      "max": 1.0,
+      "null_count": 125715,
+      "null_pct": 4.315499892897748
+    }
+  },
+  "cross_sectional_stats": {
+    "mom5_zscore_tanh": {
+      "avg_cs_mean": -0.009282552591919055,
+      "avg_cs_std": 0.5607320002546743
+    },
+    "mom10_zscore_tanh": {
+      "avg_cs_mean": -0.01127957162021402,
+      "avg_cs_std": 0.5680920607964601
+    },
+    "mom20_zscore_tanh": {
+      "avg_cs_mean": -0.013552519907711797,
+      "avg_cs_std": 0.5738658319028859
+    },
+    "mom60_zscore_tanh": {
+      "avg_cs_mean": -0.021950331642444254,
+      "avg_cs_std": 0.5748285680929456
+    },
+    "mom120_zscore_tanh": {
+      "avg_cs_mean": -0.03435276889054121,
+      "avg_cs_std": 0.5620991294873102
+    },
+    "mom252_zscore_tanh": {
+      "avg_cs_mean": -0.050220276511858605,
+      "avg_cs_std": 0.5366051900163179
+    },
+    "vol5_zscore_clip": {
+      "avg_cs_mean": -0.025669953211313525,
+      "avg_cs_std": 0.8642318902098688
+    },
+    "vol10_zscore_clip": {
+      "avg_cs_mean": -0.02448945301753048,
+      "avg_cs_std": 0.8739592814724925
+    },
+    "vol20_zscore_clip": {
+      "avg_cs_mean": -0.02259461862126346,
+      "avg_cs_std": 0.8869974263824425
+    },
+    "vol60_zscore_clip": {
+      "avg_cs_mean": -0.019760467098255356,
+      "avg_cs_std": 0.9065148373317085
+    },
+    "vol120_zscore_clip": {
+      "avg_cs_mean": -0.018177716066705246,
+      "avg_cs_std": 0.9176613206441003
+    },
+    "vol252_zscore_clip": {
+      "avg_cs_mean": -0.016590511288570465,
+      "avg_cs_std": 0.9273343748661069
+    },
+    "beta60_rank": {
+      "avg_cs_mean": -0.0033758369977270565,
+      "avg_cs_std": 0.577407340185169
+    },
+    "beta252_rank": {
+      "avg_cs_mean": -0.013927750958310661,
+      "avg_cs_std": 0.5713011000775742
+    }
+  },
+  "ic_stats": {
+    "mom5_zscore_tanh": {
+      "mean": -0.014138477253374825,
+      "std": 0.14782685774781748,
+      "ir": -0.09564214154841943,
+      "t_stat": -7.7946878444147325,
+      "hit_rate": 0.4664257753688648,
+      "n_days": 6642.0
+    },
+    "mom10_zscore_tanh": {
+      "mean": -0.0141765081772329,
+      "std": 0.1494194439480294,
+      "ir": -0.09487726498409223,
+      "t_stat": -7.729440629300984,
+      "hit_rate": 0.4718999547988549,
+      "n_days": 6637.0
+    },
+    "mom20_zscore_tanh": {
+      "mean": -0.014724339268268976,
+      "std": 0.15597864598316175,
+      "ir": -0.09439971205967837,
+      "t_stat": -7.684739582840063,
+      "hit_rate": 0.4766862833861476,
+      "n_days": 6627.0
+    },
+    "mom60_zscore_tanh": {
+      "mean": -0.009451956715247905,
+      "std": 0.17288324262839783,
+      "ir": -0.05467248630663597,
+      "t_stat": -4.437237311571135,
+      "hit_rate": 0.49946865037194477,
+      "n_days": 6587.0
+    },
+    "mom120_zscore_tanh": {
+      "mean": -0.0030411371313975692,
+      "std": 0.18545277704483945,
+      "ir": -0.016398444821682404,
+      "t_stat": -1.324827911278608,
+      "hit_rate": 0.5313313926765743,
+      "n_days": 6527.0
+    },
+    "mom252_zscore_tanh": {
+      "mean": 0.008042756002881702,
+      "std": 0.20179268532077352,
+      "ir": 0.03985652894254706,
+      "t_stat": 3.1872765555142912,
+      "hit_rate": 0.5588741204065676,
+      "n_days": 6395.0
+    },
+    "vol5_zscore_clip": {
+      "mean": 0.019880710455084244,
+      "std": 0.17676012436357558,
+      "ir": 0.11247282455058626,
+      "t_stat": 9.166362694917444,
+      "hit_rate": 0.5429087624209575,
+      "n_days": 6642.0
+    },
+    "vol10_zscore_clip": {
+      "mean": 0.02521228521343104,
+      "std": 0.20237291349388087,
+      "ir": 0.12458329910931179,
+      "t_stat": 10.149525431928588,
+      "hit_rate": 0.5449751393701974,
+      "n_days": 6637.0
+    },
+    "vol20_zscore_clip": {
+      "mean": 0.028225050711978568,
+      "std": 0.21982551747913878,
+      "ir": 0.12839751742950906,
+      "t_stat": 10.452378116420148,
+      "hit_rate": 0.5454956994114984,
+      "n_days": 6627.0
+    },
+    "vol60_zscore_clip": {
+      "mean": 0.03377711443711807,
+      "std": 0.23771458688124883,
+      "ir": 0.142091046579281,
+      "t_stat": 11.532156960735303,
+      "hit_rate": 0.5548808258691362,
+      "n_days": 6587.0
+    },
+    "vol120_zscore_clip": {
+      "mean": 0.03630294052804,
+      "std": 0.2455612758962612,
+      "ir": 0.14783658537177657,
+      "t_stat": 11.943695682024941,
+      "hit_rate": 0.5590623563658649,
+      "n_days": 6527.0
+    },
+    "vol252_zscore_clip": {
+      "mean": 0.03914063452235234,
+      "std": 0.24856318354700857,
+      "ir": 0.15746754593264217,
+      "t_stat": 12.592481852319738,
+      "hit_rate": 0.5693510555121188,
+      "n_days": 6395.0
+    },
+    "beta60_rank": {
+      "mean": -0.022942283805129027,
+      "std": 0.25824609814363075,
+      "ir": -0.08883884004461913,
+      "t_stat": -7.210190031449826,
+      "hit_rate": 0.46789130104751786,
+      "n_days": 6587.0
+    },
+    "beta252_rank": {
+      "mean": -0.029509482607072094,
+      "std": 0.27649904610165044,
+      "ir": -0.10672544091245582,
+      "t_stat": -8.534699451312978,
+      "hit_rate": 0.4436278342455043,
+      "n_days": 6395.0
+    }
+  },
+  "performance_stats": {
+    "mom5_zscore_tanh": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "mom10_zscore_tanh": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "mom20_zscore_tanh": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "mom60_zscore_tanh": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "mom120_zscore_tanh": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "mom252_zscore_tanh": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "vol5_zscore_clip": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "vol10_zscore_clip": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "vol20_zscore_clip": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "vol60_zscore_clip": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "vol120_zscore_clip": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "vol252_zscore_clip": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "beta60_rank": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    },
+    "beta252_rank": {
+      "error": "No module named 'pyarrow'",
+      "turnover_error": "No module named 'pyarrow'"
+    }
+  }
+}

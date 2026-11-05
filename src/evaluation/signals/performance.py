@@ -55,7 +55,7 @@ def compute_stability(lf:pl.LazyFrame, signal_col:str) -> pl.LazyFrame:
     )
 
 
-def get_stability_DF(lf:pl.LazyFrame, signal_col:str|list, _plot=False, _print=False) -> pd.DataFrame :
+def get_stability_DF(lf:pl.LazyFrame, signal_col:"str|list", _plot=False, _print=False) -> pd.DataFrame :
     '''
     ~ Turnover
     Average day-over-day absolute change in signal value, per ticker, aggregated across the cross-section for each date. 

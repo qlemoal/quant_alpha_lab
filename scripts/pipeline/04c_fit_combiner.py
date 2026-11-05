@@ -1,29 +1,24 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 0c: Fit Elastic Net Combiner
+Phase 04c: Fit Elastic Net Combiner
 ===============================================
 
-Fits Elastic Net on selected signals from Phase 0b using CPCV search + holdout.
+Fits Elastic Net on selected signals from Phase 04b using CPCV search + holdout.
 Produces combined_score for all dates.
 
 Inputs:
-  data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet
-  data/clean/equities/US/SP500/daily/signal_eval/{run_id}/selected_signals.json
-  data/clean/equities/US/SP500/daily/signal_eval/{run_id}/fdr_report.parquet (for q-values)
+  data/clean/{asset}/{region}/{universe}/{freq}/signals/{run_id}/signals.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/signal_eval/{run_id}/selected_signals.json
+  data/clean/{asset}/{region}/{universe}/{freq}/signal_eval/{run_id}/fdr_report.parquet (for q-values)
 
 Outputs:
-  data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet   # [date, ticker, combined_score, <signal_cols>]
-  data/clean/equities/US/SP500/daily/en_scores/{run_id}/config.json
-  data/clean/equities/US/SP500/daily/en_model/{run_id}/model.json           # Model coefficients, CV results, holdout report
-  data/clean/equities/US/SP500/daily/en_model/{run_id}/stability.parquet    # Per-fold coefficient stability
+  data/clean/{asset}/{region}/{universe}/{freq}/en_scores/{run_id}/en_scores.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/en_model/{run_id}/model.json
+  data/clean/{asset}/{region}/{universe}/{freq}/en_model/{run_id}/stability.parquet
 
 Usage:
-    Previous runs:
-        python scripts/pipeline/04a_generate_signals.py --date 2026-10-29 --tag default
-        python scripts/pipeline/04b_evaluate_signals.py --date 2026-10-29 --tag default --horizon 20 --alpha 0.2
-        
-  python scripts/pipeline/04c_fit_combiner.py --date 2026-10-29 --tag default
+    python scripts/pipeline/04c_fit_combiner.py --date 2026-10-29 --tag default
 '''
 
 import argparse
@@ -32,6 +27,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
+from config.paths import get_data_config, run_id_from_args
 from src.models.elastic_net_combiner import run_en_combiner, coefficient_stability_by_fold
 from config.constants import EMBARGO_WINDOW
 
@@ -46,29 +42,28 @@ EN_CONFIG = {
     'n_test_blocks': 2,
     'holdout_dates': 200,
     'l1_ratio_grid': [.1, .5, .7, .9, .95, .99, 1],
-    'q_value_weighting': True,  # Keep Q-value weighting as requested
+    'q_value_weighting': True,
 }
 
-# Training: uses CPCV search region + embargo gap + holdout
-# (no hardcoded TRAIN_START/TRAIN_END dates - derived from data)
 
-
-def main(run_id: str):
+def main(date: str, tag: str = 'default'):
+    run_id = run_id_from_args(date, tag)
+    
+    # Use centralized config
+    cfg = get_data_config(run_id=run_id)
+    
     print('=' * 70)
-    print('PHASE 0c: FIT ELASTIC NET COMBINER (CPCV + Holdout)')
+    print('PHASE 04c: FIT ELASTIC NET COMBINER (CPCV + Holdout)')
     print('=' * 70)
     print(f'Run ID:    {run_id}')
     print(f'EN config:     {EN_CONFIG}')
     print('=' * 70)
 
-    # Derived paths
-    signal_dir = f'data/clean/equities/US/SP500/daily/signals/{run_id}'
-    signal_tag = run_id.split('_', 1)[1] if '_' in run_id else 'default'
+    signal_tag = tag
 
     # Load selected signals from evaluation
-    eval_dir = f'data/clean/equities/US/SP500/daily/signal_eval/{run_id}'
-    selected_file = f'{eval_dir}/selected_signals.json'
-    if not Path(selected_file).exists():
+    selected_file = cfg.signal_eval_dir / 'selected_signals.json'
+    if not selected_file.exists():
         raise FileNotFoundError(f'Selected signals not found: {selected_file}. Run 04b_evaluate_signals.py first.')
 
     with open(selected_file) as f:
@@ -83,18 +78,17 @@ def main(run_id: str):
     # Load q-values for weighting
     q_values = {}
     if EN_CONFIG['q_value_weighting']:
-        fdr_file = f'{eval_dir}/fdr_report.parquet'
-        if Path(fdr_file).exists():
+        fdr_file = cfg.signal_eval_dir / 'fdr_report.parquet'
+        if fdr_file.exists():
             fdr_df = pl.read_parquet(fdr_file)
             for row in fdr_df.iter_rows(named=True):
                 if row['signal'] in signal_cols:
                     q_values[row['signal']] = row['qvalue']
             print(f'  Loaded q-values for {len(q_values)} signals: {q_values}')
 
-    # Load signal data (versioned path)
-    signal_file = Path(f'data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet')
-    print(f'\nLoading {signal_file}...')
-    lf = pl.scan_parquet(signal_file)
+    # Load signal data
+    print(f'\nLoading {cfg.signals_file}...')
+    lf = pl.scan_parquet(cfg.signals_file)
 
     # Verify forward return column exists
     schema = lf.collect_schema()
@@ -102,7 +96,7 @@ def main(run_id: str):
         available = [c for c in schema.names() if c.startswith('fwdret')]
         raise ValueError(f'Forward return column {fwd_ret_col} not found. Available: {available}')
 
-    # Run EN combiner with CPCV + holdout (uses run_en_combiner from module)
+    # Run EN combiner with CPCV + holdout
     print('\nRunning Elastic Net combiner (CPCV search + holdout)...')
     result = run_en_combiner(
         lf=lf,
@@ -134,15 +128,12 @@ def main(run_id: str):
     print(stability_df)
     
     # Save stability
-    stability_dir = f'data/clean/equities/US/SP500/daily/en_model/{run_id}'
-    Path(stability_dir).mkdir(parents=True, exist_ok=True)
-    stability_file = f'{stability_dir}/stability.parquet'
-    stability_df.write_parquet(stability_file)
-    print(f'  Saved stability to {stability_file}')
+    cfg.en_model_dir.mkdir(parents=True, exist_ok=True)
+    stability_df.write_parquet(cfg.en_model_stability_file)
+    print(f'  Saved stability to {cfg.en_model_stability_file}')
 
     # --- Score FULL dataset ---
     print('\nScoring full dataset...')
-    # Use combined_score_column to apply same q-value weighting at inference
     from src.models.elastic_net_combiner import combined_score_column
     full_lf = combined_score_column(lf, result, out_col='combined_score')
     full_df = full_lf.collect()
@@ -151,24 +142,21 @@ def main(run_id: str):
     print(f'  Score stats: mean={full_df["combined_score"].mean():.6f}, std={full_df["combined_score"].std():.6f}')
 
     # Save scores
-    en_scores_dir = f'data/clean/equities/US/SP500/daily/en_scores/{run_id}'
-
-    Path(en_scores_dir).mkdir(parents=True, exist_ok=True)
-    output_file = f'{en_scores_dir}/en_scores.parquet'
-    full_df.select(['date', 'ticker', 'combined_score'] + signal_cols).write_parquet(output_file)
-    print(f'\n✓ Saved scores to {output_file}')
+    cfg.en_scores_dir.mkdir(parents=True, exist_ok=True)
+    full_df.select(['date', 'ticker', 'combined_score'] + signal_cols).write_parquet(cfg.en_scores_file)
+    print(f'\n✓ Saved scores to {cfg.en_scores_file}')
 
     # Save config for scores
     score_config = {
         'run_id': run_id,
         'signal_tag': signal_tag,
-        'signal_dir': signal_dir,
+        'signal_dir': str(cfg.signals_dir),
         'fwd_ret_col': fwd_ret_col,
         'horizon': horizon,
         'signal_cols': signal_cols,
         'q_values': q_values,
     }
-    with open(f'{en_scores_dir}/config.json', 'w') as f:
+    with open(cfg.en_scores_config_file, 'w') as f:
         json.dump(score_config, f, indent=2, default=str)
 
     # Save model info (includes holdout report)
@@ -176,7 +164,7 @@ def main(run_id: str):
     model_info = {
         'signal_tag': signal_tag,
         'run_id': run_id,
-        'signal_dir': signal_dir,
+        'signal_dir': str(cfg.signals_dir),
         'alpha': float(alpha_used),
         'l1_ratio': float(l1_ratio_used),
         'signals': signal_cols,
@@ -195,12 +183,10 @@ def main(run_id: str):
         'fwd_ret_col': fwd_ret_col,
         'holdout_report': holdout_report,
     }
-    model_dir = f'data/clean/equities/US/SP500/daily/en_model/{run_id}'
-    Path(model_dir).mkdir(parents=True, exist_ok=True)
-    model_file = f'{model_dir}/model.json'
-    with open(model_file, 'w') as f:
+    cfg.en_model_dir.mkdir(parents=True, exist_ok=True)
+    with open(cfg.en_model_file, 'w') as f:
         json.dump(model_info, f, indent=2, default=str)
-    print(f'  Model info: {model_file}')
+    print(f'  Model info: {cfg.en_model_file}')
 
     # Print holdout summary
     if holdout_report:
@@ -210,7 +196,7 @@ def main(run_id: str):
         print(f'  Hit rate: {holdout_report.get("hit_rate", "N/A"):.2%}')
 
     print('\nDone!')
-    print(f'\nNext: python scripts/pipeline/04d_estimate_risk_model.py --signal-tag {signal_tag}')
+    print(f'\nNext: python scripts/pipeline/04d_estimate_risk_model.py --date {date} --tag {tag}')
 
 
 
@@ -224,6 +210,4 @@ if __name__ == '__main__':
                         help='Signal tag (default: default)')
     args = parser.parse_args()
     
-    # Construct run_id from date + tag
-    run_id = f'{args.date}_{args.tag}'
-    main(run_id)
+    main(args.date, args.tag)

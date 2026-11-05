@@ -18,7 +18,8 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
-from datetime import date
+
+from config.paths import get_data_config, run_id_from_args
 
 PHASES = [
     ('0a', '04a_generate_signals.py', 'Generate signals (make_signal)'),
@@ -29,110 +30,72 @@ PHASES = [
     ('3',  '04f_run_backtest.py', 'Run backtest with costs'),
 ]
 
-# New structure: clean/equities/US/SP500/daily/{step}/{run_id}/{data_file}.parquet + config.json
-# run_id format: YYYY-MM-DD_tag (e.g., 2026-10-29_default)
 
-def find_run_dir(step: str, run_id: str) -> "Path | None":
-    """Find the run directory for a given step and run_id."""
-    base = Path(f'data/clean/equities/US/SP500/daily/{step}')
-    if not base.exists():
-        return None
-    # Look for exact match first
-    exact = base / run_id
-    if exact.exists():
-        return exact
-    # Fallback: find by tag suffix
-    tag = run_id.split('_', 1)[1] if '_' in run_id else run_id
-    matches = list(base.glob(f'*_{tag}'))
-    if matches:
-        return sorted(matches)[-1]  # latest
-    return None
-
-
-def check_prereqs(phase_id: str, run_id: str):
+def check_prereqs(phase_id: str, cfg) -> list[str]:
     """Check if prerequisites for a phase exist."""
     missing = []
-    tag = run_id.split('_', 1)[1] if '_' in run_id else run_id
-    
-    # Fixed paths for single-file base tables
-    ohlcv_file = Path('data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet')
-    features_file = Path('data/clean/equities/US/SP500/daily/features/features.parquet')
     
     if phase_id == '0a':
-        # Need features and OHLCV
-        if not features_file.exists():
-            missing.append('data/clean/equities/US/SP500/daily/features/features.parquet')
-        if not ohlcv_file.exists():
-            missing.append('data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet')
+        if not cfg.clean_features_file.exists():
+            missing.append(str(cfg.clean_features_file))
+        if not cfg.clean_ohlcv_file.exists():
+            missing.append(str(cfg.clean_ohlcv_file))
     
     elif phase_id == '0b':
-        # Need signals directory
-        signals_dir = find_run_dir('signals', run_id)
-        if not signals_dir or not (signals_dir / 'signals.parquet').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet')
+        if not cfg.signals_file.exists():
+            missing.append(str(cfg.signals_file))
     
     elif phase_id == '0c':
-        # Need signals and signal_eval
-        signals_dir = find_run_dir('signals', run_id)
-        signal_eval_dir = find_run_dir('signal_eval', run_id)
-        if not signals_dir or not (signals_dir / 'signals.parquet').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet')
-        if not signal_eval_dir or not (signal_eval_dir / 'selected_signals.json').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/signal_eval/{run_id}/selected_signals.json')
+        if not cfg.signals_file.exists():
+            missing.append(str(cfg.signals_file))
+        if not (cfg.signal_eval_dir / 'selected_signals.json').exists():
+            missing.append(str(cfg.signal_eval_dir / 'selected_signals.json'))
     
     elif phase_id == '1':
-        # Need en_scores, ohlcv, features
-        en_scores_dir = find_run_dir('en_scores', run_id)
-        if not en_scores_dir or not (en_scores_dir / 'en_scores.parquet').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet')
-        if not ohlcv_file.exists():
-            missing.append('data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet')
-        if not features_file.exists():
-            missing.append('data/clean/equities/US/SP500/daily/features/features.parquet')
+        if not cfg.en_scores_file.exists():
+            missing.append(str(cfg.en_scores_file))
+        if not cfg.clean_ohlcv_file.exists():
+            missing.append(str(cfg.clean_ohlcv_file))
+        if not cfg.clean_features_file.exists():
+            missing.append(str(cfg.clean_features_file))
     
     elif phase_id == '2':
-        # Need risk_model, en_scores
-        risk_dir = find_run_dir('risk_model', run_id)
-        en_scores_dir = find_run_dir('en_scores', run_id)
-        if not risk_dir or not (risk_dir / 'cov.parquet').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}/cov.parquet')
-        if not risk_dir or not (risk_dir / 'clusters.parquet').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}/clusters.parquet')
-        if not risk_dir or not (risk_dir / 'summary.json').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}/summary.json')
-        if not en_scores_dir or not (en_scores_dir / 'en_scores.parquet').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet')
+        if not (cfg.risk_model_dir / 'cov.parquet').exists():
+            missing.append(str(cfg.risk_model_dir / 'cov.parquet'))
+        if not (cfg.risk_model_dir / 'clusters.parquet').exists():
+            missing.append(str(cfg.risk_model_dir / 'clusters.parquet'))
+        if not (cfg.risk_model_dir / 'summary.json').exists():
+            missing.append(str(cfg.risk_model_dir / 'summary.json'))
+        if not cfg.en_scores_file.exists():
+            missing.append(str(cfg.en_scores_file))
     
     elif phase_id == '3':
-        # Need weights, en_scores, ohlcv, features
-        weights_dir = find_run_dir('weights', run_id)
-        en_scores_dir = find_run_dir('en_scores', run_id)
-        if not weights_dir or not (weights_dir / 'weights.parquet').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/weights/{run_id}/weights.parquet')
-        if not en_scores_dir or not (en_scores_dir / 'en_scores.parquet').exists():
-            missing.append(f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet')
-        if not ohlcv_file.exists():
-            missing.append('data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet')
-        if not features_file.exists():
-            missing.append('data/clean/equities/US/SP500/daily/features/features.parquet')
+        if not cfg.weights_file.exists():
+            missing.append(str(cfg.weights_file))
+        if not cfg.en_scores_file.exists():
+            missing.append(str(cfg.en_scores_file))
+        if not cfg.clean_ohlcv_file.exists():
+            missing.append(str(cfg.clean_ohlcv_file))
+        if not cfg.clean_features_file.exists():
+            missing.append(str(cfg.clean_features_file))
     
     return missing
 
 
 def run_phase(phase_id: str, script: str, date: str, tag: str):
-    run_id = f'{date}_{tag}'
+    run_id = run_id_from_args(date, tag)
     print(f'\n{"="*60}')
     print(f'RUNNING PHASE {phase_id}: {script}')
     print(f'{"="*60}')
 
-    missing = check_prereqs(phase_id, run_id)
+    cfg = get_data_config(run_id=run_id)
+    missing = check_prereqs(phase_id, cfg)
     if missing:
         print(f'✗ Prerequisites not met:')
         for m in missing:
             print(f'  - {m}')
         return False
 
-    # All pipeline scripts now use --date and --tag
     cmd = [sys.executable, f'scripts/pipeline/{script}', f'--date={date}', f'--tag={tag}']
     print(f'Command: {" ".join(cmd)}')
 
@@ -158,13 +121,12 @@ def main():
     parser.add_argument('--check', action='store_true', help='Check prerequisites only')
     args = parser.parse_args()
 
-    run_id = f'{args.date}_{args.tag}'
+    run_id = run_id_from_args(args.date, args.tag)
     print('=' * 60)
     print('PIPELINE RUNNER')
     print('=' * 60)
     print(f'Run ID: {run_id}')
 
-    # Determine phases to run
     if args.only_phase:
         phases_to_run = [args.only_phase]
     else:
@@ -175,8 +137,9 @@ def main():
 
     if args.check:
         print('\nPrerequisite check:')
+        cfg = get_data_config(run_id=run_id)
         for pid in phases_to_run:
-            missing = check_prereqs(pid, run_id)
+            missing = check_prereqs(pid, cfg)
             status = '✓' if not missing else '✗'
             print(f'  {pid}: {status}')
             for m in missing:
@@ -194,7 +157,8 @@ def main():
     print('\n' + '=' * 60)
     if success:
         print('✓ ALL PHASES COMPLETED')
-        print(f'Results in data/clean/equities/US/SP500/daily/backtest/{run_id}/')
+        cfg = get_data_config(run_id=run_id)
+        print(f'Results in {cfg.backtest_dir}/')
     else:
         print('✗ PIPELINE FAILED')
     print('=' * 60)

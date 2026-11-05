@@ -24,7 +24,7 @@ def zscore_expr(expr:pl.Expr, descending=False) -> pl.Expr:
     )
 
 
-def z_score(lf:pl.LazyFrame, colname:str|list, descending=False):
+def z_score(lf:pl.LazyFrame, colname:"str|list", descending=False):
     '''
     Normalizes a column cross-sectionally, i.e., over dates.
     If colname is a list, then it normalizes all columns in the list, using the helper function as_list.

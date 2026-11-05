@@ -1,20 +1,20 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 2: Construct Portfolio Weights
+Phase 04e: Construct Portfolio Weights
 ===============================================
 
 Thin wrapper calling src/risk/portfolio_construction.py functions.
 Loads risk model + scores, constructs weights at each rebalance.
 
 Inputs:
-  data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet
-  data/clean/equities/US/SP500/daily/risk_model/{run_id}/
+  data/clean/{asset}/{region}/{universe}/{freq}/en_scores/{run_id}/en_scores.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/risk_model/{run_id}/
 
 Outputs:
-  data/clean/equities/US/SP500/daily/weights/{run_id}/weights.parquet    # [date, ticker, weight, cluster_id, signal, raw_w, capped_w]
-  data/clean/equities/US/SP500/daily/weights/{run_id}/weights_diag.parquet
-  data/clean/equities/US/SP500/daily/weights/{run_id}/config.json
+  data/clean/{asset}/{region}/{universe}/{freq}/weights/{run_id}/weights.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/weights/{run_id}/weights_diag.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/weights/{run_id}/config.json
 
 Usage:
   python scripts/pipeline/04e_construct_weights.py --date 2026-10-29 --tag default
@@ -27,6 +27,7 @@ from datetime import date
 import numpy as np
 import polars as pl
 
+from config.paths import get_data_config, run_id_from_args
 from src.risk.portfolio_construction import (
     raw_weights_from_score,
     apply_cluster_caps,
@@ -38,7 +39,6 @@ from src.portfolio.backtest import prepare_backtest_data
 # CONFIGURATION
 # =============================================================================
 
-# Portfolio construction config
 PORTFOLIO_CONFIG = {
     'target_vol': 0.10,
     'max_gross': 1.0,
@@ -59,7 +59,6 @@ def load_covariance(cov_file, reb_date, tickers):
     if len(df) == 0:
         return None, None
     
-    # Get tickers that are in both the scores and the covariance matrix
     cov_tickers = set(df['ticker_i'].unique()).union(set(df['ticker_j'].unique()))
     common_tickers = [t for t in tickers if t in cov_tickers]
     
@@ -85,24 +84,26 @@ def load_clusters(clusters_file, reb_date, tickers):
 
 
 def main(date: str, tag: str = 'default'):
-    run_id = f'{date}_{tag}'
+    run_id = run_id_from_args(date, tag)
+    
+    # Use centralized config
+    cfg = get_data_config(run_id=run_id)
+    
     print('=' * 70)
-    print('PHASE 2: CONSTRUCT PORTFOLIO WEIGHTS')
+    print('PHASE 04e: CONSTRUCT PORTFOLIO WEIGHTS')
     print('=' * 70)
     print(f'Run ID:        {run_id}')
-    print(f'Date:          {date}')
-    print(f'Tag:           {tag}')
     print(f'Config:        {PORTFOLIO_CONFIG}')
     print('=' * 70)
 
     # Input files
-    en_scores_file = f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet'
-    risk_dir = Path(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}')
+    en_scores_file = cfg.en_scores_file
+    risk_dir = cfg.risk_model_dir
     cov_file = risk_dir / 'cov.parquet'
     clusters_file = risk_dir / 'clusters.parquet'
     summary_file = risk_dir / 'summary.json'
 
-    if not Path(en_scores_file).exists():
+    if not en_scores_file.exists():
         raise FileNotFoundError(f'No en_scores file: {en_scores_file}')
     if not cov_file.exists():
         raise FileNotFoundError(f'No cov file: {cov_file}')
@@ -111,20 +112,15 @@ def main(date: str, tag: str = 'default'):
     if not summary_file.exists():
         raise FileNotFoundError(f'No summary file: {summary_file}')
 
-    # Find OHLCV for this tag (not run_id since ohlcv is per tag)
-    ohlcv_files = list(Path('data/clean/equities/US/SP500/daily/ohlcv').glob('ohlcv.parquet'))
-    if not ohlcv_files:
-        raise FileNotFoundError(f'No ohlcv file found for tag {tag}')
-    ohlcv_file = sorted(ohlcv_files)[-1]
-    print(f'  Using OHLCV: {ohlcv_file}')
-
-    # Use single features file (no date/tag)
-    features_file = Path('data/clean/equities/US/SP500/daily/features/features.parquet')
+    # OHLCV and features (shared base tables)
+    ohlcv_file = cfg.clean_ohlcv_file
+    features_file = cfg.clean_features_file
+    if not ohlcv_file.exists():
+        raise FileNotFoundError(f'No ohlcv file: {ohlcv_file}')
     if not features_file.exists():
-        raise FileNotFoundError(f'No features file found: {features_file}')
-    print(f'  Using features: {features_file}')
+        raise FileNotFoundError(f'No features file: {features_file}')
 
-    out_dir = Path(f'data/clean/equities/US/SP500/daily/weights/{run_id}')
+    out_dir = cfg.weights_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load rebalance dates from risk model
@@ -132,43 +128,21 @@ def main(date: str, tag: str = 'default'):
         summaries = json.load(f)
     rebalance_dates = [s['date'] for s in summaries]
 
-    # Prepare backtest data (aligns dates, gets returns panel)
+    # Prepare backtest data
     print('\n[1/3] Preparing data...')
     price_lf = pl.scan_parquet(ohlcv_file)
     features_lf = pl.scan_parquet(features_file)
     
-    # Add adv60 and std60 from features
     features_lf = features_lf.with_columns([
         pl.col('log_adv60').exp().alias('adv60'),
         pl.col('vol60').alias('std60'),
         pl.col('logret'),
     ]).select(['date', 'ticker', 'logret', 'adv60', 'std60'])
     
-    # Join prices with features
     complete_price_lf = price_lf.join(features_lf, on=['date', 'ticker'], how='left')
     
     signal_lf = pl.scan_parquet(en_scores_file).select(['date', 'ticker', SCORE_COL])
 
-    # Get date range from data
-    date_range = complete_price_lf.select(
-        pl.col('date').min().alias('min_date'),
-        pl.col('date').max().alias('max_date')
-    ).collect()
-    start_date = date_range['min_date'][0]
-    
-    # Add adv60 and std60 from features
-    features_lf = features_lf.with_columns([
-        pl.col('log_adv60').exp().alias('adv60'),
-        pl.col('vol60').alias('std60'),
-        pl.col('logret'),
-    ]).select(['date', 'ticker', 'logret', 'adv60', 'std60'])
-    
-    # Join prices with features
-    complete_price_lf = price_lf.join(features_lf, on=['date', 'ticker'], how='left')
-    
-    signal_lf = pl.scan_parquet(en_scores_file).select(['date', 'ticker', SCORE_COL])
-
-    # Get date range from data
     date_range = complete_price_lf.select(
         pl.col('date').min().alias('min_date'),
         pl.col('date').max().alias('max_date')
@@ -193,50 +167,39 @@ def main(date: str, tag: str = 'default'):
     prep_dates = [str(d) for d in prepared['rebalance_dates']]
     
     # Find dates with non-null combined_score
-    from datetime import date as dt_date
     signal_lf_for_dates = pl.scan_parquet(en_scores_file)
     score_dates = set(str(d) for d in signal_lf_for_dates.filter(
         pl.col(SCORE_COL).is_not_null()
     ).select(pl.col('date').unique()).collect()['date'])
     
-    # Risk model dates
     risk_dates = set(rebalance_dates)
-    
-    # Intersection: dates with risk model, backtest prep, AND non-null combined_score
     common_dates = sorted(set(prep_dates) & risk_dates & score_dates)
     print(f'  {len(common_dates)} common rebalance dates (with non-null {SCORE_COL})')
 
-    returns_panel = prepared['returns_panel']  # Already a DataFrame
-
-    # Pre-load signals for all common dates at once (much faster than filtering per date)
+    # Pre-load signals for all common dates
     print('\n[2/3] Pre-loading signals...')
     signals_lf = pl.scan_parquet(en_scores_file)
-    # Only keep signals with non-null combined_score
     signals_df = signals_lf.filter(
         pl.col('date').dt.strftime('%Y-%m-%d').is_in(common_dates) & 
         pl.col(SCORE_COL).is_not_null()
     ).collect()
-    # Group by date for fast lookup - use string dates as keys for consistency with cov/clusters
     signals_df = signals_df.with_columns(pl.col('date').dt.strftime('%Y-%m-%d').alias('date_str'))
-    # Use to_dict to get string keys
     signals_by_date = {}
     for row in signals_df.iter_rows(named=True):
         d = row['date_str']
         if d not in signals_by_date:
             signals_by_date[d] = []
         signals_by_date[d].append(row)
-    # Convert to DataFrames
     signals_by_date = {d: pl.DataFrame(g) for d, g in signals_by_date.items()}
-    print(f'  Loaded signals for {len(signals_by_date)} dates (with non-null {SCORE_COL})')
+    print(f'  Loaded signals for {len(signals_by_date)} dates')
 
-    # Pre-load cov and clusters for all common dates
+    # Pre-load cov and clusters
     print('\n[2/3b] Pre-loading covariance and clusters...')
     cov_lf = pl.scan_parquet(cov_file)
     clusters_lf = pl.scan_parquet(clusters_file)
     cov_df = cov_lf.filter(pl.col('date').is_in(common_dates)).collect()
     clusters_df = clusters_lf.filter(pl.col('date').is_in(common_dates)).collect()
     
-    # Ensure date column is string type for consistent key access
     if cov_df['date'].dtype != pl.Utf8:
         cov_df = cov_df.with_columns(pl.col('date').cast(pl.Utf8).alias('date_str'))
     else:
@@ -246,7 +209,6 @@ def main(date: str, tag: str = 'default'):
     else:
         clusters_df = clusters_df.with_columns(pl.col('date').alias('date_str'))
     
-    # Build dicts using string keys
     cov_by_date = {}
     for row in cov_df.iter_rows(named=True):
         d = row['date_str']
@@ -260,8 +222,8 @@ def main(date: str, tag: str = 'default'):
     clusters_by_date = {d: pl.DataFrame(g) for d, g in clusters_by_date.items()}
     print(f'  Loaded cov for {len(cov_by_date)} dates, clusters for {len(clusters_by_date)} dates')
 
-    # Construct weights
-    print('\n[2/3] Constructing weights...')
+    # Construct weights per date
+    print('\n[3/3] Constructing weights...')
     all_weights = []
     all_diag = []
 
@@ -269,107 +231,112 @@ def main(date: str, tag: str = 'default'):
         if i % 50 == 0:
             print(f'  [{i+1}/{len(common_dates)}] {reb_date}')
 
-        # Get signals for this date (from pre-loaded dict)
-        score_df = signals_by_date.get(reb_date)
-        if score_df is None or len(score_df) == 0:
+        # Get signals for this date
+        if reb_date not in signals_by_date:
+            continue
+        sig_df = signals_by_date[reb_date]
+        tickers = sig_df['ticker'].to_list()
+        scores = sig_df[SCORE_COL].to_numpy()
+        n = len(tickers)
+
+        # Get covariance and clusters for this date
+        cov_df_date = cov_by_date.get(reb_date)
+        cluster_df_date = clusters_by_date.get(reb_date)
+        
+        if cov_df_date is None:
             continue
 
-        tickers = score_df['ticker'].to_list()
-        scores = score_df[SCORE_COL].to_numpy()
+        # Build covariance matrix
+        cov_tickers = set(cov_df_date['ticker_i'].unique()).union(set(cov_df_date['ticker_j'].unique()))
+        common = [t for t in tickers if t in cov_tickers]
+        if len(common) < 10:
+            continue
 
-        # Get cov from pre-loaded dict
-        cov_df = cov_by_date.get(reb_date)
-        if cov_df is None or len(cov_df) == 0:
-            continue
-        
-        cov_tickers = set(cov_df['ticker_i'].unique()).union(set(cov_df['ticker_j'].unique()))
-        common_tickers = [t for t in tickers if t in cov_tickers]
-        
-        if len(common_tickers) == 0:
-            continue
-        
-        n = len(common_tickers)
-        idx = {t: i for i, t in enumerate(common_tickers)}
-        cov = np.zeros((n, n))
-        for row in cov_df.iter_rows(named=True):
+        idx = {t: i for i, t in enumerate(common)}
+        cov = np.zeros((len(common), len(common)))
+        for row in cov_df_date.iter_rows(named=True):
             ti, tj = row['ticker_i'], row['ticker_j']
             if ti in idx and tj in idx:
                 i, j = idx[ti], idx[tj]
                 cov[i, j] = cov[j, i] = row['cov']
-        
-        # Filter tickers and scores to only those in covariance matrix
-        ticker_mask = [t in common_tickers for t in tickers]
-        tickers = [t for t in tickers if t in common_tickers]
-        scores = scores[ticker_mask]
-        
-        # Get clusters from pre-loaded dict
-        cluster_df = clusters_by_date.get(reb_date)
-        if cluster_df is None or len(cluster_df) == 0:
-            continue
-        cluster_map = {row['ticker']: row['cluster_id'] for row in cluster_df.iter_rows(named=True) if row['ticker'] in tickers}
 
-        # Step 1: Raw weights
+        # Clusters
+        cluster_map = {}
+        if cluster_df_date is not None:
+            cluster_map = {row['ticker']: row['cluster_id'] for row in cluster_df_date.iter_rows(named=True) if row['ticker'] in common}
+
+        # Align scores to common tickers
+        scores_aligned = np.array([scores[tickers.index(t)] for t in common])
+
+        # Raw weights
         raw_w = raw_weights_from_score(
-            pl.Series('score', scores),
-            max_gross=PORTFOLIO_CONFIG['max_gross'],
+            scores=scores_aligned,
             method=PORTFOLIO_CONFIG['signal_method'],
         )
 
-        # Step 2: Cluster caps
+        # Cluster caps
         capped_w = apply_cluster_caps(
-            raw_w, cluster_map,
-            max_multiple=PORTFOLIO_CONFIG['max_cluster_multiple'],
+            weights=raw_w,
+            tickers=common,
+            cluster_map=cluster_map,
+            max_cluster_multiple=PORTFOLIO_CONFIG['max_cluster_multiple'],
             method=PORTFOLIO_CONFIG['cap_method'],
         )
 
-        # Step 3: Vol targeting
+        # Vol target
         final_w = apply_vol_target(
-            capped_w, cov, PORTFOLIO_CONFIG['target_vol'],
+            weights=capped_w,
+            cov=cov,
+            target_vol=PORTFOLIO_CONFIG['target_vol'],
             method=PORTFOLIO_CONFIG['vol_method'],
         )
 
-        # Record
-        for t, w_r, w_c, w_f in zip(tickers, raw_w, capped_w, final_w):
+        # Gross cap
+        gross = np.sum(np.abs(final_w))
+        if gross > PORTFOLIO_CONFIG['max_gross']:
+            final_w = final_w * PORTFOLIO_CONFIG['max_gross'] / gross
+
+        # Save weights
+        for j, t in enumerate(common):
             all_weights.append({
                 'date': reb_date,
                 'ticker': t,
-                'signal': float(scores[tickers.index(t)]),
-                'raw_weight': float(w_r),
-                'capped_weight': float(w_c),
-                'weight': float(w_f),
-                'cluster_id': cluster_map.get(t, -1),
+                'weight': float(final_w[j]),
+                'cluster_id': int(cluster_map.get(t, -1)) if cluster_map else -1,
+                'raw_weight': float(raw_w[j]),
+                'capped_weight': float(capped_w[j]),
             })
 
-        # Diagnostics - convert to numpy for numpy operations
-        raw_w_np = raw_w.to_numpy()
-        capped_w_np = capped_w.to_numpy()
-        final_w_np = final_w.to_numpy()
+        # Diagnostics
         all_diag.append({
             'date': reb_date,
-            'n_tickers': len(tickers),
-            'gross_raw': float(np.sum(np.abs(raw_w_np))),
-            'gross_capped': float(np.sum(np.abs(capped_w_np))),
-            'gross_final': float(np.sum(np.abs(final_w_np))),
-            'n_long': int(np.sum(final_w_np > 1e-6)),
-            'n_short': int(np.sum(final_w_np < -1e-6)),
-            'max_cluster_exp': float(max(
-                sum(abs(w_f) for t, w_f in zip(tickers, final_w_np) if cluster_map.get(t) == c)
-                for c in set(cluster_map.values())
-            ) if cluster_map else 0),
+            'n_tickers': len(common),
+            'gross': float(np.sum(np.abs(final_w))),
+            'long_exposure': float(np.sum(final_w[final_w > 0])),
+            'short_exposure': float(np.abs(np.sum(final_w[final_w < 0]))),
+            'max_weight': float(np.max(final_w)) if len(final_w) > 0 else 0.0,
+            'min_weight': float(np.min(final_w)) if len(final_w) > 0 else 0.0,
+            'turnover': float(np.sum(np.abs(final_w))) if i == 0 else None,  # Will fill below
         })
 
-    # Save
-    print('\n[3/3] Saving...')
-    out_dir = Path(f'data/clean/equities/US/SP500/daily/weights/{run_id}')
-    out_dir.mkdir(parents=True, exist_ok=True)
-    
-    weights_df = pl.DataFrame(all_weights)
-    weights_file = out_dir / 'weights.parquet'
-    weights_df.write_parquet(weights_file)
+    # Fill turnover
+    for i in range(1, len(all_diag)):
+        prev = [w for w in all_weights if w['date'] == all_diag[i-1]['date']]
+        curr = [w for w in all_weights if w['date'] == all_diag[i]['date']]
+        if prev and curr:
+            prev_w = {w['ticker']: w['weight'] for w in prev}
+            curr_w = {w['ticker']: w['weight'] for w in curr}
+            all_t = set(prev_w.keys()) | set(curr_w.keys())
+            turnover = sum(abs(curr_w.get(t, 0) - prev_w.get(t, 0)) for t in all_t) / 2
+            all_diag[i]['turnover'] = turnover
 
+    # Write outputs
+    weights_df = pl.DataFrame(all_weights)
     diag_df = pl.DataFrame(all_diag)
-    diag_file = out_dir / 'weights_diag.parquet'
-    diag_df.write_parquet(diag_file)
+    weights_df.write_parquet(cfg.weights_file)
+    diag_df.write_parquet(cfg.weights_diag_file)
+    print(f'\n✓ Saved weights to {cfg.weights_file}')
+    print(f'  {len(all_weights):,} weight entries across {len(all_diag)} dates')
 
     # Save config
     config = {
@@ -377,20 +344,9 @@ def main(date: str, tag: str = 'default'):
         'tag': tag,
         'portfolio_config': PORTFOLIO_CONFIG,
         'score_col': SCORE_COL,
-        'lookback_window': LOOKBACK_WINDOW,
-        'min_obs': MIN_OBS,
-        'rebalance_freq': REBALANCE_FREQ,
-        'start_date': str(start_date),
-        'end_date': str(end_date),
     }
     with open(out_dir / 'config.json', 'w') as f:
         json.dump(config, f, indent=2, default=str)
-
-    print(f'  Weights: {len(weights_df):,} rows -> {weights_file}')
-    print(f'  Diag:    {len(diag_df)} rows -> {diag_file}')
-    print(f'  Config:  {out_dir}/config.json')
-    print(f'  Avg gross: {diag_df["gross_final"].mean():.4f}')
-    print(f'  Avg names: {diag_df["n_tickers"].mean():.0f}')
 
     print('\nDone!')
     print(f'\nNext: python scripts/pipeline/04f_run_backtest.py --date {date} --tag {tag}')

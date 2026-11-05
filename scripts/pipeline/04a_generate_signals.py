@@ -8,11 +8,12 @@ Generates signals from features using make_signal().
 No persistent signals.parquet - signals are created fresh each run.
 
 Outputs:
-  data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet   # [date, ticker, <signal_cols>, fwd_ret_<H>d]
-  data/clean/equities/US/SP500/daily/signals/{run_id}/config.json       # full config for reproducibility
+  data/clean/{asset}/{region}/{universe}/{freq}/signals/{run_id}/signals.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/signals/{run_id}/config.json
 
 Usage:
   python scripts/pipeline/04a_generate_signals.py --date 2026-10-29 --tag default
+  # Dataset defined in config/dataset_config.json
 '''
 
 import argparse
@@ -26,6 +27,12 @@ import json
 import os
 import numpy as np
 from datetime import datetime
+from pathlib import Path
+
+# Import centralized paths
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'config'))
+from config.paths import get_data_config, run_id_from_args
 
 # =============================================================================
 # ARGUMENT PARSING
@@ -39,18 +46,21 @@ args = parser.parse_args()
 
 RUN_DATE = args.date
 SIGNAL_TAG = args.tag
-run_id = f'{RUN_DATE}_{SIGNAL_TAG}'
+run_id = run_id_from_args(RUN_DATE, SIGNAL_TAG)
+
+# Create data config from dataset_config.json (no CLI args needed)
+cfg = get_data_config(run_id=run_id)
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-# Input
-FEATURES_FILE = 'data/clean/equities/US/SP500/daily/features/features.parquet'
+# Input (from config)
+FEATURES_FILE = cfg.clean_features_file
 
 # Output (tagged so you can keep multiple signal sets)
-OUTPUT_DIR = f'data/clean/equities/US/SP500/daily/signals/{run_id}'
-OUTPUT_FILE = f'{OUTPUT_DIR}/signals.parquet'
+OUTPUT_DIR = cfg.signals_dir
+OUTPUT_FILE = cfg.signals_file
 
 # Signal specifications: list of (feature_col, method, params)
 # method: 'zscore_tanh', 'zscore_clip', 'rank', 'decile'
@@ -103,6 +113,7 @@ DATE_END = None    # '2024-12-31'
 print('=' * 70)
 print('PHASE 4.a: GENERATE SIGNALS (on-demand)')
 print('=' * 70)
+print(f'Dataset:       {cfg.asset}/{cfg.region}/{cfg.universe}/{cfg.freq}')
 print(f'Features:      {FEATURES_FILE}')
 print(f'Output:        {OUTPUT_FILE}')
 print(f'Signal tag:    {SIGNAL_TAG}')
@@ -265,10 +276,16 @@ config = {
     'n_signals': len(signal_cols),
     'n_rows': row_count,
     'output_cols': output_cols,
+    # Dataset configuration
+    'source': cfg.source,
+    'asset': cfg.asset,
+    'region': cfg.region,
+    'universe': cfg.universe,
+    'freq': cfg.freq,
     # Provenance
     'git_commit': get_git_commit(),
     'git_diff': get_git_diff() or None,
-    'features_file': FEATURES_FILE,
+    'features_file': str(FEATURES_FILE),
     'features_hash': file_hash(FEATURES_FILE),
     'params_hash': params_hash(SIGNAL_SPECS),
     'script_path': __file__,
@@ -278,7 +295,7 @@ config = {
     'ic_stats': ic_stats,
     'performance_stats': perf_stats,
 }
-config_file = f'{OUTPUT_DIR}/config.json'
+config_file = cfg.signals_config_file
 with open(config_file, 'w') as f:
     json.dump(config, f, indent=2, default=str)
 print(f'  Config saved to {config_file}')

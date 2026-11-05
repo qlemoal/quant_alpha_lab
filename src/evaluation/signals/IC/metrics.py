@@ -13,7 +13,7 @@ from src.features.returns import add_fwdret_horizon
 from src.evaluation.signals.ic.core import compute_ic, summarize_ic
 
 
-def newey_west_ic_tstat(ic_values:pl.LazyFrame|pl.DataFrame|list, max_lag=None) -> dict:
+def newey_west_ic_tstat(ic_values:"pl.LazyFrame|pl.DataFrame|list", max_lag=None) -> dict:
     '''
     Newey-West (HAC, heteroskedastic autocorrelated consistent) corrected t-stat for the mean of a daily IC series.
         HAC is for the covariance matrix,   See https://en.wikipedia.org/wiki/Newey%E2%80%93West_estimator 
@@ -70,7 +70,7 @@ def newey_west_ic_tstat(ic_values:pl.LazyFrame|pl.DataFrame|list, max_lag=None) 
 
 
 
-def ic_pvalue_nw(nw_result:dict) -> float | None:
+def ic_pvalue_nw(nw_result:dict) -> "float | None":
     '''
     Two-sided p-value from a Newey-West-corrected t-stat, via the normal
         approximation (the NW t-stat is asymptotically normal, not exactly

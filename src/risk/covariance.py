@@ -139,7 +139,7 @@ def _psd_project(M: np.ndarray, floor: float = 1e-12) -> np.ndarray:
 
 def ledoit_wolf_shrinkage(
     corr: np.ndarray,
-    returns: np.ndarray | None = None,
+    returns: "np.ndarray | None" = None,
     target: str = 'identity',
 ) -> tuple[np.ndarray, float]:
     '''
@@ -304,7 +304,7 @@ def ledoit_wolf_shrinkage(
 
 def oracle_approximating_shrinkage(
     corr: np.ndarray,
-    returns: np.ndarray | None = None,
+    returns: "np.ndarray | None" = None,
 ) -> tuple[np.ndarray, float]:
     '''
     Oracle Approximating Shrinkage (OAS) -- Ledoit & Wolf (2012).
@@ -424,7 +424,7 @@ def oracle_approximating_shrinkage(
 
 def factor_model_covariance(
     returns: np.ndarray,
-    n_factors: int | None = None,
+    n_factors: "int | None" = None,
     method: str = 'fixed',
 ) -> tuple[np.ndarray, np.ndarray, int]:
     '''
@@ -710,8 +710,8 @@ def estimate_covariance(
     returns: np.ndarray,
     method: str = 'ledoit_wolf',
     target: str = 'identity',
-    n_factors: int | None = None,
-    delta: float | None = None,
+    n_factors: "int | None" = None,
+    delta: "float | None" = None,
 ) -> tuple[np.ndarray, dict]:
     '''
     End-to-end covariance estimation from a returns panel.

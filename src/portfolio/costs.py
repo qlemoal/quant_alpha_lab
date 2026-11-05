@@ -83,7 +83,7 @@ from polars import col as c
 
 def estimate_spread(
     adv: np.ndarray,
-    vol: np.ndarray | None = None,
+    vol: "np.ndarray | None" = None,
     model: str = 'power_law',
     spread_bps_min: float = 1.0,
     spread_bps_max: float = 200.0,
@@ -302,7 +302,7 @@ def estimate_commission(
     notional: float,
     commission_bps: float = 1.0,
     min_commission_per_share: float = 0.0,
-    prices: np.ndarray | None = None,
+    prices: "np.ndarray | None" = None,
 ) -> np.ndarray:
     '''
     Estimate commission cost per asset in dollars.
@@ -360,11 +360,11 @@ def total_transaction_cost(
     adv: np.ndarray,
     vol: np.ndarray,
     notional: float,
-    prices: np.ndarray | None = None,
+    prices: "np.ndarray | None" = None,
     spread_model: str = 'power_law',
-    spread_kwargs: dict | None = None,
+    spread_kwargs: "dict | None" = None,
     impact_model: str = 'sqrt',
-    impact_kwargs: dict | None = None,
+    impact_kwargs: "dict | None" = None,
     commission_bps: float = 1.0,
     min_commission_per_share: float = 0.0,
 ) -> tuple[float, dict]:
@@ -461,11 +461,11 @@ def cost_adjusted_returns(
     adv: np.ndarray,
     vol: np.ndarray,
     notional: float,
-    prices: np.ndarray | None = None,
+    prices: "np.ndarray | None" = None,
     spread_model: str = 'power_law',
-    spread_kwargs: dict | None = None,
+    spread_kwargs: "dict | None" = None,
     impact_model: str = 'sqrt',
-    impact_kwargs: dict | None = None,
+    impact_kwargs: "dict | None" = None,
     commission_bps: float = 1.0,
     min_commission_per_share: float = 0.0,
 ) -> tuple[np.ndarray, float]:
@@ -560,7 +560,7 @@ def turnover_cost_analysis(
     adv: np.ndarray,
     vol: np.ndarray,
     notional: float,
-    prices: np.ndarray | None = None,
+    prices: "np.ndarray | None" = None,
     **cost_kwargs,
 ) -> dict:
     '''

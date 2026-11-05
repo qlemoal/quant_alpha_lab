@@ -131,7 +131,7 @@ def inverse_volatility_weights(vols: np.ndarray) -> np.ndarray:
 
 def equal_risk_contribution_weights(
     sigma: np.ndarray,
-    w_init: np.ndarray | None = None,
+    w_init: "np.ndarray | None" = None,
     max_iter: int = 1000,
     tol: float = 1e-8,
 ) -> np.ndarray:
@@ -289,7 +289,7 @@ def _recursive_bisection(
 
 def hierarchical_risk_parity(
     sigma: np.ndarray,
-    corr: np.ndarray | None = None,
+    corr: "np.ndarray | None" = None,
     method: str = 'ward',
 ) -> np.ndarray:
     '''
@@ -384,8 +384,8 @@ def hierarchical_risk_parity(
 
 def clustered_risk_parity(
     sigma: np.ndarray,
-    cluster_map: dict[int, int] | np.ndarray,
-    corr: np.ndarray | None = None,
+    cluster_map: "dict[int, int] | np.ndarray",
+    corr: "np.ndarray | None" = None,
 ) -> np.ndarray:
     '''
     Clustered Risk Parity - Raffinot (2018).
@@ -493,13 +493,13 @@ def clustered_risk_parity(
 def mean_variance_optimize(
     mu: np.ndarray,
     sigma: np.ndarray,
-    target_vol: float | None = None,
-    target_return: float | None = None,
+    target_vol: "float | None" = None,
+    target_return: "float | None" = None,
     max_gross: float = 1.0,
     long_only: bool = False,
-    max_weight: float | None = None,
-    min_weight: float | None = None,
-    risk_aversion: float | None = None,
+    max_weight: "float | None" = None,
+    min_weight: "float | None" = None,
+    risk_aversion: "float | None" = None,
 ) -> np.ndarray:
     '''
     Mean-Variance Optimization (Markowitz) with constraints.
@@ -649,7 +649,7 @@ def black_litterman_weights(
     mu_prior: np.ndarray,
     views: np.ndarray,
     pick_matrix: np.ndarray,
-    omega: np.ndarray | None = None,
+    omega: "np.ndarray | None" = None,
     tau: float = 0.05,
     risk_aversion: float = 1.0,
 ) -> np.ndarray:
@@ -737,8 +737,8 @@ def cost_aware_optimize(
     sigma: np.ndarray,
     w_prev: np.ndarray,
     Lambda: np.ndarray,  # diagonal cost matrix from costs.py
-    target_vol: float | None = None,
-    risk_aversion: float | None = None,
+    target_vol: "float | None" = None,
+    risk_aversion: "float | None" = None,
     max_gross: float = 1.0,
     long_only: bool = False,
 ) -> np.ndarray:

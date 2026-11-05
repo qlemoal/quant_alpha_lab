@@ -1,0 +1,35 @@
+{
+  "run_id": "2026-11-04_test_full",
+  "signal_tag": "test_full",
+  "signal_dir": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/clean/equities/US/SP500/daily/signals/2026-11-04_test_full",
+  "fwd_ret_col": "fwdret20",
+  "horizon": 20,
+  "signal_cols": [
+    "vol252_zscore_clip",
+    "vol120_zscore_clip",
+    "mom5_zscore_tanh",
+    "vol60_zscore_clip",
+    "vol20_zscore_clip",
+    "vol10_zscore_clip",
+    "vol5_zscore_clip",
+    "mom10_zscore_tanh",
+    "beta252_rank",
+    "mom20_zscore_tanh",
+    "beta60_rank",
+    "mom60_zscore_tanh"
+  ],
+  "q_values": {
+    "vol252_zscore_clip": 0.0003478435365487087,
+    "vol120_zscore_clip": 0.0003672620672968696,
+    "mom5_zscore_tanh": 0.0003672620672968696,
+    "vol60_zscore_clip": 0.0003672620672968696,
+    "vol20_zscore_clip": 0.0011335091193097392,
+    "vol10_zscore_clip": 0.001224983733640365,
+    "vol5_zscore_clip": 0.0024805770600897503,
+    "mom10_zscore_tanh": 0.003125112947233555,
+    "beta252_rank": 0.0065686878886425226,
+    "mom20_zscore_tanh": 0.006789256990308701,
+    "beta60_rank": 0.018668576204379672,
+    "mom60_zscore_tanh": 0.14734439530897112
+  }
+}

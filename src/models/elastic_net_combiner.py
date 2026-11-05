@@ -250,7 +250,7 @@ def apply_q_value_weighting( X:np.ndarray, signal_cols:list[str], q_values:dict[
 
 def fit_elastic_net_combiner( panel:pl.DataFrame, signal_cols:list[str], fwdret_col:str,
                               cv_folds:list[tuple[np.ndarray, np.ndarray]],
-                              q_values:dict[str, float]|None=None, l1_ratio_grid:list[float]=[.1, .5, .7, .9, .95, .99, 1],
+                              q_values:"dict[str, float] | None"=None, l1_ratio_grid:list[float]=[.1, .5, .7, .9, .95, .99, 1],
 ) -> dict:
     '''
     cv_folds: pre-built list[(train_idx, test_idx)], built by the CALLER via build_cpcv_idx()
@@ -388,7 +388,7 @@ def run_en_combiner(
     holdout_dates: int = 200,
     q_values: dict[str, float] | None = None,
     l1_ratio_grid: list[float] | None = None,
-    fwdret_col: str | None = None,
+    fwdret_col: "str | None" = None,
 ) -> dict:
     '''
     High-level wrapper: CPCV search + holdout evaluation.

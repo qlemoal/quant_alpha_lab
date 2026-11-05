@@ -16,7 +16,7 @@ def rank_scaled_expr(expr:pl.Expr, descending=False) -> pl.Expr:
                 ) - 1)
 
 
-def rank_scaled(lf: pl.LazyFrame, feature:str|list, descending=False) -> pl.LazyFrame:
+def rank_scaled(lf: pl.LazyFrame, feature:"str|list", descending=False) -> pl.LazyFrame:
     '''
     Rank feature at each date across tickers --> normalise into (0,1) --> transform into (-1, 1).
     Use descending=False if lower feature is better.
@@ -39,7 +39,7 @@ def rank_expr(expr:pl.Expr, descending=False) -> pl.Expr:
             .over('date') 
             )
 
-def rank(lf: pl.LazyFrame, feature:str|list, descending=False) -> pl.LazyFrame:
+def rank(lf: pl.LazyFrame, feature:"str|list", descending=False) -> pl.LazyFrame:
     '''
     Rank feature at each date across tickers .
     Use descending=False if lower feature is better.
@@ -72,7 +72,7 @@ def decile_expr(expr:pl.Expr, n_buckets=10, descending=False) -> pl.Expr:
         ).otherwise(None)
     )
 
-def decile(lf:pl.LazyFrame, colname:str|list, n_buckets=10, descending=False) -> pl.LazyFrame:
+def decile(lf:pl.LazyFrame, colname:"str|list", n_buckets=10, descending=False) -> pl.LazyFrame:
     '''
     Categorizes data in colname into n_buckets.
     It should then be coupled into a long-short position in the top and bottom deciles.

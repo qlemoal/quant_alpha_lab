@@ -11,7 +11,7 @@ def tanh_expr(expr:pl.Expr, scale=1) -> pl.Expr:
     '''
     return (expr * scale).tanh()
 
-def tanh(lf:pl.LazyFrame, colname:str|list, scale=1):
+def tanh(lf:pl.LazyFrame, colname:"str|list", scale=1):
     '''
     Applies tanh function to column called colname.
     If colname is a list, then tanh is applied to each column name in it.
@@ -26,7 +26,7 @@ def clip_expr(expr:pl.Expr, low=-3, high=3) -> pl.Expr:
     '''
     return expr.clip(lower_bound=low, upper_bound=high)
 
-def clip(lf:pl.LazyFrame, colname:str|list, low=-3, high=3) -> pl.LazyFrame:
+def clip(lf:pl.LazyFrame, colname:"str|list", low=-3, high=3) -> pl.LazyFrame:
     '''
     Clips values of colname, between low and high.
     If colname is a llist, it clips all the names in colname.

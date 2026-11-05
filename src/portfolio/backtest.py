@@ -96,7 +96,7 @@ from src.portfolio.optimization import (
 # PRE-COMPUTED RISK MODEL LOADING
 # =============================================================================
 
-def load_precomputed_risk_model(risk_model_dir: str) -> dict | None:
+def load_precomputed_risk_model(risk_model_dir: str) -> "dict | None":
     '''
     Load pre-computed risk model from 04d output directory.
     
@@ -373,9 +373,9 @@ def rebalance_step(
     ticker_col: str = 'ticker',
     date_col: str = 'date',
     # Pre-computed risk model for this date (optional)
-    precomputed_corr: np.ndarray | None = None,
-    precomputed_sigma: np.ndarray | None = None,
-    precomputed_cluster_map: dict | None = None,
+    precomputed_corr: "np.ndarray | None" = None,
+    precomputed_sigma: "np.ndarray | None" = None,
+    precomputed_cluster_map: "dict | None" = None,
 ) -> dict:
     '''
     Execute ONE rebalance step: estimate risk model, construct portfolio.
@@ -613,12 +613,12 @@ def run_backtest(
     notional: float = 1_000_000.0,
     cost_model: str = 'sqrt',
     commission_bps: float = 1.0,
-    spread_kwargs: dict | None = None,
-    impact_kwargs: dict | None = None,
+    spread_kwargs: "dict | None" = None,
+    impact_kwargs: "dict | None" = None,
     score_col: str = 'combined_score',
     execution_lag: int = 1,  # days between signal date and trade date
     # Pre-computed risk model (from 04d) - if provided, skips per-rebalance estimation
-    risk_model_dir: str | None = None,
+    risk_model_dir: "str | None" = None,
 ) -> dict:
     '''
     Run the full walk-forward backtest.
@@ -1035,8 +1035,8 @@ def compute_metrics(
 def performance_attribution(
     weights_history: pl.DataFrame,
     returns_panel: pl.DataFrame,
-    factor_loadings: pl.DataFrame | None = None,
-    factor_returns: pl.DataFrame | None = None,
+    factor_loadings: "pl.DataFrame | None" = None,
+    factor_returns: "pl.DataFrame | None" = None,
     date_col: str = 'date',
     ticker_col: str = 'ticker',
     weight_col: str = 'weight',
@@ -1127,7 +1127,7 @@ def performance_attribution(
 
 def regime_analysis(
     returns_history: pl.DataFrame,
-    regime_indicator: pl.DataFrame | None = None,
+    regime_indicator: "pl.DataFrame | None" = None,
     date_col: str = 'date',
     return_col: str = 'net_return',
 ) -> dict:

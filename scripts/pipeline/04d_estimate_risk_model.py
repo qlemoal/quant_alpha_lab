@@ -1,26 +1,26 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 1: Estimate Risk Model (Covariance + Clustering)
+Phase 04d: Estimate Risk Model (Covariance + Clustering)
 ===============================================
 
 Thin wrapper calling src/risk functions.
 Estimates correlation, cleans with RMT, runs Louvain, builds covariance.
 
 Inputs:
-  data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet (for ticker universe + dates)
-  data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet
-  data/clean/equities/US/SP500/daily/features/features.parquet (for vol, ADV)
+  data/clean/{asset}/{region}/{universe}/{freq}/en_scores/{run_id}/en_scores.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/ohlcv/ohlcv.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/features/features.parquet
 
 Outputs:
-  data/clean/equities/US/SP500/daily/risk_model/{run_id}/
-    ├── corr_raw.parquet       # [date, ticker_i, ticker_j, corr]
-    ├── corr_clean.parquet     # RMT-cleaned
-    ├── cov.parquet            # [date, ticker_i, ticker_j, cov]
-    ├── clusters.parquet       # [date, ticker, cluster_id]
-    ├── eigenvalues.parquet    # [date, eigenvalue, component]
-    ├── summary.json           # Per-rebalance stats
-    └── config.json            # Run configuration
+  data/clean/{asset}/{region}/{universe}/{freq}/risk_model/{run_id}/
+    ├── corr_raw.parquet
+    ├── corr_clean.parquet
+    ├── cov.parquet
+    ├── clusters.parquet
+    ├── eigenvalues.parquet
+    ├── summary.json
+    └── config.json
 
 Usage:
   python scripts/pipeline/04d_estimate_risk_model.py --date 2026-10-29 --tag default
@@ -33,6 +33,7 @@ from datetime import date
 import numpy as np
 import polars as pl
 
+from config.paths import get_data_config, run_id_from_args
 from src.risk.correlation_cleaning import clean_correlation_matrix as clean_correlation_rmt, marchenko_pastur_bounds
 from src.risk.clustering import louvain_clustering
 from src.risk.covariance import (
@@ -47,9 +48,8 @@ from src.portfolio.backtest import prepare_backtest_data
 # CONFIGURATION
 # =============================================================================
 
-SIGNAL_TAG = 'default'
+SCORE_COL = 'combined_score'
 
-# Risk model config
 RISK_CONFIG = {
     'rebalance_freq': 'weekly',
     'lookback_window': 252,
@@ -58,9 +58,6 @@ RISK_CONFIG = {
     'cluster_resolution': 1.0,
     'n_factors': 5,                 # For factor model
 }
-
-# Score column (from en_scores)
-SCORE_COL = 'combined_score'
 
 
 def save_long_matrix(matrix, tickers, date_str, file_path, value_name, append=True):
@@ -76,13 +73,11 @@ def save_long_matrix(matrix, tickers, date_str, file_path, value_name, append=Tr
                 value_name: float(matrix[i, j])
             })
     df = pl.DataFrame(rows)
-    # Write to a temporary per-date file
     temp_path = Path(str(file_path).replace('.parquet', f'_{date_str}.parquet'))
     df.write_parquet(temp_path)
 
 
 def save_clusters(cluster_map, valid_tickers, date_str, file_path, append=True):
-    '''cluster_map has integer indices, valid_tickers has ticker symbols'''
     rows = [{'date': date_str, 'ticker': valid_tickers[t], 'cluster_id': int(c)} for t, c in cluster_map.items()]
     df = pl.DataFrame(rows)
     temp_path = Path(str(file_path).replace('.parquet', f'_{date_str}.parquet'))
@@ -90,14 +85,12 @@ def save_clusters(cluster_map, valid_tickers, date_str, file_path, append=True):
 
 
 def combine_parquet_files(output_dir, base_name, date_suffixes):
-    '''Combine per-date parquet files into one'''
     files = [output_dir / f'{base_name}_{ds}.parquet' for ds in date_suffixes if (output_dir / f'{base_name}_{ds}.parquet').exists()]
     if not files:
         return
     dfs = [pl.read_parquet(f) for f in files]
     combined = pl.concat(dfs)
     combined.write_parquet(output_dir / f'{base_name}.parquet')
-    # Clean up temp files
     for f in files:
         f.unlink()
 
@@ -105,24 +98,25 @@ def combine_parquet_files(output_dir, base_name, date_suffixes):
 def save_eigenvalues(eigenvals, date_str, file_path):
     rows = [{'date': date_str, 'eigenvalue': float(v), 'component': i} for i, v in enumerate(eigenvals)]
     df = pl.DataFrame(rows)
-    # Write to a temporary per-date file
     temp_path = Path(str(file_path).replace('.parquet', f'_{date_str}.parquet'))
     df.write_parquet(temp_path)
 
 
 def main(date: str, tag: str = 'default'):
-    run_id = f'{date}_{tag}'
+    run_id = run_id_from_args(date, tag)
+    
+    # Use centralized config
+    cfg = get_data_config(run_id=run_id)
+    
     print('=' * 70)
-    print('PHASE 1: ESTIMATE RISK MODEL')
+    print('PHASE 04d: ESTIMATE RISK MODEL')
     print('=' * 70)
     print(f'Run ID:        {run_id}')
-    print(f'Date:          {date}')
-    print(f'Tag:           {tag}')
     print(f'Config:        {RISK_CONFIG}')
     print('=' * 70)
 
-    # Output dir - new structure: data/clean/equities/US/SP500/daily/risk_model/{run_id}/
-    out_dir = Path(f'data/clean/equities/US/SP500/daily/risk_model/{run_id}')
+    # Output dir
+    out_dir = cfg.risk_model_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     corr_raw_file = out_dir / 'corr_raw.parquet'
@@ -134,41 +128,33 @@ def main(date: str, tag: str = 'default'):
 
     # Load data
     print('\n[1/4] Loading data...')
-    # Find the ohlcv file for this run
-    ohlcv_files = list(Path('data/clean/equities/US/SP500/daily/ohlcv').glob('ohlcv.parquet'))
-    if not ohlcv_files:
-        raise FileNotFoundError(f'No ohlcv file found for tag {tag}')
-    ohlcv_file = sorted(ohlcv_files)[-1]
+    ohlcv_file = cfg.clean_ohlcv_file
+    if not ohlcv_file.exists():
+        raise FileNotFoundError(f'No ohlcv file found: {ohlcv_file}')
     print(f'  Using OHLCV: {ohlcv_file}')
     price_lf = pl.scan_parquet(ohlcv_file)
 
-    # Use single features file (no date/tag)
-    features_file = Path('data/clean/equities/US/SP500/daily/features/features.parquet')
+    features_file = cfg.clean_features_file
     if not features_file.exists():
         raise FileNotFoundError(f'No features file found: {features_file}')
     print(f'  Using features: {features_file}')
     features_lf = pl.scan_parquet(features_file)
 
-    # Find en_scores file for this run
-    en_scores_file = f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet'
-    if not Path(en_scores_file).exists():
+    en_scores_file = cfg.en_scores_file
+    if not en_scores_file.exists():
         raise FileNotFoundError(f'No en_scores file found: {en_scores_file}')
     print(f'  Using en_scores: {en_scores_file}')
     signal_lf = pl.scan_parquet(en_scores_file).select(['date', 'ticker', SCORE_COL])
 
-    # Prepare features with required columns (adv60, std60/logret from features)
-    # features has log_adv60 and vol60, we need to derive adv60 and std60
-    # adv60 = exp(log_adv60), std60 = vol60
+    # Prepare features with required columns
     features_lf = features_lf.with_columns([
         pl.col('log_adv60').exp().alias('adv60'),
         pl.col('vol60').alias('std60'),
         pl.col('logret'),
     ]).select(['date', 'ticker', 'logret', 'adv60', 'std60'])
 
-    # Join prices with features for complete price data
     complete_price_lf = price_lf.join(features_lf, on=['date', 'ticker'], how='left')
 
-    # Get date range from data
     date_range = complete_price_lf.select(
         pl.col('date').min().alias('min_date'),
         pl.col('date').max().alias('max_date')
@@ -192,7 +178,6 @@ def main(date: str, tag: str = 'default'):
     )
 
     rebalance_dates = prepared['rebalance_dates']
-    # Use long-format returns from features for risk model estimation
     returns_long = features_lf.select(['date', 'ticker', 'logret']).collect()
     print(f'  {len(rebalance_dates)} rebalance dates')
 
@@ -208,16 +193,13 @@ def main(date: str, tag: str = 'default'):
         date_str = str(reb_date)
         date_suffixes.append(date_str)
 
-        # Get lookback returns
         lookback_start = np.datetime64(reb_date) - np.timedelta64(RISK_CONFIG['lookback_window'], 'D')
         window_rets = returns_long.filter(
             (pl.col('date') > lookback_start) & (pl.col('date') <= reb_date)
         )
 
-        # Pivot to [ticker, time]
         ret_wide = window_rets.pivot(values='logret', index='ticker', on='date', aggregate_function='first')
 
-        # Filter valid tickers
         valid_tickers = []
         ret_matrix = []
         for row in ret_wide.iter_rows(named=True):
@@ -230,10 +212,9 @@ def main(date: str, tag: str = 'default'):
         if len(valid_tickers) < 10:
             continue
 
-        # Align all tickers to the same length (use minimum observations)
         min_len = min(len(v) for v in ret_matrix)
         ret_matrix = [v[-min_len:] for v in ret_matrix]
-        ret_matrix = np.array(ret_matrix)  # [n, T]
+        ret_matrix = np.array(ret_matrix)
         n_tickers, n_obs = ret_matrix.shape
 
         # Correlation
@@ -245,9 +226,8 @@ def main(date: str, tag: str = 'default'):
         q = n_tickers / n_obs
         lambda_min, lambda_max = marchenko_pastur_bounds(n_tickers, n_obs, variance=1.0)
         corr_clean = clean_correlation_rmt(corr, n_obs)
-        # Compute eigenvalues for saving
         eigenvalues, eigenvectors = np.linalg.eigh(corr)
-        eigenvals = eigenvalues  # Ascending order
+        eigenvals = eigenvalues
         save_long_matrix(corr_clean, valid_tickers, date_str, corr_clean_file, 'corr')
         save_eigenvalues(eigenvals, date_str, eigen_file)
 
@@ -270,7 +250,7 @@ def main(date: str, tag: str = 'default'):
 
         save_long_matrix(cov, valid_tickers, date_str, cov_file, 'cov')
 
-        # Louvain Clustering (on cleaned correlation)
+        # Louvain Clustering
         cluster_map = louvain_clustering(corr_clean, resolution=RISK_CONFIG['cluster_resolution'])
         save_clusters(cluster_map, valid_tickers, date_str, clusters_file)
 
@@ -291,7 +271,7 @@ def main(date: str, tag: str = 'default'):
             'cov_method': method,
         })
 
-    # Combine per-date parquet files into single files
+    # Combine per-date parquet files
     print('\n[3/4] Combining parquet files...')
     combine_parquet_files(out_dir, 'corr_raw', date_suffixes)
     combine_parquet_files(out_dir, 'corr_clean', date_suffixes)
@@ -317,8 +297,6 @@ def main(date: str, tag: str = 'default'):
 
     print(f'\n✓ Risk model estimated for {len(summaries)} rebalances')
     print(f'  Output: {out_dir}/')
-    print(f'    corr_raw.parquet, corr_clean.parquet, cov.parquet')
-    print(f'    clusters.parquet, eigenvalues.parquet, summary.json, config.json')
 
     print('\nDone!')
     print(f'\nNext: python scripts/pipeline/04e_construct_weights.py --date {date} --tag {tag}')

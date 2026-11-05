@@ -99,11 +99,11 @@ from src.utils.helpers import as_list
 
 def raw_weights_from_score(
     score: pl.Series,
-    tickers: pl.Series | None = None,
-    dates: pl.Series | None = None,
+    tickers: "pl.Series | None" = None,
+    dates: "pl.Series | None" = None,
     max_gross: float = 1.0,
     method: str = 'proportional',
-    vols: np.ndarray | pl.Series | None = None,
+    vols: "np.ndarray | pl.Series | None" = None,
 ) -> pl.Series:
     '''
     Convert a raw alpha signal into dollar-neutral, gross-normalized weights.
@@ -254,10 +254,10 @@ def raw_weights_from_score(
 
 def apply_cluster_caps(
     weights: pl.Series,
-    cluster_map: dict[int, int] | np.ndarray | pl.Series,
+    cluster_map: "dict[int, int] | np.ndarray | pl.Series",
     max_multiple: float = 2.0,
     method: str = 'cap',
-    tickers: pl.Series | None = None,
+    tickers: "pl.Series | None" = None,
 ) -> pl.Series:
     '''
     Cap each cluster's total absolute exposure.
@@ -439,7 +439,7 @@ def apply_vol_target(
     sigma: np.ndarray,
     target_vol: float,
     method: str = 'scale',
-    tickers: pl.Series | None = None,
+    tickers: "pl.Series | None" = None,
 ) -> pl.Series:
     '''
     Scale weights to achieve a target portfolio volatility.
@@ -547,7 +547,7 @@ def construct_portfolio(
     score_df: pl.DataFrame,
     corr: np.ndarray,
     vols: np.ndarray,
-    cluster_map: dict[int, int] | np.ndarray | pl.Series,
+    cluster_map: "dict[int, int] | np.ndarray | pl.Series",
     target_vol: float,
     max_gross: float = 1.0,
     max_cluster_multiple: float = 2.0,
@@ -698,8 +698,8 @@ def construct_portfolio(
 def portfolio_diagnostics(
     weights: pl.Series,
     sigma: np.ndarray,
-    cluster_map: dict[int, int] | np.ndarray | pl.Series | None = None,
-    target_vol: float | None = None,
+    cluster_map: "dict[int, int] | np.ndarray | pl.Series | None" = None,
+    target_vol: "float | None" = None,
     max_gross: float = 1.0,
     max_cluster_multiple: float = 2.0,
 ) -> dict:

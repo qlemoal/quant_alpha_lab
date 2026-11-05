@@ -1,25 +1,22 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 3: Run Backtest with Costs
+Phase 04f: Run Backtest
 ===============================================
 
-Thin wrapper calling src/portfolio/backtest.py and src/portfolio/costs.py.
-Executes walk-forward backtest on pre-constructed weights.
+Runs full backtest with transaction costs, computes performance metrics.
 
 Inputs:
-  data/clean/equities/US/SP500/daily/weights/{run_id}/weights.parquet
-  data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet
-  data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet (has open, close, logret, dollar_volume)
-  data/clean/equities/US/SP500/daily/features/features.parquet (has log_adv60, vol60)
+  data/clean/{asset}/{region}/{universe}/{freq}/weights/{run_id}/weights.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/ohlcv/ohlcv.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/features/features.parquet
 
 Outputs:
-  data/clean/equities/US/SP500/daily/backtest/{run_id}/
-    ├── weights.parquet        # Final weights with execution lag applied
-    ├── returns.parquet        # [date, gross_ret, net_ret, cost, turnover]
-    ├── diagnostics.parquet    # Per-rebalance details
-    ├── metrics.json           # Summary metrics
-    └── config.json            # Run configuration
+  data/clean/{asset}/{region}/{universe}/{freq}/backtest/{run_id}/
+    ├── returns.parquet      # [date, strategy_ret, long_ret, short_ret, tcost, turnover]
+    ├── metrics.json         # Sharpe, IR, max_dd, etc.
+    ├── equity_curve.png
+    └── config.json
 
 Usage:
   python scripts/pipeline/04f_run_backtest.py --date 2026-10-29 --tag default
@@ -28,244 +25,142 @@ Usage:
 import argparse
 import json
 from pathlib import Path
-from datetime import date, timedelta
-import polars as pl
 import numpy as np
+import polars as pl
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
-from src.portfolio.backtest import run_backtest, prepare_backtest_data, rebalance_step
-from src.portfolio.costs import total_transaction_cost
+from config.paths import get_data_config, run_id_from_args
+from src.portfolio.costs import estimate_costs
+from src.portfolio.backtest import backtest_weights
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
 BACKTEST_CONFIG = {
-    'notional': 1_000_000,
-    'cost_model': 'sqrt',           # 'sqrt', 'linear', 'almgren_chriss_full'
-    'commission_bps': 1.0,
-    'execution_lag': 1,             # Days from signal date to trade date
-    'adv_col': 'adv60',
-    'vol_col': 'std60',
+    'cost_bps': 5.0,          # 5 bps per side (10 bps round trip)
+    'spread_pct': 0.0005,     # 5 bps half-spread
+    'impact_coeff': 0.0,      # No market impact for now
+    'adv_window': 60,
+    'max_participation': 0.10,
 }
-
-REBALANCE_FREQ = 'weekly'
-LOOKBACK_WINDOW = 252
-MIN_OBS = 60
-SCORE_COL = 'combined_score'
 
 
 def main(date: str, tag: str = 'default'):
-    run_id = f'{date}_{tag}'
+    run_id = run_id_from_args(date, tag)
+    
+    # Use centralized config
+    cfg = get_data_config(run_id=run_id)
+    
     print('=' * 70)
-    print('PHASE 3: RUN BACKTEST')
+    print('PHASE 04f: RUN BACKTEST')
     print('=' * 70)
     print(f'Run ID:        {run_id}')
-    print(f'Date:          {date}')
-    print(f'Tag:           {tag}')
     print(f'Config:        {BACKTEST_CONFIG}')
-    print(f'Rebalance:     {REBALANCE_FREQ}')
     print('=' * 70)
 
-    # Paths
-    en_scores_file = f'data/clean/equities/US/SP500/daily/en_scores/{run_id}/en_scores.parquet'
-    weights_file = f'data/clean/equities/US/SP500/daily/weights/{run_id}/weights.parquet'
-    ohlcv_files = list(Path('data/clean/equities/US/SP500/daily/ohlcv').glob('ohlcv.parquet'))
-    
-    for f, name in [(en_scores_file, 'en_scores'), (weights_file, 'weights')]:
-        if not Path(f).exists():
-            raise FileNotFoundError(f'Missing {name}: {f}')
-    
-    if not ohlcv_files:
-        raise FileNotFoundError(f'No ohlcv file found for tag {tag}')
-    ohlcv_file = sorted(ohlcv_files)[-1]
-    
-    # Use single features file
-    features_file = Path('data/clean/equities/US/SP500/daily/features/features.parquet')
-    if not features_file.exists():
-        raise FileNotFoundError(f'No features file found: {features_file}')
-    
-    print(f'  Using OHLCV: {ohlcv_file}')
-    print(f'  Using features: {features_file}')
+    # Input files
+    weights_file = cfg.weights_file
+    ohlcv_file = cfg.clean_ohlcv_file
+    features_file = cfg.clean_features_file
 
-    # Output dir
-    out_dir = Path(f'data/clean/equities/US/SP500/daily/backtest/{run_id}')
+    if not weights_file.exists():
+        raise FileNotFoundError(f'No weights file: {weights_file}')
+    if not ohlcv_file.exists():
+        raise FileNotFoundError(f'No ohlcv file: {ohlcv_file}')
+    if not features_file.exists():
+        raise FileNotFoundError(f'No features file: {features_file}')
+
+    out_dir = cfg.backtest_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load EN scores (signals with combined_score)
-    print('\n[1/4] Loading EN scores...')
-    en_scores_df = pl.read_parquet(en_scores_file)
-    print(f'  {len(en_scores_df):,} score records, {en_scores_df["date"].n_unique()} dates')
+    # Load data
+    print('\n[1/4] Loading data...')
+    weights_df = pl.read_parquet(weights_file)
+    print(f'  Weights: {len(weights_df):,} rows, {weights_df["date"].n_unique()} dates')
 
-    # Load features (has logret, adv60, std60, open, close)
-    print('\n[2/4] Loading features...')
-    features_df = pl.read_parquet(features_file)
-    print(f'  {len(features_df):,} feature records, {features_df["date"].n_unique()} dates')
-
-    # Prepare data for backtest
-    print('\n[3/4] Preparing backtest data...')
-    
-    # Use the ohlcv file for price data (has open, close, logret, dollar_volume)
-    # Use features for adv60 (from log_adv60) and vol60
-    ohlcv_lf = pl.scan_parquet(ohlcv_file)
+    price_lf = pl.scan_parquet(ohlcv_file)
     features_lf = pl.scan_parquet(features_file)
-    
-    # Features need: logret, adv60 (dollar volume), std60 (vol), open, close
-    # log_adv60 is log of adv60, so adv60 = exp(log_adv60)
-    # vol60 is the 60-day volatility (std of returns)
-    features_for_backtest_lf = features_lf.select([
-        'date', 'ticker', 
-        pl.col('logret').alias('logret'),          # logret from features
-        pl.col('log_adv60').exp().alias('adv60'),  # Convert log_adv60 to adv60
-        pl.col('vol60').alias('std60'),            # Use vol60 as std60
-    ])
-    
-    # OHLCV has: open, close, volume
-    # Compute dollar_volume = close * volume
-    ohlcv_for_backtest_lf = ohlcv_lf.select([
-        'date', 'ticker', 'open', 'close', 
-        (pl.col('close') * pl.col('volume')).alias('dollar_volume'),
-    ])
-    
-    # Join OHLCV with features to get logret, adv60, and std60
-    price_lf = ohlcv_for_backtest_lf.join(
-        features_for_backtest_lf, 
-        on=['date', 'ticker'], 
-        how='left'
-    )
-    
-    signals_lf = pl.scan_parquet(en_scores_file).select(['date', 'ticker', SCORE_COL])
-    
-    # Get date range from data
-    date_range = price_lf.select(
-        pl.col('date').min().alias('min_date'),
-        pl.col('date').max().alias('max_date')
-    ).collect()
-    start_date = date_range['min_date'][0]
-    end_date = date_range['max_date'][0]
-    print(f'  Date range: {start_date} to {end_date}')
-    
-    # Prepare backtest data
-    prepared = prepare_backtest_data(
-        signals_lf=signals_lf,
-        score_cols=[SCORE_COL],
-        price_lf=price_lf,
-        start_date=start_date,
-        end_date=end_date,
-        rebalance_freq=REBALANCE_FREQ,
-        lookback_window=LOOKBACK_WINDOW,
-        min_obs=MIN_OBS,
-        date_col='date',
-        ticker_col='ticker',
-        score_col=SCORE_COL,
+
+    # Prepare features for returns
+    features_lf = features_lf.with_columns([
+        pl.col('log_adv60').exp().alias('adv60'),
+        pl.col('vol60').alias('std60'),
+        pl.col('logret'),
+    ]).select(['date', 'ticker', 'logret', 'adv60', 'std60'])
+
+    complete_price_lf = price_lf.join(features_lf, on=['date', 'ticker'], how='left')
+
+    # Get date range
+    dates = sorted(weights_df['date'].unique().to_list())
+    start_date = dates[0]
+    end_date = dates[-1]
+    print(f'  Backtest period: {start_date} to {end_date}')
+
+    # Run backtest
+    print('\n[2/4] Running backtest...')
+    result = backtest_weights(
+        weights_lf=weights_df.lazy(),
+        price_lf=complete_price_lf,
+        cost_bps=BACKTEST_CONFIG['cost_bps'],
         adv_col='adv60',
-        vol_col='std60',
-        open_col='open',
-        close_col='close',
-        return_col='logret',
-    )
-    
-    rebalance_dates = prepared['rebalance_dates']
-    print(f'  Rebalance dates: {len(rebalance_dates)}')
-    
-    # Run the backtest
-    print('\n[4/4] Running backtest...')
-    
-    # Path to pre-computed risk model from 04d
-    risk_model_files = list(Path('data/clean/equities/US/SP500/daily/risk_model').glob(f'*_{signal_tag}/'))
-    risk_model_dir = str(sorted(risk_model_files)[-1]) if risk_model_files else None
-    if risk_model_dir:
-        print(f'  Using pre-computed risk model: {risk_model_dir}')
-    else:
-        print('  No pre-computed risk model found, will re-estimate at each rebalance')
-    
-    result = run_backtest(
-        prepared_data=prepared,
-        target_vol=0.10,
-        max_gross=1.0,
-        max_cluster_multiple=2.0,
-        signal_method='proportional',
-        cap_method='cap',
-        vol_method='scale',
-        cov_method='ledoit_wolf',
-        cluster_resolution=1.0,
-        lookback_window=LOOKBACK_WINDOW,
-        min_obs=MIN_OBS,
-        notional=BACKTEST_CONFIG['notional'],
-        cost_model=BACKTEST_CONFIG['cost_model'],
-        commission_bps=BACKTEST_CONFIG['commission_bps'],
-        execution_lag=BACKTEST_CONFIG['execution_lag'],
-        score_col=SCORE_COL,
-        risk_model_dir=risk_model_dir,
     )
 
-    weights_hist = result['weights_history']
-    returns_hist = result['returns_history']
-    diag_hist = result['diagnostics_history']
-    metrics = result['summary_metrics']
+    returns_df = result['returns']
+    metrics = result['metrics']
+    positions_df = result['positions']
 
-    print(f'  Weight records: {len(weights_hist)}')
-    print(f'  Return records: {len(returns_hist)}')
-    print(f'  Rebalances:     {len(diag_hist)}')
+    print(f'  Backtest complete: {len(returns_df)} periods')
+    print(f'  Annualized Sharpe: {metrics.get("sharpe", "N/A"):.4f}')
+    print(f'  Annualized IR:     {metrics.get("information_ratio", "N/A"):.4f}')
+    print(f'  Max Drawdown:      {metrics.get("max_drawdown", "N/A"):.2%}')
+    print(f'  Hit Rate:          {metrics.get("hit_rate", "N/A"):.2%}')
+    print(f'  Avg Turnover:      {metrics.get("avg_turnover", "N/A"):.4f}')
+    print(f'  Avg T-Cost:        {metrics.get("avg_tcost", "N/A"):.6f}')
 
-    # Save
-    print('\n[5/5] Saving...')
-    weights_hist.write_parquet(out_dir / 'weights.parquet')
-    returns_hist.write_parquet(out_dir / 'returns.parquet')
-    # Convert diagnostics to flat DataFrame (handle struct columns)
-    if diag_hist:
-        diag_df = pl.DataFrame(diag_hist)
-        # Explode any struct columns to flat columns
-        for col in diag_df.columns:
-            if diag_df[col].dtype == pl.Struct:
-                # Explode struct into separate columns
-                struct_fields = diag_df[col].struct.fields
-                for field in struct_fields:
-                    diag_df = diag_df.with_columns(pl.col(col).struct.field(field).alias(f"{col}_{field}"))
-                diag_df = diag_df.drop(col)
-        diag_df.write_parquet(out_dir / 'diagnostics.parquet')
+    # Save returns
+    print('\n[3/4] Saving results...')
+    returns_file = out_dir / 'returns.parquet'
+    returns_df.write_parquet(returns_file)
+    print(f'  Returns: {returns_file}')
 
-    with open(out_dir / 'metrics.json', 'w') as f:
+    # Save metrics
+    metrics_file = out_dir / 'metrics.json'
+    with open(metrics_file, 'w') as f:
         json.dump(metrics, f, indent=2, default=str)
+    print(f'  Metrics: {metrics_file}')
+
+    # Plot equity curve
+    print('\n[4/4] Plotting equity curve...')
+    equity_curve = (1 + returns_df['strategy_ret'].fill_null(0)).cumprod()
+    plt.figure(figsize=(10, 5))
+    plt.plot(equity_curve)
+    plt.title(f'Equity Curve — {run_id}')
+    plt.xlabel('Date')
+    plt.ylabel('Cumulative Return')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    equity_file = out_dir / 'equity_curve.png'
+    plt.savefig(equity_file, dpi=150)
+    plt.close()
+    print(f'  Equity curve: {equity_file}')
 
     # Save config
     config = {
         'run_id': run_id,
         'tag': tag,
         'backtest_config': BACKTEST_CONFIG,
-        'rebalance_freq': REBALANCE_FREQ,
-        'lookback_window': LOOKBACK_WINDOW,
-        'min_obs': MIN_OBS,
-        'score_col': SCORE_COL,
         'start_date': str(start_date),
         'end_date': str(end_date),
+        'n_periods': len(returns_df),
     }
     with open(out_dir / 'config.json', 'w') as f:
         json.dump(config, f, indent=2, default=str)
 
-    # Print summary
-    print('\n' + '=' * 70)
-    print('BACKTEST SUMMARY')
-    print('=' * 70)
-    for k, v in metrics.items():
-        if isinstance(v, float):
-            print(f'  {k}: {v:.4f}')
-        else:
-            print(f'  {k}: {v}')
-    print('=' * 70)
-
-    if metrics:
-        print(f'\nKey Metrics:')
-        print(f'  Net Sharpe:     {metrics.get("sharpe_net", 0):.3f}')
-        print(f'  Gross Sharpe:   {metrics.get("sharpe_gross", 0):.3f}')
-        print(f'  Net Ann Return: {metrics.get("annual_return_net", 0):.2%}')
-        print(f'  Net Ann Vol:    {metrics.get("annual_vol_net", 0):.2%}')
-        print(f'  Max Drawdown:   {metrics.get("max_drawdown", 0):.2%}')
-        print(f'  Hit Rate:       {metrics.get("hit_rate", 0):.2%}')
-        print(f'  Cost Drag:      {metrics.get("cost_drag_annual_bps", 0):.1f} bps/yr')
-        print(f'  Avg Turnover:   {metrics.get("avg_turnover", 0):.2%}')
-
-    print(f'\n✓ Backtest complete. Results in {out_dir}/')
-    print('\nDone!')
+    print('\n✓ Backtest complete!')
+    print(f'  Output: {out_dir}/')
 
 
 if __name__ == '__main__':

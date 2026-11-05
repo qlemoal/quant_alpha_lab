@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 0b: Evaluate Signals (IC, FDR, Decay)
+Phase 04b: Evaluate Signals (IC, FDR, Decay)
 ===============================================
 
 Evaluates generated signals: Rank IC, Newey-West, IC decay, FDR (BH/BY/q-value).
 Produces a report and a filtered signal list for the combiner.
 
 Inputs:
-  data/clean/equities/US/SP500/daily/signals/{run_id}/signals.parquet
-  data/clean/equities/US/SP500/daily/signals/{run_id}/config.json
+  data/clean/{asset}/{region}/{universe}/{freq}/signals/{run_id}/signals.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/signals/{run_id}/config.json
 
 Outputs:
-  data/clean/equities/US/SP500/daily/signal_eval/{run_id}/
+  data/clean/{asset}/{region}/{universe}/{freq}/signal_eval/{run_id}/
     ├── ic_summary.parquet      # Per-signal IC stats
     ├── ic_decay.parquet        # IC vs horizon
     ├── fdr_report.parquet      # BH, BY, q-value per signal
@@ -32,6 +32,7 @@ from pathlib import Path
 import polars as pl
 import numpy as np
 
+from config.paths import get_data_config, run_id_from_args
 from src.evaluation.signals.ic.core import compute_ic, summarize_ic
 from src.evaluation.signals.ic.metrics import ic_decay
 from src.evaluation.signals.ic.metrics import newey_west_ic_tstat
@@ -39,13 +40,17 @@ from src.evaluation.signals.fdr import fdr_report
 
 
 def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2, min_ir: float = 0.0):
-    run_id = f'{date}_{tag}'
-    signal_dir = Path(f'data/clean/equities/US/SP500/daily/signals/{run_id}')
+    run_id = run_id_from_args(date, tag)
+    
+    # Use centralized config
+    cfg = get_data_config(run_id=run_id)
+    
+    signal_dir = cfg.signals_dir
     if not signal_dir.exists():
         raise FileNotFoundError(f'Signal directory not found: {signal_dir}')
 
-    signals_file = signal_dir / 'signals.parquet'
-    config_file = signal_dir / 'config.json'
+    signals_file = cfg.signals_file
+    config_file = cfg.signals_config_file
 
     if not signals_file.exists():
         raise FileNotFoundError(f'Signals file not found: {signals_file}. Run 04a_generate_signals.py first.')
@@ -56,7 +61,7 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
 
     signal_tag = config.get('signal_tag', 'unknown')
 
-    OUTPUT_DIR = Path(f'data/clean/equities/US/SP500/daily/signal_eval/{run_id}')
+    OUTPUT_DIR = cfg.signal_eval_dir
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     FWD_RET_COL = f'fwdret{horizon}'
