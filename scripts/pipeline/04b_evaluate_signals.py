@@ -45,12 +45,8 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
     # Use centralized config
     cfg = get_data_config(run_id=run_id)
     
-    signal_dir = cfg.signals_dir
-    if not signal_dir.exists():
-        raise FileNotFoundError(f'Signal directory not found: {signal_dir}')
-
-    signals_file = cfg.signals_file
-    config_file = cfg.signals_config_file
+    signals_file = cfg.stage_dir('signals') / 'signals.parquet'
+    config_file = cfg.stage_dir('signals') / 'config.json'
 
     if not signals_file.exists():
         raise FileNotFoundError(f'Signals file not found: {signals_file}. Run 04a_generate_signals.py first.')
@@ -61,7 +57,7 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
 
     signal_tag = config.get('signal_tag', 'unknown')
 
-    OUTPUT_DIR = cfg.signal_eval_dir
+    OUTPUT_DIR = cfg.stage_dir('signal_eval')
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     FWD_RET_COL = f'fwdret{horizon}'

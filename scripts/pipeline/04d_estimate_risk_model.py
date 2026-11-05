@@ -116,7 +116,7 @@ def main(date: str, tag: str = 'default'):
     print('=' * 70)
 
     # Output dir
-    out_dir = cfg.risk_model_dir
+    out_dir = cfg.stage_dir('risk_model')
     out_dir.mkdir(parents=True, exist_ok=True)
 
     corr_raw_file = out_dir / 'corr_raw.parquet'
@@ -128,19 +128,19 @@ def main(date: str, tag: str = 'default'):
 
     # Load data
     print('\n[1/4] Loading data...')
-    ohlcv_file = cfg.clean_ohlcv_file
+    ohlcv_file = cfg.ohlcv_file
     if not ohlcv_file.exists():
         raise FileNotFoundError(f'No ohlcv file found: {ohlcv_file}')
     print(f'  Using OHLCV: {ohlcv_file}')
     price_lf = pl.scan_parquet(ohlcv_file)
 
-    features_file = cfg.clean_features_file
+    features_file = cfg.features_file
     if not features_file.exists():
         raise FileNotFoundError(f'No features file found: {features_file}')
     print(f'  Using features: {features_file}')
     features_lf = pl.scan_parquet(features_file)
 
-    en_scores_file = cfg.en_scores_file
+    en_scores_file = cfg.stage_dir('en_scores') / 'en_scores.parquet'
     if not en_scores_file.exists():
         raise FileNotFoundError(f'No en_scores file found: {en_scores_file}')
     print(f'  Using en_scores: {en_scores_file}')

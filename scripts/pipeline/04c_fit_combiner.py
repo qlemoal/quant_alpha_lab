@@ -62,7 +62,7 @@ def main(date: str, tag: str = 'default'):
     signal_tag = tag
 
     # Load selected signals from evaluation
-    selected_file = cfg.signal_eval_dir / 'selected_signals.json'
+    selected_file = cfg.stage_dir('signal_eval') / 'selected_signals.json'
     if not selected_file.exists():
         raise FileNotFoundError(f'Selected signals not found: {selected_file}. Run 04b_evaluate_signals.py first.')
 
@@ -78,7 +78,7 @@ def main(date: str, tag: str = 'default'):
     # Load q-values for weighting
     q_values = {}
     if EN_CONFIG['q_value_weighting']:
-        fdr_file = cfg.signal_eval_dir / 'fdr_report.parquet'
+        fdr_file = cfg.stage_dir('signal_eval') / 'fdr_report.parquet'
         if fdr_file.exists():
             fdr_df = pl.read_parquet(fdr_file)
             for row in fdr_df.iter_rows(named=True):
@@ -87,8 +87,9 @@ def main(date: str, tag: str = 'default'):
             print(f'  Loaded q-values for {len(q_values)} signals: {q_values}')
 
     # Load signal data
-    print(f'\nLoading {cfg.signals_file}...')
-    lf = pl.scan_parquet(cfg.signals_file)
+    signals_file = cfg.stage_dir('signals') / 'signals.parquet'
+    print(f'\nLoading {signals_file}...')
+    lf = pl.scan_parquet(signals_file)
 
     # Verify forward return column exists
     schema = lf.collect_schema()
@@ -128,9 +129,9 @@ def main(date: str, tag: str = 'default'):
     print(stability_df)
     
     # Save stability
-    cfg.en_model_dir.mkdir(parents=True, exist_ok=True)
-    stability_df.write_parquet(cfg.en_model_stability_file)
-    print(f'  Saved stability to {cfg.en_model_stability_file}')
+    cfg.stage_dir('en_model').mkdir(parents=True, exist_ok=True)
+    stability_df.write_parquet(cfg.stage_dir('en_model') / 'stability.parquet')
+    print(f'  Saved stability to {cfg.stage_dir("en_model") / "stability.parquet"}')
 
     # --- Score FULL dataset ---
     print('\nScoring full dataset...')
@@ -142,21 +143,21 @@ def main(date: str, tag: str = 'default'):
     print(f'  Score stats: mean={full_df["combined_score"].mean():.6f}, std={full_df["combined_score"].std():.6f}')
 
     # Save scores
-    cfg.en_scores_dir.mkdir(parents=True, exist_ok=True)
-    full_df.select(['date', 'ticker', 'combined_score'] + signal_cols).write_parquet(cfg.en_scores_file)
-    print(f'\n✓ Saved scores to {cfg.en_scores_file}')
+    cfg.stage_dir('en_scores').mkdir(parents=True, exist_ok=True)
+    full_df.select(['date', 'ticker', 'combined_score'] + signal_cols).write_parquet(cfg.stage_dir('en_scores') / 'en_scores.parquet')
+    print(f'\n✓ Saved scores to {cfg.stage_dir("en_scores") / "en_scores.parquet"}')
 
     # Save config for scores
     score_config = {
         'run_id': run_id,
         'signal_tag': signal_tag,
-        'signal_dir': str(cfg.signals_dir),
+        'signal_dir': str(cfg.stage_dir('signals')),
         'fwd_ret_col': fwd_ret_col,
         'horizon': horizon,
         'signal_cols': signal_cols,
         'q_values': q_values,
     }
-    with open(cfg.en_scores_config_file, 'w') as f:
+    with open(cfg.stage_dir('en_scores') / 'config.json', 'w') as f:
         json.dump(score_config, f, indent=2, default=str)
 
     # Save model info (includes holdout report)

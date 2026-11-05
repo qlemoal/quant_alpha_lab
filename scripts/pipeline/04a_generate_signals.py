@@ -59,8 +59,8 @@ cfg = get_data_config(run_id=run_id)
 FEATURES_FILE = cfg.clean_features_file
 
 # Output (tagged so you can keep multiple signal sets)
-OUTPUT_DIR = cfg.signals_dir
-OUTPUT_FILE = cfg.signals_file
+OUTPUT_DIR = cfg.stage_dir('signals')
+OUTPUT_FILE = OUTPUT_DIR / 'signals.parquet'
 
 # Signal specifications: list of (feature_col, method, params)
 # method: 'zscore_tanh', 'zscore_clip', 'rank', 'decile'

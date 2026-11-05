@@ -97,8 +97,8 @@ def main(date: str, tag: str = 'default'):
     print('=' * 70)
 
     # Input files
-    en_scores_file = cfg.en_scores_file
-    risk_dir = cfg.risk_model_dir
+    en_scores_file = cfg.stage_dir('en_scores') / 'en_scores.parquet'
+    risk_dir = cfg.stage_dir('risk_model')
     cov_file = risk_dir / 'cov.parquet'
     clusters_file = risk_dir / 'clusters.parquet'
     summary_file = risk_dir / 'summary.json'
@@ -113,14 +113,14 @@ def main(date: str, tag: str = 'default'):
         raise FileNotFoundError(f'No summary file: {summary_file}')
 
     # OHLCV and features (shared base tables)
-    ohlcv_file = cfg.clean_ohlcv_file
-    features_file = cfg.clean_features_file
+    ohlcv_file = cfg.ohlcv_file
+    features_file = cfg.features_file
     if not ohlcv_file.exists():
         raise FileNotFoundError(f'No ohlcv file: {ohlcv_file}')
     if not features_file.exists():
         raise FileNotFoundError(f'No features file: {features_file}')
 
-    out_dir = cfg.weights_dir
+    out_dir = cfg.stage_dir('weights')
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load rebalance dates from risk model

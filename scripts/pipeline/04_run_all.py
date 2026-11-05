@@ -36,48 +36,54 @@ def check_prereqs(phase_id: str, cfg) -> list[str]:
     missing = []
     
     if phase_id == '0a':
-        if not cfg.clean_features_file.exists():
-            missing.append(str(cfg.clean_features_file))
-        if not cfg.clean_ohlcv_file.exists():
-            missing.append(str(cfg.clean_ohlcv_file))
+        if not cfg.features_file.exists():
+            missing.append(str(cfg.features_file))
+        if not cfg.ohlcv_file.exists():
+            missing.append(str(cfg.ohlcv_file))
     
     elif phase_id == '0b':
-        if not cfg.signals_file.exists():
-            missing.append(str(cfg.signals_file))
+        signals_file = cfg.stage_dir('signals') / 'signals.parquet'
+        if not signals_file.exists():
+            missing.append(str(signals_file))
     
     elif phase_id == '0c':
-        if not cfg.signals_file.exists():
-            missing.append(str(cfg.signals_file))
-        if not (cfg.signal_eval_dir / 'selected_signals.json').exists():
-            missing.append(str(cfg.signal_eval_dir / 'selected_signals.json'))
+        signals_file = cfg.stage_dir('signals') / 'signals.parquet'
+        if not signals_file.exists():
+            missing.append(str(signals_file))
+        if not (cfg.stage_dir('signal_eval') / 'selected_signals.json').exists():
+            missing.append(str(cfg.stage_dir('signal_eval') / 'selected_signals.json'))
     
     elif phase_id == '1':
-        if not cfg.en_scores_file.exists():
-            missing.append(str(cfg.en_scores_file))
-        if not cfg.clean_ohlcv_file.exists():
-            missing.append(str(cfg.clean_ohlcv_file))
-        if not cfg.clean_features_file.exists():
-            missing.append(str(cfg.clean_features_file))
+        en_scores_file = cfg.stage_dir('en_scores') / 'en_scores.parquet'
+        if not en_scores_file.exists():
+            missing.append(str(en_scores_file))
+        if not cfg.ohlcv_file.exists():
+            missing.append(str(cfg.ohlcv_file))
+        if not cfg.features_file.exists():
+            missing.append(str(cfg.features_file))
     
     elif phase_id == '2':
-        if not (cfg.risk_model_dir / 'cov.parquet').exists():
-            missing.append(str(cfg.risk_model_dir / 'cov.parquet'))
-        if not (cfg.risk_model_dir / 'clusters.parquet').exists():
-            missing.append(str(cfg.risk_model_dir / 'clusters.parquet'))
-        if not (cfg.risk_model_dir / 'summary.json').exists():
-            missing.append(str(cfg.risk_model_dir / 'summary.json'))
-        if not cfg.en_scores_file.exists():
-            missing.append(str(cfg.en_scores_file))
+        risk_dir = cfg.stage_dir('risk_model')
+        if not (risk_dir / 'cov.parquet').exists():
+            missing.append(str(risk_dir / 'cov.parquet'))
+        if not (risk_dir / 'clusters.parquet').exists():
+            missing.append(str(risk_dir / 'clusters.parquet'))
+        if not (risk_dir / 'summary.json').exists():
+            missing.append(str(risk_dir / 'summary.json'))
+        en_scores_file = cfg.stage_dir('en_scores') / 'en_scores.parquet'
+        if not en_scores_file.exists():
+            missing.append(str(en_scores_file))
     
     elif phase_id == '3':
-        if not cfg.weights_file.exists():
-            missing.append(str(cfg.weights_file))
-        if not cfg.en_scores_file.exists():
-            missing.append(str(cfg.en_scores_file))
-        if not cfg.clean_ohlcv_file.exists():
-            missing.append(str(cfg.clean_ohlcv_file))
-        if not cfg.clean_features_file.exists():
-            missing.append(str(cfg.clean_features_file))
+        if not (cfg.stage_dir('weights') / 'weights.parquet').exists():
+            missing.append(str(cfg.stage_dir('weights') / 'weights.parquet'))
+        en_scores_file = cfg.stage_dir('en_scores') / 'en_scores.parquet'
+        if not en_scores_file.exists():
+            missing.append(str(en_scores_file))
+        if not cfg.ohlcv_file.exists():
+            missing.append(str(cfg.ohlcv_file))
+        if not cfg.features_file.exists():
+            missing.append(str(cfg.features_file))
     
     return missing
 

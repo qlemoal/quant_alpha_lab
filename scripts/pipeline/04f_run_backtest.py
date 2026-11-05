@@ -62,9 +62,9 @@ def main(date: str, tag: str = 'default'):
     print('=' * 70)
 
     # Input files
-    weights_file = cfg.weights_file
-    ohlcv_file = cfg.clean_ohlcv_file
-    features_file = cfg.clean_features_file
+    weights_file = cfg.stage_dir('weights') / 'weights.parquet'
+    ohlcv_file = cfg.ohlcv_file
+    features_file = cfg.features_file
 
     if not weights_file.exists():
         raise FileNotFoundError(f'No weights file: {weights_file}')
@@ -73,7 +73,7 @@ def main(date: str, tag: str = 'default'):
     if not features_file.exists():
         raise FileNotFoundError(f'No features file: {features_file}')
 
-    out_dir = cfg.backtest_dir
+    out_dir = cfg.stage_dir('backtest')
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load data
