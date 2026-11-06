@@ -45,9 +45,11 @@ The methodology follows practices used at systematic investment firms (Millenniu
 |------|-------------|
 | Deduplication | Drop exact duplicate rows |
 | Missing data | Forward-fill `Adj Close` within ticker (max 5 days) |
-| Returns | Compute log returns: $r_t = \log(P_t) - \log(P_{t-1})$ |
+| **Adjusted Open** | Derive `adj_open = Adj Close × (Open / Close)` for consistent split/dividend adjustment |
+| Returns | Compute log returns: $r_t = \log(P_t) - \log(P_{t-1})$ using `Adj Close` |
+| Forward Returns | Open-to-open using **adjusted open**: `fwdret{h} = log(adj_open_{t+h}) - log(adj_open_{t+1})` |
 | Validation | Flag tickers with $< 60$ observations, extreme returns $> 50\%$/day |
-| Output | `prices.parquet`: [date, ticker, open, high, low, close, adj_close, volume, logret] |
+| Output | `prices.parquet`: [date, ticker, open, high, low, close, adj_close, **adj_open**, volume, logret] |
 
 ### 1.3 Known Data Limitations
 

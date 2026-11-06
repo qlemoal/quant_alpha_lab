@@ -49,7 +49,7 @@ def _market_var(lf, window):
         .unique(subset = 'date')
         .sort('date')
         .with_columns(
-            c('mkt_logret').rolling_var(window).alias(f'mkt_var{window}')
+            pl.rolling_cov(c('mkt_logret'), c('mkt_logret'), window_size=window).alias(f'mkt_var{window}')
         )
         .select(['date', f'mkt_var{window}'])
     )
@@ -63,10 +63,25 @@ def add_beta(lf, window=60):
     def _add_single(lf, w):
         mkt_var = _market_var(lf, w)
         lf = lf.sort(['ticker', 'date']).join(mkt_var, on='date', how='left')
-        cov = pl.rolling_cov(c('logret'), c('mkt_logret'), window_size=w).over('ticker')
-        beta = (cov / c(f'mkt_var{w}')).alias(f'beta{w}')
-
-        return lf.sort(['ticker', 'date']).with_columns(beta).drop(f'mkt_var{w}')
+        
+        # Polars 1.36+: compute rolling_cov per ticker using map_batches on struct
+        # The issue is rolling_cov cannot be used as window expression (.over('ticker'))
+        # Solution: collect per ticker, compute, then reassemble
+        # But we need to stay lazy - use map_groups on partition_by approach
+        
+        # First collect the lazy frame to work with DataFrame
+        df = lf.collect()
+        
+        def compute_beta(partition):
+            # partition is a DataFrame for one ticker
+            # Compute rolling covariance for this ticker
+            cov = pl.rolling_cov(partition['logret'], partition['mkt_logret'], window_size=w)
+            beta = cov / partition[f'mkt_var{w}']
+            return partition.with_columns(pl.Series(beta).alias(f'beta{w}')).drop(f'mkt_var{w}')
+        
+        # Partition by ticker and apply
+        df = df.partition_by('ticker', as_dict=False).map_groups(compute_beta)
+        return df.lazy()
 
     if isinstance(window, list):
         for w in window:

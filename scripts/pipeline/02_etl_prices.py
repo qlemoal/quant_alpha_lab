@@ -1,3 +1,16 @@
+'''
+Added Adj_Open because because we want to be realistic in the trading available to us.
+    Therefore we want to work with t+1 open price, but we adjust it for events using 
+    the same relation between Close and Adj_Close.
+
+Usage:
+    python scripts/pipeline/02_etl_prices.py
+
+With:
+    loading and saving directories set here.
+'''
+
+
 from pathlib import Path
 from datetime import date
 
@@ -17,7 +30,7 @@ con = duckdb.connect()
 con.execute(f'''
 CREATE OR REPLACE TABLE prices AS
 SELECT
-    filename, Date, Open, High, Low, "Adj Close", Volume
+    filename, Date, Open, High, Low, "Adj Close", Close, Volume
 FROM            
     read_csv_auto('{RAW_DIR}/*.csv', filename=True)
 ''')
@@ -31,6 +44,7 @@ SELECT
     CAST(Open AS DOUBLE) AS open,
     CAST(High AS DOUBLE) AS high,
     CAST(Low AS DOUBLE) AS low,
+    CAST(Close AS DOUBLE) AS close_raw,
     CAST("Adj Close" AS DOUBLE) AS close,
     CAST(Volume AS BIGINT) AS volume
 FROM 
@@ -38,7 +52,19 @@ FROM
 WHERE
     "Adj Close" > 0
 AND 
+    Close > 0
+AND 
     Volume > 0
+''')
+
+# Add adjusted open
+con.execute('''
+CREATE OR REPLACE TABLE clean AS
+SELECT 
+    *,
+    CAST(open * close / close_raw AS DOUBLE) AS open_adj
+FROM 
+    clean
 ''')
 
 
@@ -65,6 +91,8 @@ COPY(
 TO '{OUT_DIR}/ohlcv.parquet'
 (FORMAT PARQUET);
 ''')
+
+
 
 # Save config
 import json

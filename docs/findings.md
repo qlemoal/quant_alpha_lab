@@ -4,6 +4,42 @@
 
 ---
 
+## 2026-11-06: Adjusted Open Prices for Forward Return Construction
+
+### Context
+Forward returns in this pipeline are **open-to-open** (`fwdret{h}` = log return from open(t+1) to open(t+h+1)), modeling realistic next-day execution at the open.
+
+### Decision
+Use **adjusted open** prices (not raw `Open`) when computing forward returns, to be consistent with **adjusted close** prices used elsewhere in the pipeline.
+
+### Rationale
+- `Adj Close` from yfinance is split- and dividend-adjusted retroactively
+- Raw `Open` is **not** adjusted — it reflects the actual printed open price on the day, pre-split
+- If a stock splits 2:1 on day t:
+  - `Adj Close(t-1)` ≈ 2 × `Adj Close(t)` (adjusted)
+  - `Open(t)` (raw) ≈ 2 × `Open(t+1)` (pre-split vs post-split)
+  - Using raw `Open` introduces a **spurious jump** in forward returns across split dates
+- Using **adjusted open** (derived as `Adj Close × (Open / Close)`) ensures both legs of the return use consistently adjusted prices
+
+### Implementation
+In `src/features/returns.py`, forward returns are computed using:
+```python
+adj_open = adj_close * (open / close)  # adjusts open same way as close
+fwdret = log(adj_open.shift(-h-1)) - log(adj_open.shift(-1))
+```
+
+### Impact
+- Eliminates artificial return spikes at split dates
+- Makes forward returns comparable to `logret` (which uses `Adj Close`)
+- Critical for signal evaluation validity — split-induced artifacts would otherwise inflate IC for signals correlated with split events (e.g., high-momentum stocks that recently split)
+
+### Files
+- `src/features/returns.py` (forward return construction)
+- `scripts/pipeline/02_etl_prices.py` (produces `adj_open` column)
+- `docs/methodology.md` §1.2 (ETL output schema updated)
+
+---
+
 ## 2026-08-20: Momentum/Reversal Dead Zone Across Horizons
 
 ### Test

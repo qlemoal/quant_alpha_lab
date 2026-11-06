@@ -23,7 +23,7 @@ Usage:
     Previous runs:
         python scripts/pipeline/04a_generate_signals.py --date 2026-10-29 --tag default
         
-  python scripts/pipeline/04b_evaluate_signals.py --date 2026-10-29 --tag default --horizon 20 --alpha 0.2
+  /Users/lemoal/.Trash/04a_generate_signals.pypython scripts/pipeline/04b_evaluate_signals.py --date 2026-11-06 --tag default --horizon 20 --alpha 0.2
 '''
 
 import argparse

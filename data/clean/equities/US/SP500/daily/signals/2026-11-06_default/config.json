@@ -1,7 +1,7 @@
 {
   "signal_tag": "default",
-  "run_date": "2026-11-05",
-  "run_timestamp": "2026-11-05T19:56:15.289592",
+  "run_date": "2026-11-06",
+  "run_timestamp": "2026-11-06T11:55:10.487975",
   "signal_specs": [
     [
       "mom5",
@@ -140,8 +140,8 @@
   "region": "US",
   "universe": "SP500",
   "freq": "daily",
-  "git_commit": "7be67c182a9f756d22e311f1e28c20e377d8b0b6",
-  "git_diff": "2 files changed, 15 insertions(+), 9 deletions(-)",
+  "git_commit": "e402453a78575eb0e13842e043c6348f05392b5f",
+  "git_diff": null,
   "features_file": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/clean/equities/US/SP500/daily/features/features.parquet",
   "features_hash": "sha256:e418976e250c356d",
   "params_hash": "sha256:cb2d3e8ef8cfa0d4",
@@ -263,58 +263,58 @@
   "cross_sectional_stats": {
     "mom5_zscore_tanh": {
       "avg_cs_mean": -0.009282552591919058,
-      "avg_cs_std": 0.5607320002546743
+      "avg_cs_std": 0.5607320002546741
     },
     "mom10_zscore_tanh": {
-      "avg_cs_mean": -0.011279571620214012,
+      "avg_cs_mean": -0.011279571620214009,
       "avg_cs_std": 0.5680920607964596
     },
     "mom20_zscore_tanh": {
-      "avg_cs_mean": -0.013552519907711799,
-      "avg_cs_std": 0.5738658319028858
+      "avg_cs_mean": -0.013552519907711797,
+      "avg_cs_std": 0.5738658319028855
     },
     "mom60_zscore_tanh": {
       "avg_cs_mean": -0.02195033164244425,
       "avg_cs_std": 0.5748285680929454
     },
     "mom120_zscore_tanh": {
-      "avg_cs_mean": -0.03435276889054121,
-      "avg_cs_std": 0.5620991294873102
+      "avg_cs_mean": -0.034352768890541195,
+      "avg_cs_std": 0.5620991294873103
     },
     "mom252_zscore_tanh": {
-      "avg_cs_mean": -0.0502202765118586,
-      "avg_cs_std": 0.536605190016318
+      "avg_cs_mean": -0.050220276511858564,
+      "avg_cs_std": 0.5366051900163179
     },
     "vol5_zscore_clip": {
-      "avg_cs_mean": -0.025669953211313514,
-      "avg_cs_std": 0.8642318902098688
+      "avg_cs_mean": -0.02566995321131352,
+      "avg_cs_std": 0.8642318902098686
     },
     "vol10_zscore_clip": {
-      "avg_cs_mean": -0.024489453017530503,
-      "avg_cs_std": 0.8739592814724926
+      "avg_cs_mean": -0.0244894530175305,
+      "avg_cs_std": 0.8739592814724929
     },
     "vol20_zscore_clip": {
-      "avg_cs_mean": -0.022594618621263465,
-      "avg_cs_std": 0.8869974263824422
+      "avg_cs_mean": -0.02259461862126346,
+      "avg_cs_std": 0.8869974263824427
     },
     "vol60_zscore_clip": {
       "avg_cs_mean": -0.019760467098255356,
-      "avg_cs_std": 0.9065148373317089
+      "avg_cs_std": 0.9065148373317091
     },
     "vol120_zscore_clip": {
       "avg_cs_mean": -0.018177716066705228,
-      "avg_cs_std": 0.9176613206441003
+      "avg_cs_std": 0.9176613206441004
     },
     "vol252_zscore_clip": {
       "avg_cs_mean": -0.01659051128857044,
-      "avg_cs_std": 0.9273343748661071
+      "avg_cs_std": 0.9273343748661069
     },
     "beta60_rank": {
-      "avg_cs_mean": -0.0033758369977270565,
-      "avg_cs_std": 0.5774073401851696
+      "avg_cs_mean": -0.0033758369977270573,
+      "avg_cs_std": 0.577407340185169
     },
     "beta252_rank": {
-      "avg_cs_mean": -0.01392775095831067,
+      "avg_cs_mean": -0.013927750958310645,
       "avg_cs_std": 0.5713011000775743
     }
   },

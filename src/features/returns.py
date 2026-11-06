@@ -20,7 +20,7 @@ def add_fwd_returns(lf:pl.LazyFrame) -> pl.LazyFrame:
         to represent more realistically what we can effectively trade in practice.
         This forces to use 2 days in the future for the next fwdret.
     '''
-    open_logret = c('open').log().diff().over('ticker')
+    open_logret = c('open_adj').log().diff().over('ticker')
     return lf.sort(['ticker', 'date']).with_columns(
                 fwdret = open_logret.shift(-2).over('ticker')
             )
@@ -36,11 +36,11 @@ def add_fwd_returns(lf:pl.LazyFrame) -> pl.LazyFrame:
 
 def add_fwdret_horizon(lf:pl.LazyFrame, horizon=1) -> pl.LazyFrame:
     '''
-    Forward log-returns using open prices.
-    We use open(t+1+horizon) relative to open(t+1) - skip execution day (t+1).
-    So fwdret{h} = log(open[t+1+h]) - log(open[t+1])
+    Forward log-returns using adjusted open prices (total return series).
+    We use open_adj(t+1+horizon) relative to open_adj(t+1) - skip execution day (t+1).
+    So fwdret{h} = log(open_adj[t+1+h]) - log(open_adj[t+1])
     '''
-    log_open = c('open').log().over('ticker')
+    log_open = c('open_adj').log().over('ticker')
     fwd_expr = log_open.shift(-(horizon + 1)) - log_open.shift(-1)
     return lf.sort(['ticker', 'date']).with_columns(**{f'fwdret{horizon}': fwd_expr})
     # Previous version using Close prices

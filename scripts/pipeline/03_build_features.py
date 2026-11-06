@@ -1,3 +1,9 @@
+'''
+Usage:
+    python scripts/pipeline/03_build_features.py
+'''
+
+
 import polars as pl
 from polars import col as c
 from datetime import date
@@ -57,7 +63,7 @@ lf = add_log_adv(lf, window=[5, 10, 20, 60, 120, 252])
 
 print(f'    Saving features to {OUTPUT}')
 
-lf.sink_parquet(OUTPUT) #  Note that sink_parquet does not keep the order, it will save in chunks in parallel. 
+lf.collect().write_parquet(OUTPUT) 
 
 # Save config
 config = {

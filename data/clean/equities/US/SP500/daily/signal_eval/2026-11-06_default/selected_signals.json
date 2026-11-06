@@ -1,0 +1,18 @@
+{
+  "signals": [
+    "vol252_zscore_clip",
+    "vol120_zscore_clip",
+    "mom5_zscore_tanh",
+    "vol60_zscore_clip",
+    "vol20_zscore_clip",
+    "vol10_zscore_clip",
+    "vol5_zscore_clip",
+    "mom10_zscore_tanh",
+    "beta252_rank",
+    "mom20_zscore_tanh",
+    "beta60_rank",
+    "mom60_zscore_tanh"
+  ],
+  "fwd_ret_col": "fwdret20",
+  "horizon": 20
+}
