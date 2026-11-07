@@ -5,32 +5,39 @@ from polars import col as c
 
 
 
-def add_log_returns(lf:pl.LazyFrame) -> pl.LazyFrame:
+def _add_log_returns_per_ticker(df: pl.DataFrame) -> pl.DataFrame:
+    '''Compute log returns per ticker (eager).'''
+    return df.sort('date').with_columns(
+        logret=c('close').log().diff()
+    )
+
+
+def _add_fwd_returns_per_ticker(df: pl.DataFrame) -> pl.DataFrame:
+    '''Compute forward returns per ticker using adjusted open (eager).'''
+    return df.sort('date').with_columns(
+        fwdret=c('open_adj').log().diff().shift(-2)
+    )
+
+
+def add_log_returns(lf: pl.LazyFrame) -> pl.LazyFrame:
     '''
     Computes log-returns 'logret' from 'close' prices column.
+    Uses map_groups to avoid window expressions in LazyFrame query plan.
     '''
-    return lf.sort(['ticker', 'date']).with_columns(
-                logret = c('close').log().diff().over('ticker')
-            )
+    schema = dict(lf.collect_schema())
+    schema['logret'] = pl.Float64
+    return lf.sort(['ticker', 'date']).group_by('ticker', maintain_order=True).map_groups(_add_log_returns_per_ticker, schema=schema)
 
 
-def add_fwd_returns(lf:pl.LazyFrame) -> pl.LazyFrame:
+def add_fwd_returns(lf: pl.LazyFrame) -> pl.LazyFrame:
     '''
-    Instead of using Close(t+1) relative to Close(t), we choose to use Open(t+2) relative to Open(t+1), 
-        to represent more realistically what we can effectively trade in practice.
-        This forces to use 2 days in the future for the next fwdret.
+    Forward returns using adjusted open prices (open_adj).
+    fwdret = log(open_adj[t+2]) - log(open_adj[t+1]) — models next-day execution at open.
+    Uses map_groups to avoid window expressions in LazyFrame query plan.
     '''
-    open_logret = c('open_adj').log().diff().over('ticker')
-    return lf.sort(['ticker', 'date']).with_columns(
-                fwdret = open_logret.shift(-2).over('ticker')
-            )
-    # Previous version using Close prices
-    # '''
-    # Computes 'fwdret' column with tomorrow's log-returns. Used to compute the performance or IC, this is not a feature obviously.
-    # '''
-    # return lf.sort(['ticker', 'date']).with_columns(
-    #             fwdret = c('logret').shift(-1).over('ticker')
-    #         )
+    schema = dict(lf.collect_schema())
+    schema['fwdret'] = pl.Float64
+    return lf.sort(['ticker', 'date']).group_by('ticker', maintain_order=True).map_groups(_add_fwd_returns_per_ticker, schema=schema)
     
 
 

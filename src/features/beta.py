@@ -15,8 +15,10 @@ def add_market_return(lf):
         Since I am computing the market erturns using today's constituents of the SP500, 
         there is much less around 2000, bringing in a huge bias. That will be fixed later on.
     '''
+    # Compute eagerly to avoid window expression conflicts with existing .over() in query plan
+    df = lf.collect()
     mkt = (
-        lf
+        df
         .group_by('date')
         .agg( 
             c('logret').mean().alias('mkt_logret') ,
@@ -30,7 +32,7 @@ def add_market_return(lf):
         )
         .sort('date')
     )
-    return lf.join(mkt, on='date', how='left').sort('ticker', 'date')
+    return df.join(mkt, on='date', how='left').sort('ticker', 'date').lazy()
 
 
 def _market_var(lf, window):
@@ -43,48 +45,49 @@ def _market_var(lf, window):
         have added the market as an extra ticker, so only rows, without duplicating the values for each ticker,
         but I would have needed to filter it out for all consecutive stats, correlations, etc. 
     '''
-    return (
+    # Compute eagerly to avoid window expression issues in lazy joins
+    mkt_df = (
         lf
         .select(['date', 'mkt_logret'])
-        .unique(subset = 'date')
+        .unique(subset='date')
         .sort('date')
-        .with_columns(
-            pl.rolling_cov(c('mkt_logret'), c('mkt_logret'), window_size=window).alias(f'mkt_var{window}')
-        )
-        .select(['date', f'mkt_var{window}'])
+        .collect()
     )
+    return mkt_df.with_columns(
+        pl.rolling_cov(c('mkt_logret'), c('mkt_logret'), window_size=window).alias(f'mkt_var{window}')
+    ).select(['date', f'mkt_var{window}'])
 
 
 def add_beta(lf, window=60):
     
-    if 'mkt_logret' not in lf.collect_schema().names():
+    # Check if market return exists by collecting schema (cheap)
+    schema = lf.collect_schema()
+    if 'mkt_logret' not in schema.names():
         lf = add_market_return(lf)
+    
+    # Collect once at the start to avoid any lazy query plan issues
+    df = lf.collect()
 
-    def _add_single(lf, w):
-        mkt_var = _market_var(lf, w)
-        lf = lf.sort(['ticker', 'date']).join(mkt_var, on='date', how='left')
+    def _add_single(df, w):
+        mkt_var = _market_var(df.lazy(), w)
         
-        # Polars 1.36+: compute rolling_cov per ticker using map_batches on struct
-        # The issue is rolling_cov cannot be used as window expression (.over('ticker'))
-        # Solution: collect per ticker, compute, then reassemble
-        # But we need to stay lazy - use map_groups on partition_by approach
+        # Join eagerly
+        df = df.sort(['ticker', 'date']).join(mkt_var, on='date', how='left')
         
-        # First collect the lazy frame to work with DataFrame
-        df = lf.collect()
+        # Use partition_by + expression API in with_columns
+        partitions = df.partition_by('ticker', as_dict=False)
+        result_parts = []
+        for part in partitions:
+            # Compute rolling covariance using expression API
+            part = part.with_columns(
+                (pl.rolling_cov(c('logret'), c('mkt_logret'), window_size=w) / c(f'mkt_var{w}')).alias(f'beta{w}')
+            ).drop(f'mkt_var{w}')
+            result_parts.append(part)
         
-        def compute_beta(partition):
-            # partition is a DataFrame for one ticker
-            # Compute rolling covariance for this ticker
-            cov = pl.rolling_cov(partition['logret'], partition['mkt_logret'], window_size=w)
-            beta = cov / partition[f'mkt_var{w}']
-            return partition.with_columns(pl.Series(beta).alias(f'beta{w}')).drop(f'mkt_var{w}')
-        
-        # Partition by ticker and apply
-        df = df.partition_by('ticker', as_dict=False).map_groups(compute_beta)
-        return df.lazy()
+        return pl.concat(result_parts, how='vertical_relaxed').sort(['ticker', 'date'])
 
     if isinstance(window, list):
         for w in window:
-            lf = _add_single(lf, w)
-        return lf
-    return _add_single(lf, window)
+            df = _add_single(df, w)
+        return df.lazy()
+    return _add_single(df, window).lazy()

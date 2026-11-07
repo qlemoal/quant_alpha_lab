@@ -1,7 +1,7 @@
 {
-  "run_date": "2026-11-03",
+  "run_date": "2026-11-07",
   "signal_tag": "default",
-  "input_file": "data/processed/ohlcv/2026-11-03_default/ohlcv.parquet",
+  "source_ohlcv": "data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet",
   "output_file": "features.parquet",
   "feature_windows": {
     "beta": [

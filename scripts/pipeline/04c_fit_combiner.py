@@ -18,7 +18,7 @@ Outputs:
   data/clean/{asset}/{region}/{universe}/{freq}/en_model/{run_id}/stability.parquet
 
 Usage:
-    python scripts/pipeline/04c_fit_combiner.py --date 2026-10-29 --tag default
+    python scripts/pipeline/04c_fit_combiner.py --date 2026-11-07 --tag default
 '''
 
 import argparse

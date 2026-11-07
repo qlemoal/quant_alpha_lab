@@ -13,7 +13,7 @@ Outputs:
 
 Usage:
     -> Dataset defined in config/dataset_config.json
-    python scripts/pipeline/04a_generate_signals.py --date 2026-11-05 --tag default
+    python scripts/pipeline/04a_generate_signals.py --date 2026-11-07 --tag default
   
 '''
 
