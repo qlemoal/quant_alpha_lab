@@ -1,3 +1,8 @@
+import warnings
+# Suppress RuntimeWarnings from np.nanmean/nanstd on empty slices (common in worker processes)
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='Mean of empty slice')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='Degrees of freedom <= 0 for slice')
+
 import numpy as np
 import polars as pl
 from typing import Optional, Tuple, Dict, Any, List
@@ -20,14 +25,22 @@ def compute_raw_correlation(returns_matrix: np.ndarray, min_obs: int = 30) -> np
     n_assets = returns_matrix.shape[0]
     
     # Standardize returns (subtract mean, divide by std) ignoring NaN
-    means = np.nanmean(returns_matrix, axis=1, keepdims=True)
-    stds = np.nanstd(returns_matrix, axis=1, keepdims=True, ddof=1)
+    # Suppress warnings for assets with insufficient data - must be inside to affect workers
+    with np.errstate(invalid='ignore', divide='ignore'):
+        means = np.nanmean(returns_matrix, axis=1, keepdims=True)
+        stds = np.nanstd(returns_matrix, axis=1, keepdims=True, ddof=1)
     
-    # Avoid division by zero
-    stds = np.where(stds == 0, 1.0, stds)
+    # Assets with < 2 valid obs get NaN mean/std (will be handled below)
+    # Assets with 0 valid obs get NaN mean/std
+    
+    # Avoid division by zero - only for assets with valid std
+    stds = np.where((stds == 0) | ~np.isfinite(stds), 1.0, stds)
     
     # Z-score normalized returns (NaN stays NaN)
-    z_returns = (returns_matrix - means) / stds
+    z_returns = np.full_like(returns_matrix, np.nan)
+    valid_std = np.isfinite(stds) & (stds > 0)
+    if np.any(valid_std):
+        z_returns[valid_std[:, 0]] = (returns_matrix[valid_std[:, 0]] - means[valid_std[:, 0]]) / stds[valid_std[:, 0]]
     
     # Correlation = mean of pairwise z-products
     # corr[i,j] = mean(z[i] * z[j]) where both are finite
@@ -41,7 +54,8 @@ def compute_raw_correlation(returns_matrix: np.ndarray, min_obs: int = 30) -> np
             mask = np.isfinite(zi) & np.isfinite(zj)
             n_valid = mask.sum()
             if n_valid > min_obs:
-                corr[i, j] = corr[j, i] = np.nanmean(zi[mask] * zj[mask])
+                with np.errstate(invalid='ignore'):
+                    corr[i, j] = corr[j, i] = np.nanmean(zi[mask] * zj[mask])
             else:
                 corr[i, j] = corr[j, i] = np.nan  # Will be handled by RMT
     
@@ -155,6 +169,7 @@ def estimate_risk_model_for_date(
         clusters.setdefault(c, []).append(t)
 
     return {
+        'date': date_str,
         'corr_raw': corr,
         'corr_clean': corr_clean,
         'cov': cov,

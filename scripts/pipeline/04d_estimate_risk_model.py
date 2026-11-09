@@ -34,6 +34,8 @@ from datetime import date
 import numpy as np
 import polars as pl
 from joblib import Parallel, delayed
+from concurrent.futures import as_completed
+from tqdm import tqdm
 
 from config.paths import get_paths, run_id_from_args
 from src.risk.risk_model import estimate_risk_model_for_date, build_returns_panel
@@ -172,9 +174,20 @@ def main(run_date: str, tag: str):
         idx, date_str, ret_matrix = item
         return estimate_risk_model_for_date(ret_matrix, valid_tickers, date_str, RISK_CONFIG)
     
-    results = Parallel(n_jobs=n_jobs, backend='loky', verbose=10)(
-        delayed(compute_one)(item) for item in valid_items
-    )
+    # Use Parallel with backend but no verbose, track progress with tqdm
+    print(f'  Processing {len(valid_items)} rebalances...')
+    with tqdm(total=len(valid_items), desc='  Risk model', unit='date', 
+              bar_format='  {l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
+        results = []
+        # Submit all jobs
+        with Parallel(n_jobs=n_jobs, backend='loky', verbose=0) as parallel:
+            futures = [delayed(compute_one)(item) for item in valid_items]
+            for future in parallel(futures):
+                result = future
+                # Update progress with meaningful info
+                pbar.set_postfix_str(f"date={result['date']}, clusters={result['n_clusters']}, λ_max={result['lambda_max']:.2f}")
+                pbar.update(1)
+                results.append(result)
 
     # --- Save outputs and build summaries (serial, IO-safe) ---
     print('\n[3/4] Saving outputs...')
