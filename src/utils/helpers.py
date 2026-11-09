@@ -5,6 +5,7 @@ import subprocess
 import hashlib
 import json
 import os
+from datetime import date, timedelta
 
 
 def as_list(x):
@@ -24,6 +25,31 @@ def add_expr(lf, expr_func, colname, suffix=None, **kwargs):
             for cn in colname
         ]
     )
+
+
+def get_rebalance_dates(start_date: date, end_date: date, freq: str = 'weekly') -> list:
+    '''Generate rebalance dates between start and end.
+    
+    Args:
+        start_date: First rebalance date
+        end_date: Last rebalance date (inclusive)
+        freq: 'weekly' or 'monthly'
+    
+    Returns:
+        List of date objects
+    '''
+    dates = []
+    current = start_date
+    while current <= end_date:
+        dates.append(current)
+        if freq == 'weekly':
+            current += timedelta(weeks=1)
+        elif freq == 'monthly':
+            # Approximate month step
+            current = (current.replace(day=1) + timedelta(days=32)).replace(day=1)
+        else:
+            raise ValueError(f'Unknown freq: {freq}')
+    return dates
 
 
 # =============================================================================

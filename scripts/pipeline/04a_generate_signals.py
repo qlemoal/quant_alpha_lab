@@ -89,16 +89,16 @@ SIGNAL_SPECS = [
     
     # # ADV family - liquidity signal (higher ADV = more liquid = lower returns?)
     # ('log_adv5', 'zscore_tanh', {}),
-    # ('log_adv10', 'zscore_tanh', {}),
-    # ('log_adv20', 'zscore_tanh', {}),
-    # ('log_adv60', 'zscore_tanh', {}),
+    ('log_adv10', 'zscore_tanh', {}),
+    ('log_adv20', 'zscore_tanh', {}),
+    ('log_adv60', 'zscore_tanh', {}),
     # ('log_adv120', 'zscore_tanh', {}),
     # ('log_adv252', 'zscore_tanh', {}),
     
     # Beta family (rank - robust to outliers)
-    ('beta60', 'rank', {'descending': True}),
-    ('beta120', 'rank', {'descending': True}),
-    ('beta252', 'rank', {'descending': True}),
+    # ('beta60', 'rank', {'descending': True}),
+    # ('beta120', 'rank', {'descending': True}),
+    # ('beta252', 'rank', {'descending': True}),
 ]
 
 # Forward return horizons to compute

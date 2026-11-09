@@ -1,6 +1,4 @@
 '''
-src/risk/covariance.py
-
 State-of-the-art covariance matrix estimation for portfolio construction.
 
 ================================================================================
@@ -18,18 +16,18 @@ Every top quant fund (Millennium, Citadel, Two Sigma, AQR, Point72) therefore
 uses regularized / shrunk covariance estimators. This module implements the
 three most widely used approaches:
 
-  1. Ledoit-Wolf (2004) linear shrinkage toward identity -- the gold standard
-     analytical shrinkage estimator. Used across the industry.
+  1. Ledoit-Wolf (2004) linear shrinkage toward identity: 
+     the gold standard analytical shrinkage estimator. Used across the industry.
 
-  2. Oracle Approximating Shrinkage (Ledoit & Wolf 2012) -- finite-sample
-     optimal variant of (1), slightly more aggressive shrinkage.
+  2. Oracle Approximating Shrinkage (Ledoit & Wolf 2012): 
+     finite-sample optimal variant of (1), slightly more aggressive shrinkage.
 
-  3. Factor-model covariance via PCA (Bai & Ng 2002; Connor & Korajczyk 1986)
-     -- decomposes covariance into low-rank systematic + diagonal idiosyncratic.
+  3. Factor-model covariance via PCA (Bai & Ng 2002; Connor & Korajczyk 1986): 
+     decomposes covariance into low-rank systematic + diagonal idiosyncratic.
      Essential when P > N.
 
-  4. Shrinkage toward constant-correlation target (Ledoit et al. 2003) -- a
-     structured alternative to the identity target.
+  4. Shrinkage toward constant-correlation target (Ledoit et al. 2003): 
+     a structured alternative to the identity target.
 
 The output of each function is a symmetric positive semi-definite covariance
 matrix, ready for use in vol targeting, cluster caps, or mean-variance
@@ -319,7 +317,7 @@ def oracle_approximating_shrinkage(
 
       - OAS uses a different (smaller) shrinkage intensity on average,
         because it accounts for the fact that the sample eigenvalues are
-        systematically biased upward (Marčenko-Pastur spreading).
+        systematically biased upward (Marcenko-Pastur spreading).
       - OAS has a closed-form solution that does NOT require estimating
         the asymptotic variance of each entry -- it uses a simpler
         moment-based formula.
