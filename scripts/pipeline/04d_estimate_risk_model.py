@@ -144,11 +144,11 @@ def main(run_date: str, tag: str):
 
     # --- Pre-filter valid rebalances (serial, fast) ---
     print(f'\n[1/4] Pre-filtering {len(rebalance_dates)} rebalances...')
-    valid_items = []  # list of (idx, date_str, ret_matrix)
+    valid_items = []  # list of (idx, date_str, ret_matrix, valid_ticker_list)
     
     for idx, reb_date in enumerate(rebalance_dates):
         date_str = reb_date.isoformat()
-        ret_matrix = returns_panel[:, :, idx]
+        ret_matrix = returns_panel[:, :, idx]  # (n_all_tickers, lookback_window)
         n_obs = ret_matrix.shape[1]
 
         if n_obs < RISK_CONFIG['min_obs']:
@@ -156,12 +156,17 @@ def main(run_date: str, tag: str):
             continue
 
         valid_per_ticker = np.sum(np.isfinite(ret_matrix), axis=1)
-        n_valid_tickers = np.sum(valid_per_ticker >= RISK_CONFIG['min_obs'])
+        valid_mask = valid_per_ticker >= RISK_CONFIG['min_obs']
+        n_valid_tickers = np.sum(valid_mask)
         if n_valid_tickers < 50:
             print(f'  Skipping {date_str}: only {n_valid_tickers} tickers with enough data')
             continue
 
-        valid_items.append((idx, date_str, ret_matrix))
+        # Filter to only valid tickers - avoids NaN rows in parallel computation
+        valid_tickers_local = [t for t, v in zip(valid_tickers, valid_mask) if v]
+        ret_matrix_valid = ret_matrix[valid_mask, :]  # (n_valid_tickers, lookback_window)
+        
+        valid_items.append((idx, date_str, ret_matrix_valid, valid_tickers_local))
 
     print(f'  {len(valid_items)}/{len(rebalance_dates)} rebalances passed pre-filter')
 
@@ -171,16 +176,16 @@ def main(run_date: str, tag: str):
     print(f'  Using n_jobs={n_jobs}')
     
     def compute_one(item):
-        idx, date_str, ret_matrix = item
-        return estimate_risk_model_for_date(ret_matrix, valid_tickers, date_str, RISK_CONFIG)
+        idx, date_str, ret_matrix, tickers_local = item
+        return estimate_risk_model_for_date(ret_matrix, tickers_local, date_str, RISK_CONFIG)
     
-    # Use Parallel with backend but no verbose, track progress with tqdm
+    # Use Parallel with threading backend (avoids pickle overhead, numpy releases GIL for BLAS/LAPACK)
     print(f'  Processing {len(valid_items)} rebalances...')
     with tqdm(total=len(valid_items), desc='  Risk model', unit='date', 
               bar_format='  {l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
         results = []
-        # Submit all jobs
-        with Parallel(n_jobs=n_jobs, backend='loky', verbose=0) as parallel:
+        # Submit all jobs - threading shares memory, no serialization of ret_matrix
+        with Parallel(n_jobs=n_jobs, backend='threading', verbose=0) as parallel:
             futures = [delayed(compute_one)(item) for item in valid_items]
             for future in parallel(futures):
                 result = future
@@ -193,12 +198,12 @@ def main(run_date: str, tag: str):
     print('\n[3/4] Saving outputs...')
     summaries = []
     
-    for (idx, date_str, ret_matrix), result in zip(valid_items, results):
+    for (idx, date_str, ret_matrix, tickers_local), result in zip(valid_items, results):
         # Save per-date outputs
-        save_long_matrix(result['corr_raw'], valid_tickers, date_str, corr_raw_file, 'corr')
-        save_long_matrix(result['corr_clean'], valid_tickers, date_str, corr_clean_file, 'corr')
-        save_long_matrix(result['cov'], valid_tickers, date_str, cov_file, 'cov')
-        save_clusters(result['cluster_map'], valid_tickers, date_str, clusters_file)
+        save_long_matrix(result['corr_raw'], tickers_local, date_str, corr_raw_file, 'corr')
+        save_long_matrix(result['corr_clean'], tickers_local, date_str, corr_clean_file, 'corr')
+        save_long_matrix(result['cov'], tickers_local, date_str, cov_file, 'cov')
+        save_clusters(result['cluster_map'], tickers_local, date_str, clusters_file)
         save_eigenvalues(result['eigenvalues'], date_str, eigen_file)
 
         # Build summary

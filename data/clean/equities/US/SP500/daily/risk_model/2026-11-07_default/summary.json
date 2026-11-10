@@ -4,166 +4,166 @@
     "start": "2026-04-29",
     "end": "2026-07-01"
   },
-  "avg_n_clusters": 6.0,
-  "avg_lambda_max": 5.8081,
+  "avg_n_clusters": 4.0,
+  "avg_lambda_max": 5.7945,
   "avg_shrinkage": 0.0,
   "per_date": [
     {
       "date": "2026-04-29",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
+        "min": 24,
         "max": 192,
-        "median": 102,
-        "mean": 83.5
+        "median": 171,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
     },
     {
       "date": "2026-05-06",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
-        "max": 186,
-        "median": 109,
-        "mean": 83.5
+        "min": 24,
+        "max": 187,
+        "median": 171,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
     },
     {
       "date": "2026-05-13",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
-        "max": 186,
-        "median": 108,
-        "mean": 83.5
+        "min": 23,
+        "max": 187,
+        "median": 174,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
     },
     {
       "date": "2026-05-20",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
+        "min": 24,
         "max": 183,
-        "median": 119,
-        "mean": 83.5
+        "median": 173,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
     },
     {
       "date": "2026-05-27",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
+        "min": 25,
         "max": 183,
-        "median": 119,
-        "mean": 83.5
+        "median": 172,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
     },
     {
       "date": "2026-06-03",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
+        "min": 25,
         "max": 181,
-        "median": 124,
-        "mean": 83.5
+        "median": 169,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
     },
     {
       "date": "2026-06-10",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
+        "min": 25,
         "max": 186,
-        "median": 119,
-        "mean": 83.5
+        "median": 169,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
     },
     {
       "date": "2026-06-17",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
+        "min": 24,
         "max": 181,
-        "median": 121,
-        "mean": 83.5
+        "median": 173,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
     },
     {
       "date": "2026-06-24",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
-        "max": 180,
-        "median": 119,
-        "mean": 83.5
+        "min": 22,
+        "max": 181,
+        "median": 176,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
     },
     {
       "date": "2026-07-01",
-      "n_tickers": 501,
+      "n_tickers": 499,
       "n_obs": 252,
-      "q_ratio": 1.9881,
-      "lambda_max": 5.8081,
-      "n_clusters": 6,
+      "q_ratio": 1.9802,
+      "lambda_max": 5.7945,
+      "n_clusters": 4,
       "cluster_size_stats": {
-        "min": 1,
-        "max": 182,
-        "median": 113,
-        "mean": 83.5
+        "min": 22,
+        "max": 183,
+        "median": 182,
+        "mean": 124.75
       },
       "shrinkage": 0.0,
       "cov_method": "ledoit_wolf"
