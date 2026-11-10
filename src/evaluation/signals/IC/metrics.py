@@ -1,82 +1,161 @@
-#  Heavier, occasionally-invoked statistical refinements, built from core.py
-#  Newey-West particularly important to take into account autocorrelation in the 
-#      estimation of the IC. Max lag is still to be determined systematically, 
-#      instead of using the standard rule of thumb.
+'''
+Statistical refinements on the daily IC series (built from core.py).
+
+THE PROBLEM THIS FILE SOLVES
+----------------------------
+The label is a 20-day forward return. The label of day t and the label of day t+1
+share 19 of their 20 days. So the daily IC values are strongly autocorrelated,
+up to lag h - 1 = 19, even when the signal is pure noise.
+
+The naive t-stat assumes independent days. It is far too large.
+Newey-West (HAC) fixes this, but ONLY if its max lag covers the overlap.
+The old default lag was int(4 * (n/100) ** (2/9)), about 5 for n = 6500.
+That is much shorter than 19, so the t-stat stayed too large.
+
+THE FIX
+-------
+    max_lag = max(rule_of_thumb, 2 * (horizon - 1))
+
+The horizon is given by the caller (`horizon=`). If the caller does not give it,
+DEFAULT_HORIZON is used (the project label is fwdret20).
+'''
 
 import numpy as np
 import polars as pl
-from polars import col as c
 from scipy.stats import norm
 
-from src.signals.combine import make_signal
-from src.features.returns import add_fwdret_horizon
 from src.evaluation.signals.ic.core import compute_ic, summarize_ic
 
+# Label horizon of the project (fwdret20). Used when the caller does not pass `horizon`.
+DEFAULT_HORIZON = 20
 
-def newey_west_ic_tstat(ic_values:"pl.LazyFrame|pl.DataFrame|list", max_lag=None) -> dict:
+
+# =============================================================================
+# 1. Lag choice
+# =============================================================================
+
+def default_nw_lag(n: int, horizon: "int | None" = None) -> int:
     '''
-    Newey-West (HAC, heteroskedastic autocorrelated consistent) corrected t-stat for the mean of a daily IC series.
-        HAC is for the covariance matrix,   See https://en.wikipedia.org/wiki/Newey%E2%80%93West_estimator 
+    Choose the Newey-West max lag.
 
-        The naive t-stat in summarize_ic() assumes independent daily observations, 
-        which overlapping-window features violate (mom20's 20-day window means consecutive days' IC values are correlated). 
-        This corrects for that autocorrelation instead of just flagging it as a caveat.
+    Two lower bounds, we keep the larger one:
+      - Newey-West (1994) rule of thumb:  4 * (n / 100) ** (2/9)
+        This covers generic autocorrelation.
+      - 2 * (horizon - 1):  windows of h days overlap by h - 1 days, so the IC
+        series is autocorrelated up to lag h - 1 by construction.
+        Why twice? With the Bartlett kernel, a lag of exactly h - 1 still gives
+        about 12% false positives at the 5% level (simulation, n = 6500, h = 20,
+        pure noise). A lag of 2 * (h - 1) brings it to about 7-8%.
+        The non-overlapping check below gives the exact 5%.
 
-        Variance must be increased when positive autocorrelation is present, preventing you from overstating the statistical significance of your IC.
+    The lag is capped at n // 4 so that very short series stay usable.
+    '''
+    h = DEFAULT_HORIZON if horizon is None else int(horizon)
+    rule_of_thumb = int(4 * (n / 100) ** (2 / 9))
+    lag = max(1, rule_of_thumb, 2 * (h - 1))
+    return int(min(lag, max(1, n // 4)))
 
-    Step-by-step: 
-        - Compute unadjusted variance of IC series gamma0
-        - Compute the autocovariance up to lag max_lag gamma_k
-        - For each lag k, compute the Bartlett Kernel Weights w:=1-k/(max_lag+1)
-        - Combine the variance with 2x the weighted autocovariance to get the NW variance
-        - Use the NW variance to compute the standard error of the mean
-        - Use the SE to get the t-stat
 
-    max_lag defaults to the standard Newey-West (1994) rule of thumb, 4 * (n/100)^(2/9), if not given explicitly.
+# =============================================================================
+# 2. Newey-West t-stat
+# =============================================================================
 
-    IMPORTANT: Feed in only the values, not the date!!! 
-        Temporary fix: forcing to be a pandas Series, which will be forced to be 1 dimensional. I then get the values of it to remove the dates.
+def newey_west_ic_tstat(
+    ic_values: "pl.LazyFrame|pl.DataFrame|list|np.ndarray",
+    max_lag: "int | None" = None,
+    horizon: "int | None" = None,
+) -> dict:
+    '''
+    Newey-West (HAC) t-stat for the MEAN of a daily IC series.
+
+    Idea in one line: the variance of the mean is larger when neighbours are
+    positively correlated, so we add the weighted autocovariances to the variance.
+
+    Steps:
+      1. Remove NaN. n = number of values.
+      2. mean = average IC. demeaned = IC - mean.
+      3. gamma_0 = variance of the series (divide by n).
+      4. For each lag k = 1..L:
+           gamma_k = sum(demeaned[k:] * demeaned[:-k]) / n       (autocovariance)
+           w_k     = 1 - k / (L + 1)                              (Bartlett weight)
+      5. long_run_var = gamma_0 + 2 * sum_k w_k * gamma_k
+         Bartlett weights keep long_run_var >= 0.
+      6. se = sqrt(long_run_var / n).  t_stat = mean / se.
+
+    Parameters:
+      ic_values: only the IC numbers, NOT the dates (1-D).
+      max_lag:   L. If None, default_nw_lag(n, horizon) is used.
+      horizon:   label horizon h in days. Sets L >= 2 * (h - 1). Default DEFAULT_HORIZON.
+
+    Returns dict: mean, se, t_stat, max_lag (None values if n < 2 or variance <= 0).
     '''
     x = np.asarray(ic_values, dtype=float)
     if x.ndim != 1:
-        raise ValueError(f'newey_west_ic_tstat expects 1D IC values, as a list, pl.LazyFrame or pl.DataFrame, but got shape {x.shape}')
+        raise ValueError(f'newey_west_ic_tstat expects 1D IC values, got shape {x.shape}')
     x = x[~np.isnan(x)]
     n = len(x)
     if n < 2:
         return {'mean': None, 'se': None, 't_stat': None, 'max_lag': None}
 
-    # The max lag represents the maximum number of lag periods to include in the autocorrelation window.
     if max_lag is None:
-        max_lag = max(1, int(4 * (n / 100) ** (2 / 9)))
+        max_lag = default_nw_lag(n, horizon)
+    max_lag = int(min(max_lag, n - 1))   # a lag cannot exceed n - 1
 
     mean = x.mean()
     demeaned = x - mean
-    gamma0 = np.sum(demeaned ** 2) / n  # This is just the variance of the IC series. We will then increase or decrease dpending on the auto-correlation, weighted by the Bartlett weights.
+    long_run_var = np.sum(demeaned ** 2) / n      # gamma_0
 
-    var = gamma0
-    gammas = [] # Those will be the auto-correlation at different lags
     for k in range(1, max_lag + 1):
-        w = 1 - k / (max_lag + 1)
-        gamma_k = np.sum(demeaned[k:] * demeaned[:-k]) / n
-        gammas.append(gamma_k)
-        var += 2 * w * gamma_k
+        w = 1 - k / (max_lag + 1)                                    # Bartlett weight
+        gamma_k = np.sum(demeaned[k:] * demeaned[:-k]) / n           # autocovariance at lag k
+        long_run_var += 2 * w * gamma_k
 
-    se = np.sqrt(var / n) if var > 0 else None
+    se = np.sqrt(long_run_var / n) if long_run_var > 0 else None
     t_stat = mean / se if se else None
-
-    return {'mean': mean, 'se': se, 't_stat': t_stat, 'max_lag': max_lag}#, 'n':n, 'gamma0':gamma0, 'gammas':gammas, 'deameaned':demeaned, 'x':x}
-
+    return {'mean': mean, 'se': se, 't_stat': t_stat, 'max_lag': max_lag}
 
 
+# =============================================================================
+# 3. Non-overlapping cross-check
+# =============================================================================
 
-
-def ic_pvalue_nw(nw_result:dict) -> "float | None":
+def ic_tstat_non_overlapping(
+    ic_values: "list|np.ndarray",
+    horizon: "int | None" = None,
+    offset: int = 0,
+) -> dict:
     '''
-    Two-sided p-value from a Newey-West-corrected t-stat, via the normal
-        approximation (the NW t-stat is asymptotically normal, not exactly
-        Student-t, unlike the naive t-stat which assumes a known small-sample
-        distribution). Takes the dict returned by newey_west_ic_tstat directly,
-        so the two functions stay paired.
+    Simple robustness check, no HAC needed.
+
+    Keep one IC every h days (days offset, offset + h, offset + 2h, ...).
+    These labels do not overlap, so the plain t-stat is valid.
+    The price is power: we keep only n / h points.
+
+    Use it next to the Newey-West t-stat. The two should be close.
+    If NW says "significant" and this says "no", distrust the signal.
+
+    Returns dict: mean, t_stat, n_used.
+    '''
+    h = DEFAULT_HORIZON if horizon is None else int(horizon)
+    x = np.asarray(ic_values, dtype=float)
+    x = x[~np.isnan(x)][offset::h]
+    n = len(x)
+    if n < 3 or x.std(ddof=1) == 0:
+        return {'mean': None, 't_stat': None, 'n_used': n}
+    mean = x.mean()
+    t_stat = mean / (x.std(ddof=1) / np.sqrt(n))
+    return {'mean': float(mean), 't_stat': float(t_stat), 'n_used': n}
+
+
+# =============================================================================
+# 4. p-value
+# =============================================================================
+
+def ic_pvalue_nw(nw_result: dict) -> "float | None":
+    '''
+    Two-sided p-value from the Newey-West t-stat, normal approximation
+    (the NW t-stat is asymptotically normal).
+    Takes the dict returned by newey_west_ic_tstat.
     '''
     t = nw_result.get('t_stat')
     if t is None:
@@ -84,46 +163,41 @@ def ic_pvalue_nw(nw_result:dict) -> "float | None":
     return 2 * (1 - norm.cdf(abs(t)))
 
 
+# =============================================================================
+# 5. IC decay
+# =============================================================================
 
 def ic_decay(lf, signal_col, horizons=(1, 5, 10, 20)):
     '''
-    IC (Spearman) of a signal against forward returns at several horizons.
-        Shows how long the signal's predictive power actually persists,
-        directly informs what rebalance frequency makes sense: 
-        a signal that only shows IC at horizon 1 wants daily rebalancing (expensive),
-        one that holds up to horizon 20 can rebalance far less often.
-    Note: No Newey-West compensation for autocorrelation is used here. TODO?
-    Uses pre-computed fwdret{h} columns from the signals file.
-    '''
+    IC of a signal against forward returns at several horizons.
 
-    # Get column names once to avoid repeated schema resolution
+    It shows how long the signal keeps its predictive power.
+    A signal with IC only at h = 1 needs fast (costly) rebalancing.
+    A signal that holds up to h = 20 can rebalance less often.
+
+    Uses the pre-computed columns fwdret{h}.
+    For each horizon the Newey-West t-stat uses lag >= 2 * (h - 1) (overlap of THAT horizon),
+    returned in the column `t_stat_nw`.
+    '''
     available_cols = set(lf.collect_schema().names())
     rows = []
     for h in horizons:
         fwd_col = f'fwdret{h}'
-        # Check if column exists in the data
         if fwd_col not in available_cols:
             continue
-        ic_lf = compute_ic(lf, signal_col, fwd_col)
-        stats = summarize_ic(ic_lf)  # returns a dict
+        ic_df = compute_ic(lf, signal_col, fwd_col).collect()   # one collect, reused below
+        stats = summarize_ic(ic_df)
+        nw = newey_west_ic_tstat(ic_df['ic'].to_numpy(), horizon=h)
+        stats['t_stat_nw'] = nw['t_stat']
         stats['horizon'] = h
         rows.append(stats)
 
-    return pl.DataFrame(rows).select(['horizon', 'mean', 'std', 'ir', 'hit_rate', 'n_days'])
+    return pl.DataFrame(rows).select(['horizon', 'mean', 'std', 'ir', 'hit_rate', 'n_days', 't_stat_nw'])
 
 
-
-
-
-
-
-
-if __name__=='__main__':
+if __name__ == '__main__':
     from src.signals.combine import make_signal
-    with pl.Config(tbl_cols=-1):  # that's to print the whole report instead of truncating some columns
-
+    with pl.Config(tbl_cols=-1):
         lf = pl.scan_parquet('data/processed/features.parquet')
         lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom120', 'mom252'], method='decile')
-        # lf = make_signal(lf, ['mom5', 'mom10', 'mom20', 'mom60', 'mom252'], method='zscore_tanh')
-        # print(signal_report(lf, signal_col='mom20_decile'))
         print(ic_decay(lf, 'mom60'))
