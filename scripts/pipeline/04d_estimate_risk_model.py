@@ -1,52 +1,86 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 04d: Estimate Risk Model (Covariance + Clustering)
+Phase 04d: Estimate Risk Model (Covariance + Clusters)
 ===============================================
 
-Thin wrapper calling src.risk.risk_model functions.
-Estimates correlation, cleans with RMT, builds covariance, runs Louvain.
+QUESTION ANSWERED
+    "At each rebalance date, how do the stocks move together, and how risky is each one?"
 
-Inputs:
-  data/clean/{asset}/{region}/{universe}/{freq}/en_scores/{run_id}/en_scores.parquet
-  data/clean/{asset}/{region}/{universe}/{freq}/ohlcv/ohlcv.parquet
-  data/clean/{asset}/{region}/{universe}/{freq}/features/features.parquet
+THE STAGE IN ONE PICTURE
 
-Outputs:
-  data/clean/{asset}/{region}/{universe}/{freq}/risk_model/{run_id}/
-    corr_raw.parquet
-    corr_clean.parquet
-    cov.parquet
-    clusters.parquet
-    eigenvalues.parquet
-    summary.json
+    features.parquet                 en_scores.parquet
+    (date, ticker, logret)           (dates that have a score)
+            |                                |
+            v                                v
+     [1] returns panel              [2] rebalance dates
+     (dates x tickers)              (last trading day of each week)
+            \\                              /
+             \\                            /
+              v                          v
+             [3] plan: for each date, the 252-day window + the eligible tickers
+                              |
+                              v        one task per date, run in parallel
+             [4] src/risk/risk_model.py (the maths, one date at a time):
+                    raw correlation
+                      -> Marchenko-Pastur cleaning
+                      -> shrinkage (Ledoit-Wolf)
+                      -> covariance = D x C x D   (annualised)
+                      -> Louvain clusters
+                              |
+                              v
+             [5] save files + summary.json
+
+WHERE IS THE COMPLICATED PART?
+    src/risk/risk_model.py     the statistics (one date)
+    src/risk/risk_pipeline.py  windows, eligibility, parallel run, summary
+    src/utils/risk_io.py       reading and writing the matrix files
+    This script only calls them, in order.
+
+NO LOOK-AHEAD
+    The window for date t holds returns up to the CLOSE of t. The signal of t is also known at the close of t.
+    The portfolio trades at the open of t+1.
+
+INPUTS
+    {clean_base}/features/features.parquet                    (columns: date, ticker, logret)
+    {clean_base}/en_scores/{run_id}/en_scores.parquet         (columns: date, ticker, combined_score)
+
+OUTPUTS   {clean_base}/risk_model/{run_id}/
+    corr_clean.parquet    cleaned correlation, long format, upper triangle  [date, ticker_i, ticker_j, corr]
+    cov.parquet           ANNUALISED covariance, same format                [date, ticker_i, ticker_j, cov]
+    clusters.parquet      [date, ticker, cluster_id]
+    eigenvalues.parquet   [date, eigenvalue, component]
+    corr_raw.parquet      only if RISK_CONFIG['save_corr_raw'] is True
+    summary.json          a DICT; the per-date list is under the key 'per_date'
     config.json
+    Read a matrix back with src.utils.risk_io.load_matrix_for_date().
 
-Usage:
-  python scripts/pipeline/04d_estimate_risk_model.py --date 2026-11-07 --tag default
+USAGE
+    python scripts/pipeline/04d_estimate_risk_model.py --date 2026-11-07 --tag default
+    QUANTALPHA_TEST_MODE=1 python scripts/pipeline/04d_estimate_risk_model.py --date 2026-11-07 --tag test
+        (test mode: only the last 10 rebalance dates)
 '''
 
 import argparse
-import json
 import os
+import sys
 from pathlib import Path
-from datetime import date
-import numpy as np
+
+# Make `import src...` and `import config...` work wherever the script is started from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import polars as pl
-from joblib import Parallel, delayed
-from concurrent.futures import as_completed
-from tqdm import tqdm
 
 from config.paths import get_paths, run_id_from_args
-from src.risk.risk_model import estimate_risk_model_for_date, build_returns_panel
-from src.utils.risk_io import (
-    save_long_matrix,
-    save_clusters,
-    combine_parquet_files,
-    save_eigenvalues,
+from src.risk.risk_pipeline import (
+    make_returns_panel,
+    pick_rebalance_dates,
+    plan_rebalances,
+    run_risk_model,
+    build_summary,
+    write_json,
 )
-from src.utils.helpers import get_rebalance_dates
-from src.portfolio.backtest import prepare_backtest_data
+from src.utils.risk_io import combine_parquet_files
 
 
 # =============================================================================
@@ -56,218 +90,119 @@ from src.portfolio.backtest import prepare_backtest_data
 SCORE_COL = 'combined_score'
 
 RISK_CONFIG = {
-    'rebalance_freq': 'weekly',
-    'lookback_window': 252,
-    'min_obs': 60,
-    'cov_method': 'ledoit_wolf',    # 'ledoit_wolf', 'oas', 'factor', 'sample'
-    'cluster_resolution': 1.0,
-    'n_factors': 5,                 # For factor model
+    'rebalance_freq': 'weekly',       # 'weekly' or 'monthly': last trading day of the period
+    'lookback_window': 252,           # trading days of returns per date
+    'min_obs': 60,                    # a ticker needs this many returns in the window to be eligible
+    'min_assets': 50,                 # a date needs this many eligible tickers, else it is skipped
+    'cov_method': 'ledoit_wolf',      # 'ledoit_wolf', 'oas', 'factor', 'sample'
+    'cluster_resolution': 1.0,        # Louvain resolution (higher = more, smaller clusters)
+    'n_factors': 5,                   # only for cov_method='factor'
+    'save_corr_raw': False,           # the raw correlation is big and not used downstream
 }
 
 
 def main(run_date: str, tag: str):
     run_id = run_id_from_args(run_date, tag)
-    paths = get_paths('yfinance', 'equities', 'US', 'SP500', 'daily', run_id=run_id)
+    paths = get_paths(run_id=run_id)
 
-    # --- Inputs ---
-    en_scores_dir = paths.stage_dir('en_scores')
-    en_scores_file = en_scores_dir / 'en_scores.parquet'
-    ohlcv_file = paths.ohlcv_file
-
-    print(f'--> Estimating risk model for {run_id}')
-    print(f'    EN scores: {en_scores_file}')
-    print(f'    OHLCV: {ohlcv_file}')
-
-    # --- Load data lazily ---
-    en_scores_lf = pl.scan_parquet(en_scores_file)
-    ohlcv_lf = pl.scan_parquet(ohlcv_file)
-
-    # Get tickers and date range from en_scores (only collect small columns)
-    tickers = en_scores_lf.select('ticker').unique().sort(by='ticker').collect().to_series().to_list()
-    dates = en_scores_lf.select('date').unique().sort(by='date').collect().to_series().to_list()
-    start_date = dates[0]
-    end_date = dates[-1]
-
-    print(f'    Tickers: {len(tickers)}')
-    print(f'    Date range: {start_date} to {end_date}')
-
-    # --- Prepare returns for risk model ---
-    # Use prepare_backtest_data with LazyFrames directly
-    signals_lf = en_scores_lf.select(['date', 'ticker', SCORE_COL])
-    features_lf = pl.scan_parquet(paths.features_file).rename({'log_adv60': 'adv60', 'vol60': 'std60'})
-    # Drop duplicate columns from features (only raw OHLCV columns, keep computed features)
-    ohlcv_cols = {'date', 'ticker', 'open', 'high', 'low', 'close_raw', 'close', 'volume', 'open_adj'}
-    feature_cols = [c for c in features_lf.collect_schema().names() if c not in ohlcv_cols]
-    features_lf = features_lf.select(feature_cols)
-    price_lf = pl.concat([ohlcv_lf, features_lf], how='horizontal')
-
-    bt_data = prepare_backtest_data(
-        signals_lf=signals_lf,
-        score_cols=[SCORE_COL],
-        price_lf=price_lf,
-        start_date=start_date,
-        end_date=end_date,
-        rebalance_freq=RISK_CONFIG['rebalance_freq'],
-        lookback_window=RISK_CONFIG['lookback_window'],
-        min_obs=RISK_CONFIG['min_obs'],
-    )
-
-    rebalance_dates = bt_data['rebalance_dates']
-    # Test mode: limit rebalance dates for faster testing
-    import os
-    test_mode = os.environ.get('QUANTALPHA_TEST_MODE', '').lower() in ('1', 'true', 'yes')
-    if test_mode:
-        rebalance_dates = rebalance_dates[-10:]  # Last 10 weeks for quick test
-        print(f'TEST MODE: limiting to last {len(rebalance_dates)} rebalance dates')
-
-    # Build returns panel using utility function
-    from src.risk.risk_model import build_returns_panel
-    returns_panel = build_returns_panel(
-        bt_data['returns_panel'],
-        rebalance_dates,
-        RISK_CONFIG['lookback_window']
-    )
-    valid_tickers = bt_data['returns_panel'].columns[1:]  # exclude date column
-
-    # --- Output directory ---
+    en_scores_file = paths.stage_dir('en_scores') / 'en_scores.parquet'
+    features_file = paths.features_file
     out_dir = paths.stage_dir('risk_model')
+
+    for f in (en_scores_file, features_file):
+        if not f.exists():
+            raise FileNotFoundError(f'Missing input: {f}')
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    corr_raw_file = out_dir / 'corr_raw.parquet'
-    corr_clean_file = out_dir / 'corr_clean.parquet'
-    cov_file = out_dir / 'cov.parquet'
-    clusters_file = out_dir / 'clusters.parquet'
-    eigen_file = out_dir / 'eigenvalues.parquet'
-    summary_file = out_dir / 'summary.json'
+    print('=' * 70)
+    print('PHASE 04d: ESTIMATE RISK MODEL')
+    print('=' * 70)
+    print(f'Run ID:   {run_id}')
+    print(f'Config:   {RISK_CONFIG}')
+    print(f'Output:   {out_dir}')
 
-    date_suffixes = [d.isoformat() for d in rebalance_dates]
+    # ------------------------------------------------------------------
+    # [1/5] Returns panel: rows = dates, columns = tickers
+    # ------------------------------------------------------------------
+    print('\n[1/5] Loading returns...')
+    returns_long = pl.read_parquet(features_file, columns=['date', 'ticker', 'logret'])
+    panel = make_returns_panel(returns_long)
+    print(f'  {len(panel.dates)} dates x {len(panel.tickers)} tickers '
+          f'({panel.dates[0]} to {panel.dates[-1]})')
 
-    # --- Pre-filter valid rebalances (serial, fast) ---
-    print(f'\n[1/4] Pre-filtering {len(rebalance_dates)} rebalances...')
-    valid_items = []  # list of (idx, date_str, ret_matrix, valid_ticker_list)
-    
-    for idx, reb_date in enumerate(rebalance_dates):
-        date_str = reb_date.isoformat()
-        ret_matrix = returns_panel[:, :, idx]  # (n_all_tickers, lookback_window)
-        n_obs = ret_matrix.shape[1]
+    # ------------------------------------------------------------------
+    # [2/5] Rebalance dates: last trading day of each week, among the dates that have a score
+    # ------------------------------------------------------------------
+    print('\n[2/5] Choosing rebalance dates...')
+    score_dates = (
+        pl.scan_parquet(en_scores_file)
+        .filter(pl.col(SCORE_COL).is_not_null())
+        .select(pl.col('date').unique())
+        .collect()['date'].to_list()
+    )
+    panel_dates = set(panel.dates.astype(object))          # datetime.date objects
+    usable_dates = [d for d in score_dates if d in panel_dates]
 
-        if n_obs < RISK_CONFIG['min_obs']:
-            print(f'  Skipping {date_str}: insufficient observations ({n_obs})')
-            continue
+    first_date = panel.dates[RISK_CONFIG['min_obs']].astype(object)   # need min_obs rows of history
+    rebalance_dates = pick_rebalance_dates(usable_dates, RISK_CONFIG['rebalance_freq'], first_date)
+    if not rebalance_dates:
+        raise ValueError('No rebalance date found. Check that en_scores.parquet and features.parquet overlap.')
 
-        valid_per_ticker = np.sum(np.isfinite(ret_matrix), axis=1)
-        valid_mask = valid_per_ticker >= RISK_CONFIG['min_obs']
-        n_valid_tickers = np.sum(valid_mask)
-        if n_valid_tickers < 50:
-            print(f'  Skipping {date_str}: only {n_valid_tickers} tickers with enough data')
-            continue
+    if os.environ.get('QUANTALPHA_TEST_MODE', '').lower() in ('1', 'true', 'yes'):
+        rebalance_dates = rebalance_dates[-10:]
+        print(f'  TEST MODE: keeping the last {len(rebalance_dates)} rebalance dates')
+    print(f'  {len(rebalance_dates)} rebalance dates ({rebalance_dates[0]} to {rebalance_dates[-1]})')
 
-        # Filter to only valid tickers - avoids NaN rows in parallel computation
-        valid_tickers_local = [t for t, v in zip(valid_tickers, valid_mask) if v]
-        ret_matrix_valid = ret_matrix[valid_mask, :]  # (n_valid_tickers, lookback_window)
-        
-        valid_items.append((idx, date_str, ret_matrix_valid, valid_tickers_local))
+    # ------------------------------------------------------------------
+    # [3/5] Plan: window + eligible tickers for each date
+    # ------------------------------------------------------------------
+    print('\n[3/5] Planning windows and eligible tickers...')
+    plans, skipped = plan_rebalances(
+        panel, rebalance_dates,
+        lookback_window=RISK_CONFIG['lookback_window'],
+        min_obs=RISK_CONFIG['min_obs'],
+        min_assets=RISK_CONFIG['min_assets'],
+    )
+    for s in skipped:
+        print(f'  Skipped {s["date"]}: {s["reason"]}')
+    print(f'  {len(plans)} dates to process, {len(skipped)} skipped')
 
-    print(f'  {len(valid_items)}/{len(rebalance_dates)} rebalances passed pre-filter')
+    # ------------------------------------------------------------------
+    # [4/5] Risk model for every date (parallel). Per-date files are written by the workers.
+    # ------------------------------------------------------------------
+    print(f'\n[4/5] Estimating the risk model ({os.cpu_count()} cores available)...')
+    summaries = run_risk_model(panel, plans, RISK_CONFIG, out_dir)
 
-    # --- Parallel risk model computation ---
-    print(f'\n[2/4] Computing risk model in parallel ({os.cpu_count()} cores)...')
-    n_jobs = min(os.cpu_count() or 4, len(valid_items))
-    print(f'  Using n_jobs={n_jobs}')
-    
-    def compute_one(item):
-        idx, date_str, ret_matrix, tickers_local = item
-        return estimate_risk_model_for_date(ret_matrix, tickers_local, date_str, RISK_CONFIG)
-    
-    # Use Parallel with threading backend (avoids pickle overhead, numpy releases GIL for BLAS/LAPACK)
-    print(f'  Processing {len(valid_items)} rebalances...')
-    with tqdm(total=len(valid_items), desc='  Risk model', unit='date', 
-              bar_format='  {l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
-        results = []
-        # Submit all jobs - threading shares memory, no serialization of ret_matrix
-        with Parallel(n_jobs=n_jobs, backend='threading', verbose=0) as parallel:
-            futures = [delayed(compute_one)(item) for item in valid_items]
-            for future in parallel(futures):
-                result = future
-                # Update progress with meaningful info
-                pbar.set_postfix_str(f"date={result['date']}, clusters={result['n_clusters']}, λ_max={result['lambda_max']:.2f}")
-                pbar.update(1)
-                results.append(result)
+    # ------------------------------------------------------------------
+    # [5/5] Combine per-date files, write summary and config
+    # ------------------------------------------------------------------
+    print('\n[5/5] Combining files and writing the summary...')
+    date_suffixes = [s['date'] for s in summaries]
+    for base_name in ('corr_raw', 'corr_clean', 'cov', 'clusters', 'eigenvalues'):
+        combine_parquet_files(out_dir, base_name, date_suffixes)
 
-    # --- Save outputs and build summaries (serial, IO-safe) ---
-    print('\n[3/4] Saving outputs...')
-    summaries = []
-    
-    for (idx, date_str, ret_matrix, tickers_local), result in zip(valid_items, results):
-        # Save per-date outputs
-        save_long_matrix(result['corr_raw'], tickers_local, date_str, corr_raw_file, 'corr')
-        save_long_matrix(result['corr_clean'], tickers_local, date_str, corr_clean_file, 'corr')
-        save_long_matrix(result['cov'], tickers_local, date_str, cov_file, 'cov')
-        save_clusters(result['cluster_map'], tickers_local, date_str, clusters_file)
-        save_eigenvalues(result['eigenvalues'], date_str, eigen_file)
-
-        # Build summary
-        cluster_sizes = result['cluster_sizes']
-        summaries.append({
-            'date': date_str,
-            'n_tickers': result['n_tickers'],
-            'n_obs': result['n_obs'],
-            'q_ratio': round(result['q_ratio'], 4),
-            'lambda_max': round(result['lambda_max'], 4),
-            'n_clusters': result['n_clusters'],
-            'cluster_size_stats': {
-                'min': min(cluster_sizes.values()),
-                'max': max(cluster_sizes.values()),
-                'median': sorted(cluster_sizes.values())[len(cluster_sizes) // 2],
-                'mean': round(sum(cluster_sizes.values()) / len(cluster_sizes), 2),
-            },
-            'shrinkage': result['shrinkage'],
-            'cov_method': result['cov_method'],
-        })
-
-    # --- Combine parquet files ---
-    print('\n[4/4] Combining parquet files...')
-    combine_parquet_files(out_dir, 'corr_raw', date_suffixes)
-    combine_parquet_files(out_dir, 'corr_clean', date_suffixes)
-    combine_parquet_files(out_dir, 'cov', date_suffixes)
-    combine_parquet_files(out_dir, 'clusters', date_suffixes)
-    combine_parquet_files(out_dir, 'eigenvalues', date_suffixes)
-
-    # Save summary with aggregate stats
-    print('\n[3/3] Saving summary...')
-    agg = {
-        'n_rebalances': len(summaries),
-        'date_range': {'start': summaries[0]['date'], 'end': summaries[-1]['date']},
-        'avg_n_clusters': round(sum(s['n_clusters'] for s in summaries) / len(summaries), 1),
-        'avg_lambda_max': round(sum(s['lambda_max'] for s in summaries) / len(summaries), 4),
-        'avg_shrinkage': round(sum(s['shrinkage'] for s in summaries if s['shrinkage'] is not None) / len([s for s in summaries if s['shrinkage'] is not None]), 4) if any(s['shrinkage'] is not None for s in summaries) else None,
-        'per_date': summaries,
-    }
-    with open(summary_file, 'w') as f:
-        json.dump(agg, f, indent=2, default=str)
-
-    # Save config
-    config = {
+    summary = build_summary(summaries, skipped)
+    write_json(out_dir / 'summary.json', summary)
+    write_json(out_dir / 'config.json', {
         'run_id': run_id,
         'tag': tag,
         'risk_config': RISK_CONFIG,
-        'start_date': str(start_date),
-        'end_date': str(end_date),
-    }
-    with open(out_dir / 'config.json', 'w') as f:
-        json.dump(config, f, indent=2, default=str)
+        'score_col': SCORE_COL,
+        'start_date': summary['date_range']['start'],
+        'end_date': summary['date_range']['end'],
+    })
 
-    print(f'\nRisk model estimated for {len(summaries)} rebalances')
-    print(f'  Output: {out_dir}/')
-
+    print(f'\nRisk model estimated for {summary["n_rebalances"]} rebalances')
+    print(f'  average shrinkage:  {summary["avg_shrinkage"]}   (should vary by date, not sit at 1.0)')
+    print(f'  average median vol: {summary["avg_median_vol"]}   (annualised, equities: about 0.2 to 0.5)')
+    print(f'  average clusters:   {summary["avg_n_clusters"]}')
+    print(f'  output: {out_dir}/')
     print(f'\nNext: python scripts/pipeline/04e_construct_weights.py --date {run_date} --tag {tag}')
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--date', type=str, required=True,
-                        help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
-    parser.add_argument('--tag', type=str, default='default',
-                        help='Signal tag (default: default)')
+    parser = argparse.ArgumentParser(description='Estimate the risk model (correlation, covariance, clusters)')
+    parser.add_argument('--date', type=str, required=True, help='Run date, YYYY-MM-DD (used in the run_id)')
+    parser.add_argument('--tag', type=str, default='default', help='Run tag (default: default)')
     args = parser.parse_args()
     main(args.date, args.tag)
