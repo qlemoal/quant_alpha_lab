@@ -1,5 +1,5 @@
 {
-  "run_date": "2026-11-07",
+  "run_date": "2026-11-12",
   "signal_tag": "default",
   "source_ohlcv": "data/clean/equities/US/SP500/daily/ohlcv/ohlcv.parquet",
   "output_file": "features.parquet",

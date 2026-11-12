@@ -14,11 +14,18 @@ Outputs:
 Usage:
     -> Dataset defined in config/dataset_config.json
     python scripts/pipeline/04a_generate_signals.py --date 2026-11-07 --tag default
-  
+
+Cheat signals (for benchmarking only):
+    Add to SIGNAL_SPECS:
+        ('fwdret20', 'cheat_perfect', {}),
+        ('fwdret20', 'cheat_rank', {}),
+        ('fwdret20', 'cheat_decile', {}),
+        ('fwdret20', 'cheat_noisy', {'signal_to_noise': 1.0}),
+    Note: Forward returns are added BEFORE signal generation to enable cheat signals.
 '''
 
 import argparse
-from src.signals.combine import make_signal
+from src.signals.combine import make_signal, register_method
 from src.features.returns import add_fwdret_horizon
 from src.evaluation.signals.ic.core import compute_ic, summarize_ic
 from src.evaluation.signals.performance import decile_longshort_returns, sharpe_ratio, max_drawdown, compute_stability
@@ -43,6 +50,8 @@ parser.add_argument('--date', type=str, required=True,
                     help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
 parser.add_argument('--tag', type=str, default='default',
                     help='Signal tag (default: default)')
+parser.add_argument('--enable-cheat', action='store_true',
+                    help='Register cheat signal methods (for benchmarking only)')
 args = parser.parse_args()
 
 RUN_DATE = args.date
@@ -65,11 +74,13 @@ OUTPUT_FILE = OUTPUT_DIR / 'signals.parquet'
 
 # Signal specifications: list of (feature_col, method, params)
 # method: 'zscore_tanh', 'zscore_clip', 'rank', 'decile'
+#         'cheat_perfect', 'cheat_rank', 'cheat_decile', 'cheat_noisy' (requires --enable-cheat)
 # kwargs per method:
 #   zscore_tanh: scale (default 1.0) -- tanh naturally bounds to [-1, 1], no clipping needed
 #   zscore_clip: low, high (default -3, 3) -- hard clipping after z-score
 #   rank: descending (default False)
 #   decile: n_buckets (default 10)
+#   cheat_noisy: signal_to_noise (default 1.0)
 SIGNAL_SPECS = [
     # Momentum family - multiple horizons
     ('mom5', 'zscore_tanh', {}),
@@ -78,7 +89,7 @@ SIGNAL_SPECS = [
     ('mom60', 'zscore_tanh', {}),
     ('mom120', 'zscore_tanh', {}),
     ('mom252', 'zscore_tanh', {}),
-    
+
     # Volatility family (inverse signal - low vol tends to outperform)
     ('vol5', 'zscore_clip', {'low': -3, 'high': 3}),
     ('vol10', 'zscore_clip', {'low': -3, 'high': 3}),
@@ -86,19 +97,26 @@ SIGNAL_SPECS = [
     ('vol60', 'zscore_clip', {'low': -3, 'high': 3}),
     ('vol120', 'zscore_clip', {'low': -3, 'high': 3}),
     ('vol252', 'zscore_clip', {'low': -3, 'high': 3}),
-    
-    # # ADV family - liquidity signal (higher ADV = more liquid = lower returns?)
+
+    # ADV family - liquidity signal
     # ('log_adv5', 'zscore_tanh', {}),
     ('log_adv10', 'zscore_tanh', {}),
     ('log_adv20', 'zscore_tanh', {}),
     ('log_adv60', 'zscore_tanh', {}),
     # ('log_adv120', 'zscore_tanh', {}),
     # ('log_adv252', 'zscore_tanh', {}),
-    
+
     # Beta family (rank - robust to outliers)
     # ('beta60', 'rank', {'descending': True}),
     # ('beta120', 'rank', {'descending': True}),
     # ('beta252', 'rank', {'descending': True}),
+
+    # CHEAT SIGNALS (benchmarking only) - uncomment and use --enable-cheat
+    # ('fwdret20', 'cheat_perfect', {}),
+    # ('fwdret20', 'cheat_rank', {}),
+    # ('fwdret20', 'cheat_decile', {}),
+    # ('fwdret20', 'cheat_noisy', {'signal_to_noise': 1.0}),
+    # ('fwdret20', 'cheat_noisy', {'signal_to_noise': 2.0}),
 ]
 
 # Forward return horizons to compute
@@ -122,14 +140,14 @@ print(f'Signal specs:  {len(SIGNAL_SPECS)} signals')
 for feat, method, params in SIGNAL_SPECS:
     print(f'    {feat:15s} -> {method:12s} {params}')
 print(f'Horizons:      {HORIZONS}')
+if args.enable_cheat:
+    print('Cheat signals: ENABLED (benchmarking only!)')
 print('=' * 70)
 
 
 # ---------------------------------------------------------------------
 # Load features
-
-
-print('\n[1/3] Loading features...')
+print('\n[1/4] Loading features...')
 features_lf = pl.scan_parquet(FEATURES_FILE)
 
 if DATE_START or DATE_END:
@@ -137,16 +155,40 @@ if DATE_START or DATE_END:
         (pl.col('date') >= DATE_START) & (pl.col('date') <= DATE_END)
     )
 
-
 # Get available columns from schema (no collect needed)
 available_cols = set(features_lf.collect_schema().names())
 print(f'  Loaded schema: {len(available_cols)} cols')
 
 
 # ---------------------------------------------------------------------
-# Generate each signal (lazy - compose expressions only)
+# Add forward returns FIRST (needed for cheat signals)
+print('\n[2/4] Adding forward returns...')
+for h in HORIZONS:
+    features_lf = add_fwdret_horizon(features_lf, horizon=h)
+    print(f'  Added fwdret{h}')
 
-print('\n[2/3] Generating signals...')
+# Refresh available columns after adding forward returns
+available_cols = set(features_lf.collect_schema().names())
+
+
+# ---------------------------------------------------------------------
+# Register cheat methods if enabled
+if args.enable_cheat:
+    print('\n[2b] Registering cheat signal methods...')
+    from src.signals.cheat import (
+        cheat_perfect_expr, cheat_rank_expr,
+        cheat_decile_expr, cheat_noisy_expr
+    )
+    register_method('cheat_perfect', cheat_perfect_expr)
+    register_method('cheat_rank', cheat_rank_expr)
+    register_method('cheat_decile', cheat_decile_expr)
+    register_method('cheat_noisy', cheat_noisy_expr)
+    print('  Registered: cheat_perfect, cheat_rank, cheat_decile, cheat_noisy')
+
+
+# ---------------------------------------------------------------------
+# Generate each signal (lazy - compose expressions only)
+print('\n[3/4] Generating signals...')
 signal_cols = []
 for feat_col, method, params in SIGNAL_SPECS:
     if feat_col not in available_cols:
@@ -168,24 +210,15 @@ print(f'\n  Generated {len(signal_cols)} signal columns (lazy)')
 
 
 # ---------------------------------------------------------------------
-# Add forward returns (features already have open/close, use add_fwdret_horizon)
-
-print('\n[3/3] Adding forward returns...')
-for h in HORIZONS:
-    features_lf = add_fwdret_horizon(features_lf, horizon=h)
-    print(f'  Added fwdret{h}')
-
-
-# ---------------------------------------------------------------------
 # Save (collect only at the end)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-print(f'\nSaving to {OUTPUT_FILE}...')
+print(f'\n[4/4] Saving to {OUTPUT_FILE}...')
 output_cols = ['date', 'ticker'] + signal_cols + [f'fwdret{h}' for h in HORIZONS]
 features_lf.select(output_cols).collect().write_parquet(OUTPUT_FILE)
 
 # Collect for stats and row count
-print('\n[4/4] Computing signal statistics...')
+print('\nComputing signal statistics...')
 full_df = features_lf.select(output_cols).collect()
 row_count = len(full_df)
 print(f'  Saved {row_count:,} rows x {len(output_cols)} cols to {OUTPUT_FILE}')
@@ -225,7 +258,7 @@ perf_stats = {}
 if len(signal_cols) > 0 and 'fwdret20' in full_df.columns:
     fwd_col = 'fwdret20'  # main evaluation horizon
     lf = pl.scan_parquet(OUTPUT_FILE)
-    
+
     for sig in signal_cols:
         # IC stats
         try:
@@ -234,7 +267,7 @@ if len(signal_cols) > 0 and 'fwdret20' in full_df.columns:
             ic_stats[sig] = {k: (float(v) if v is not None else None) for k, v in ic_stats[sig].items()}
         except Exception as e:
             ic_stats[sig] = {'error': str(e)}
-        
+
         # Performance (decile long-short)
         try:
             ls_lf = decile_longshort_returns(lf, sig, fwd_ret_col=fwd_col)
@@ -251,7 +284,7 @@ if len(signal_cols) > 0 and 'fwdret20' in full_df.columns:
                 perf_stats[sig] = {'error': 'no data'}
         except Exception as e:
             perf_stats[sig] = {'error': str(e)}
-        
+
         # Stability / Turnover
         try:
             turnover_lf = compute_stability(lf, sig)
@@ -318,9 +351,3 @@ print(f'\nOutput directory: {OUTPUT_DIR}')
 print(f'  signals.parquet  - the signal data')
 print(f'  config.json      - full config for reproducibility')
 print(f'\nNext: python scripts/pipeline/04b_evaluate_signals.py --date {RUN_DATE} --tag {SIGNAL_TAG}')
-
-
-
-
-
-

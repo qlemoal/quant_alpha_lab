@@ -38,7 +38,7 @@ Outputs:
     └── selected_signals.json   # List of signals passing FDR (for combiner)
 
 Usage:
-    python scripts/pipeline/04b_evaluate_signals.py --date 2026-11-06 --tag default --horizon 20 --alpha 0.2
+    python scripts/pipeline/04b_evaluate_signals.py --date 2026-11-07 --tag default --horizon 20 --alpha 0.2
 '''
 
 import argparse

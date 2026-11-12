@@ -21,3 +21,5 @@ __pycache__/
 CLAUDE.md
 
 tmp/
+
+quant_alpha_lab.egg-info/
