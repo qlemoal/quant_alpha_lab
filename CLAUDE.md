@@ -66,21 +66,8 @@ python scripts/analysis/inspect_signals.py compare --runs 2026-10-29_default 202
 python scripts/pipeline/04_run_all.py
 ```
 
-## Data Files
-| Path | Description |
-|------|-------------|
-| `data/raw/prices.parquet` | Raw OHLCV from YFinance |
-| `data/processed/prices.parquet` | Cleaned, aligned prices |
-| `data/processed/features.parquet` | Technical features (mom, vol, beta, adv, etc.) |
-| `data/processed/signals/{date}_{tag}/signals.parquet` | Generated signals + fwd returns |
-| `data/processed/signals/{date}_{tag}/config.json` | Full run config + stats |
-| `data/exports/signal_eval_{tag}/` | IC, FDR, decay reports |
-| `data/exports/combiner_{tag}/` | Elastic Net coefficients, predictions |
-| `data/exports/risk_model_{tag}/` | Correlation matrices, clusters |
-| `data/exports/weights_{tag}.parquet` | Portfolio weights per date |
-
 ## Environment
-- Python 3.11+ (uses `str|list` union syntax)
+- Python 3.11+ 
 - Key deps: polars, numpy, scipy, sklearn, matplotlib, networkx
 - Run `pip install -e .` in venv
 - **Conda env:** `quantlab311` (path: `/Users/lemoal/miniforge3/envs/quantlab311`)
@@ -99,11 +86,3 @@ python scripts/pipeline/04_run_all.py
 - Signal columns named `{feature}_{method}` (e.g., `mom5_zscore_tanh`)
 - `make_signal` expects LazyFrame, returns LazyFrame with new column `{col}_{method}`
 - CPCV not fully wired for panel data; walk-forward used as fallback
-
-## Signal Methods
-| Method | Use case | Params |
-|--------|----------|--------|
-| `zscore_tanh` | Well-behaved (mom, adv, std) | `scale` (default 1.0) |
-| `zscore_clip` | Noisy features | `low`, `high` (default -3, 3) |
-| `rank` | Very noisy (beta) | `descending` |
-| `decile` | Top/bottom buckets | `n_buckets` (default 10) |
