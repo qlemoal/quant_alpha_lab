@@ -47,8 +47,11 @@ def add_fwdret_horizon(lf:pl.LazyFrame, horizon=1) -> pl.LazyFrame:
     We use open_adj(t+1+horizon) relative to open_adj(t+1) - skip execution day (t+1).
     So fwdret{h} = log(open_adj[t+1+h]) - log(open_adj[t+1])
     '''
-    log_open = c('open_adj').log().over('ticker')
-    fwd_expr = log_open.shift(-(horizon + 1)) - log_open.shift(-1)
+    # The shift MUST happen inside the per-ticker window: `.over('ticker')` is applied to the whole
+    # expression. (Applied to the log only, the shift runs over the full frame and the last rows of a ticker
+    # read the prices of the NEXT ticker: wrong labels, not null, in the last horizon+1 rows of every ticker.)
+    log_open = c('open_adj').log()
+    fwd_expr = (log_open.shift(-(horizon + 1)) - log_open.shift(-1)).over('ticker')
     return lf.sort(['ticker', 'date']).with_columns(**{f'fwdret{horizon}': fwd_expr})
     # Previous version using Close prices
     # '''
