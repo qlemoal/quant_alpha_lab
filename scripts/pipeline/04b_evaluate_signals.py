@@ -38,13 +38,18 @@ Outputs:
     └── selected_signals.json   # List of signals passing FDR (for combiner)
 
 Usage:
-    python scripts/pipeline/04b_evaluate_signals.py --date 2026-11-07 --tag default --horizon 20 --alpha 0.2
+    python scripts/pipeline/04b_evaluate_signals.py --date 2026-11-06 --tag default --horizon 20 --alpha 0.2
 '''
 
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
+
+# Make `import src...` and `import config...` work wherever the script is started from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 import polars as pl
 import numpy as np
 
@@ -268,7 +273,10 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
             'signals': selected,
             'fwd_ret_col': FWD_RET_COL,
             'horizon': horizon,
-            'train_end': str(train_end),        # for traceability
+            'train_end': str(train_end),        # 04c checks that it computes the same cut
+            'holdout_start': str(holdout_start),
+            'holdout_dates': holdout_dates,     # 04c reads these: one source of truth for the split
+            'embargo_w': embargo_w,
         }, f, indent=2)
 
     print(f'\n✓ Evaluation complete. Results in {OUTPUT_DIR}/')
