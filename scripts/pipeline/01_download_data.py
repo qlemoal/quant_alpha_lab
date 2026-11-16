@@ -1,3 +1,9 @@
+'''
+Usage:
+    python scripts/pipeline/01_download_data.py
+'''
+
+
 from pathlib import Path
 from datetime import date
 
