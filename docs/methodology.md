@@ -42,7 +42,7 @@ flowchart LR
 
 | Quantity | Unit |
 |---|---|
-| Weight | fraction of NAV. Gross = Σ|w|. Gross 1 means 50% long and 50% short. |
+| Weight | fraction of net asset value (NAV). Gross = Σ|w|. Gross 1 means 50% long and 50% short. |
 | Volatility, covariance | annualised (daily × 252) |
 | Costs | basis points of traded dollars, then returned as fractions of NAV |
 | Sharpe | annualised. For h-day returns: mean / std × √(252 / h) |
