@@ -41,6 +41,13 @@ THE CLOCK
     The signal of row t uses data up to the close of day t.
     The label of row t is the return from the open of t+1 to the open of t+1+h. It uses only later prices.
 
+CHEATING SIGNALS (a benchmark, option --cheat)
+    python scripts/pipeline/04a_generate_signals.py --date 2026-11-14 --tag cheat --cheat
+    adds signals built from the FUTURE return plus noise, with a known IC (CHEAT_SIGNALS below).
+    They show what 04b, 04c and 04f do with a signal of a known strength. See src/signals/cheat.py.
+    The tag MUST contain the word "cheat", so that a cheat run never replaces a real run.
+    Never quote a result of a cheat run as a strategy result.
+
 HOW TO ADD A SIGNAL
     Add one line to SIGNAL_SPECS: (feature column, transform, parameters). Then run 04a, 04b, ...
     Every signal you ever try counts as one test for the false discovery rate in 04b.
@@ -72,6 +79,7 @@ from src.signals.signal_pipeline import (
     validate_specs, clean_features, build_signals, add_labels, restrict_dates,
     check_labels, calendar_gaps, signal_descriptives, signal_warnings,
 )
+from src.signals.cheat import add_cheat_signals, validate_cheat_specs
 from src.utils.helpers import get_git_commit, get_git_diff, file_hash, params_hash
 
 
@@ -124,11 +132,26 @@ HORIZONS = [1, 5, 10, 20]
 DATE_START = None
 DATE_END = None
 
+# Cheating signals, added ONLY with the option --cheat. One line per signal: (label horizon, wanted rank IC).
+#   IC 0.02 weak (a typical real signal)   0.05 good   0.10 strong   0.30 very strong   0.90 near-perfect (max 0.99)
+# The horizon must be in HORIZONS. The column name is cheat_h{horizon}_ic{IC x 1000}, for example cheat_h20_ic050.
+CHEAT_SIGNALS = [
+    (20, 0.02),
+    (20, 0.05),
+    (20, 0.10),
+    (20, 0.30),
+]
+CHEAT_SEED = 0                  # another seed gives another draw of the noise
+
 MAX_MISSING_SHARE = 0.01        # warn if more than 1% of the expected (ticker, date) rows are missing
 
 
-def main(run_date: str, tag: str):
+def main(run_date: str, tag: str, cheat: bool = False):
     start = time.time()
+    if cheat and 'cheat' not in tag.lower():
+        raise ValueError(f'--cheat needs a tag that contains "cheat" (got {tag!r}). '
+                         f'Example: --tag cheat. This keeps cheat runs apart from real runs.')
+    cheat_specs = validate_cheat_specs(CHEAT_SIGNALS, HORIZONS) if cheat else []
     run_id = run_id_from_args(run_date, tag)
     cfg = get_paths(run_id=run_id)
     out_dir = cfg.stage_dir('signals')
@@ -144,6 +167,8 @@ def main(run_date: str, tag: str):
     print(f'Features:  {cfg.features_file}')
     print(f'Output:    {out_dir}')
     print(f'Horizons:  {HORIZONS}')
+    if cheat:
+        print('\n  *** CHEAT RUN: the cheat signals use FUTURE returns. Benchmark only, not a strategy. ***\n')
     print(f'Dates:     {DATE_START or "first"} to {DATE_END or "last"}')
 
     # ------------------------------------------------------------------
@@ -170,9 +195,15 @@ def main(run_date: str, tag: str):
     lf = clean_features(lf, sorted({feat for feat, _, _ in specs}))
     lf, signal_cols = build_signals(lf, specs)
     lf, label_cols = add_labels(lf, HORIZONS)
+    cheat_cols = []
+    if cheat:
+        lf, cheat_cols = add_cheat_signals(lf, cheat_specs, seed=CHEAT_SEED)      # needs the labels, so after them
+        signal_cols = signal_cols + cheat_cols
     for s in signal_cols:
         print(f'  {s}')
     print(f'  labels: {label_cols}')
+    if cheat:
+        print(f'  cheat signals: {cheat_cols}')
 
     output_cols = ['date', 'ticker'] + signal_cols + label_cols
     df = lf.select(output_cols).collect()
@@ -219,6 +250,10 @@ def main(run_date: str, tag: str):
         'signal_specs': SIGNAL_SPECS,
         'skipped_specs': skipped,
         'signal_cols': signal_cols,
+        'cheat': cheat,
+        'cheat_specs': cheat_specs,
+        'cheat_cols': cheat_cols,
+        'cheat_seed': CHEAT_SEED if cheat else None,
         'horizons': HORIZONS,
         'date_start': DATE_START,
         'date_end': DATE_END,
@@ -231,7 +266,7 @@ def main(run_date: str, tag: str):
         'git_diff': get_git_diff() or None,
         'features_file': str(cfg.features_file),
         'features_hash': file_hash(cfg.features_file),
-        'params_hash': params_hash([SIGNAL_SPECS, HORIZONS, DATE_START, DATE_END]),
+        'params_hash': params_hash([SIGNAL_SPECS, HORIZONS, DATE_START, DATE_END, cheat_specs, CHEAT_SEED if cheat else None]),
         'script_path': str(Path(__file__).resolve()),
         # statistics that use NO returns
         'signal_stats': stats,
@@ -252,5 +287,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate the candidate signals and the forward returns')
     parser.add_argument('--date', type=str, required=True, help='Run date, YYYY-MM-DD (used in the run_id)')
     parser.add_argument('--tag', type=str, default='default', help='Run tag (default: default)')
+    parser.add_argument('--cheat', action='store_true',
+                        help='Add the cheating benchmark signals (CHEAT_SIGNALS). The tag must contain "cheat".')
     args = parser.parse_args()
-    main(args.date, args.tag)
+    main(args.date, args.tag, args.cheat)

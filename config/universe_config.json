@@ -1,0 +1,8 @@
+{
+  "source": "yfinance",
+  "asset": "equities",
+  "region": "US",
+  "universe": "SP500",
+  "freq": "daily",
+  "description": "Primary dataset for equity long-short research. Modify this file to switch datasets."
+}

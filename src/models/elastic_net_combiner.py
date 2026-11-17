@@ -326,6 +326,18 @@ def coefficient_stability_by_fold(fit_result: dict, panel: pl.DataFrame) -> pl.D
 # Not a special evaluation path: the combined score goes through the same checklist as any signal
 # (signal_report, ic_decay, ...).
 
+def raw_unit_coefficients(fit_result: dict) -> "tuple[dict, float]":
+    '''
+    The final model written on the RAW signal columns:  score = const + sum_j eff_j * x_j.
+        eff_j = coef_j * q_weight_j / std_j      const = intercept - sum_j eff_j * mean_j
+    Returns ({signal: eff_j}, const). Same formula as combined_score_column. Use it for reporting.
+    '''
+    model = fit_result['model']
+    eff = model.coef_ * fit_result['col_weights'] / fit_result['x_std']
+    const = float(model.intercept_ - np.sum(eff * fit_result['x_mean']))
+    return {k: float(v) for k, v in zip(fit_result['signal_cols'], eff)}, const
+
+
 def combined_score_column(lf: pl.LazyFrame, fit_result: dict, out_col: str = 'combined_score',
                           use_oof: bool = True) -> pl.LazyFrame:
     '''
@@ -426,7 +438,7 @@ def run_en_combiner(
     # Holdout rows are not in the OOF table, so they get the final model's score: a true out-of-sample test.
     combined_lf = combined_score_column(holdout_panel.lazy(), fit_result)
     print('    Computing the signal report for this combined signal (holdout)')
-    holdout_report = signal_report(combined_lf, 'combined_score', fwdret_col)
+    holdout_report = signal_report(combined_lf, 'combined_score', fwdret_col, horizon=horizon)
 
     return {
         **fit_result,

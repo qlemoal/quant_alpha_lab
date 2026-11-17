@@ -17,7 +17,7 @@ from src.signals.transforms import tanh_expr, clip_expr
 from src.signals.ranking import rank_scaled_expr, decile_expr
 
 
-# Method registry for extensibility (e.g., cheat signals)
+# Method registry for extensibility (add a method with register_method)
 _METHOD_REGISTRY = {
     'zscore_tanh': lambda base, **kw: tanh_expr(zscore_expr(base, kw.get('descending', False)), kw.get('scale', 1.0)),
     'zscore': lambda base, **kw: zscore_expr(base, kw.get('descending', False)),
@@ -32,13 +32,15 @@ def register_method(name: str, func):
     Register a custom signal transformation method.
 
     Args:
-        name: Method name (e.g., 'cheat_perfect')
+        name: Method name (e.g., 'my_transform')
         func: Function with signature (base_expr: pl.Expr, **kwargs) -> pl.Expr
 
     Example:
         from src.signals.combine import register_method
-        from src.signals.cheat import cheat_perfect_expr
-        register_method('cheat_perfect', cheat_perfect_expr)
+        register_method('my_transform', lambda base, **kw: base.rank().over('date'))
+
+    The cheating benchmark signals are NOT made here: they need the labels. See src/signals/cheat.py and
+    the option --cheat of 04a_generate_signals.py.
     """
     _METHOD_REGISTRY[name] = func
 
@@ -56,14 +58,10 @@ def make_signal(lf, cols, method='zscore_tanh', **kwargs):
         'zscore_clip'    -- z-score, then hard clip.
         'rank'           -- rank transform straight to [-1, 1]. Default for noisy features (e.g., beta for now).
         'decile'         -- long-short top-bottom deciles of a feature.
-        'cheat_perfect'  -- normalized forward return (requires fwdret{h} column)
-        'cheat_rank'     -- rank by future return, scaled to [-1, 1]
-        'cheat_decile'   -- +1 top decile, -1 bottom decile, 0 otherwise
-        'cheat_noisy'    -- forward return + noise (requires signal_to_noise kwarg)
 
     kwargs:
         scale (for zscore_tanh), low/high (for zscore_clip), descending (for rank),
-        n_buckets (for decile), signal_to_noise (for cheat_noisy).
+        n_buckets (for decile).
     '''
 
     cols = as_list(cols)

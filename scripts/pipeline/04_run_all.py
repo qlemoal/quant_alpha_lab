@@ -30,6 +30,7 @@ USAGE
     python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default --from 04d      # from 04d to the end
     python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default --only 04f      # one phase
     python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default --check         # inputs only, run nothing
+    python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag cheat --cheat           # with the cheating benchmark signals
 
 NOTES
     - --from re-uses the outputs of the earlier phases as they are on disk. If you changed an earlier phase
@@ -94,7 +95,7 @@ def missing_inputs(phase_id: str, cfg) -> list:
 # RUNNING
 # =============================================================================
 
-def run_phase(phase_id: str, script: str, title: str, date: str, tag: str) -> bool:
+def run_phase(phase_id: str, script: str, title: str, date: str, tag: str, cheat: bool = False) -> bool:
     '''Check the inputs, run the script as a subprocess, return True if it succeeded.'''
     cfg = get_paths(run_id=run_id_from_args(date, tag))
     print(f'\n{"=" * 70}\nPHASE {phase_id}: {title}\n{"=" * 70}')
@@ -107,6 +108,8 @@ def run_phase(phase_id: str, script: str, title: str, date: str, tag: str) -> bo
         return False
 
     cmd = [sys.executable, str(ROOT / 'scripts' / 'pipeline' / script), '--date', date, '--tag', tag]
+    if cheat and phase_id == '04a':
+        cmd.append('--cheat')                       # only 04a builds the cheat signals
     print(f'Command: {" ".join(cmd)}\n')
     env = {**os.environ, 'PYTHONPATH': str(ROOT) + os.pathsep + os.environ.get('PYTHONPATH', '')}
     start = time.time()
@@ -142,11 +145,15 @@ def main():
     parser.add_argument('--from', dest='from_phase', type=str, default='04a', choices=PHASE_IDS,
                         help='First phase to run (default: 04a)')
     parser.add_argument('--only', dest='only_phase', type=str, choices=PHASE_IDS, help='Run this phase only')
+    parser.add_argument('--cheat', action='store_true',
+                        help='Add the cheating benchmark signals in 04a (the tag must contain "cheat")')
     parser.add_argument('--check', action='store_true', help='Check the inputs of the phases and run nothing')
     args = parser.parse_args()
 
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.date):
         parser.error(f'--date must be YYYY-MM-DD, got {args.date!r}')
+    if args.cheat and 'cheat' not in args.tag.lower():
+        parser.error('--cheat needs a tag that contains "cheat", for example --tag cheat')
     if args.only_phase and args.from_phase != '04a':
         parser.error('use --only or --from, not both')
 
@@ -174,7 +181,7 @@ def main():
     start = time.time()
     for pid in phases:
         _, script, title = next(p for p in PHASES if p[0] == pid)
-        if not run_phase(pid, script, title, args.date, args.tag):
+        if not run_phase(pid, script, title, args.date, args.tag, args.cheat):
             print(f'\nPIPELINE STOPPED at phase {pid}.')
             sys.exit(1)
 

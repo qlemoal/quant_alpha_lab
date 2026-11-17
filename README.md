@@ -143,6 +143,19 @@ python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default --only 04f
 pytest -q                                        # unit and regression tests, a few seconds
 ```
 
+### Benchmark with cheating signals
+
+To check what the pipeline does with a signal of a **known** strength, add signals built from the future return plus noise:
+
+```bash
+python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag cheat --cheat
+```
+
+- Edit `CHEAT_SIGNALS` in `04a_generate_signals.py`: one line `(horizon, rank IC)`, for example `(20, 0.05)`. Typical real signal: 0.02. Very strong: 0.30.
+- The tag **must** contain `cheat`, so that a cheat run never replaces a real run.
+- A cheat run is a sanity check of the chain (selection, combiner, costs). It is **not** a strategy: it uses the future.
+- Each cheat signal has its own independent noise (`src/signals/cheat.py`, tested). With a shared noise a linear model could cancel it and rebuild the future return.
+
 Read the **HOLDOUT** block printed by 04f. It gives the net Sharpe, its 95% interval, the annual return, the drawdown, the market beta and the Sharpe at higher costs.
 
 ---
@@ -280,7 +293,8 @@ quant_alpha_lab/
 ├── src/
 │   ├── data/                download.py, prices_etl.py                       stages 01, 02
 │   ├── features/            returns, momentum, volatility, adv, beta         stage 03
-│   ├── signals/             combine, normalize, ranking, signal_pipeline     stage 04a
+│   ├── signals/             combine, normalize, ranking, signal_pipeline,    stage 04a
+│   │                        cheat (benchmark signals with a known IC)
 │   ├── evaluation/signals/  ic/, FDR.py, performance.py, report.py           stage 04b
 │   ├── validation/          cpcv.py (+ PBO), walk_forward_cv.py
 │   ├── models/              elastic_net_combiner.py (04c), gbm_combiner.py

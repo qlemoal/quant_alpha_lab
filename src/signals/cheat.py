@@ -1,215 +1,120 @@
-"""
-Cheating Signals for Benchmarking
-=================================
+'''
+Cheating signals: a benchmark with a KNOWN information coefficient (IC).
 
-These signals use FUTURE information (forward returns) to establish
-theoretical upper bounds on performance. Use ONLY for:
-- Sanity checking your pipeline
-- Understanding maximum achievable IC/Sharpe
-- Debugging evaluation metrics
+A cheating signal is built from the FUTURE return, plus noise. It cannot be traded.
+Use it for one thing only: to see what the pipeline does with a signal of a known strength.
 
-NEVER use in production or real backtests!
+    IC = 0.90   near-perfect foresight     the upper bound: the pipeline must find it at once
+    IC = 0.30   very strong                far above any real signal
+    IC = 0.10   strong                     above any real daily signal
+    IC = 0.05   good                       about the best real signals
+    IC = 0.02   weak                       a typical real signal
 
-Integration with make_signal:
------------------------------
-Add to SIGNAL_SPECS in 04a_generate_signals.py:
-    SIGNAL_SPECS = [
-        # ... your real signals ...
-        ('fwdret20', 'cheat_perfect', {}),
-        ('fwdret20', 'cheat_rank', {}),
-        ('fwdret20', 'cheat_decile', {}),
-        ('fwdret20', 'cheat_noisy', {'signal_to_noise': 1.0}),
-        ('fwdret20', 'cheat_noisy', {'signal_to_noise': 2.0}),
-    ]
+HOW IT IS BUILT (for one date, across the stocks)
 
-Note: Forward returns (fwdret1, fwdret5, fwdret10, fwdret20) must be added
-BEFORE calling make_signal for cheat signals to work.
-"""
+    forward return of the stock   fwdret{h}
+            |  rank across the stocks, then normal scores          -> z_true   (mean 0, std 1)
+            v
+    signal = rho * z_true  +  sqrt(1 - rho^2) * noise                    noise: N(0, 1), independent
+            |
+            v
+    rho = 2 sin(pi * ic / 6)  makes the RANK correlation (Spearman) of the signal with fwdret{h} equal to `ic`
+    (for normal variables, Spearman = 6/pi * asin(rho / 2)). The IC measured in 04b is a Spearman IC.
 
-from __future__ import annotations
-import polars as pl
-from polars import col as c
+WHY THE NOISE IS BUILT FROM (ticker, date)
+    A new noise value for every stock AND every date, so the noise is independent across days.
+    A noise made from the ticker alone would be a fixed bias of the stock, and it would not lower the IC the
+    way a real error does. The noise is a hash of (ticker, date, seed), so a run can be repeated exactly.
+
+WHERE IT IS USED
+    04a_generate_signals.py with the option --cheat. See CHEAT_SIGNALS in that script.
+
+NEVER READ A RESULT FROM A CHEAT RUN AS A STRATEGY RESULT.
+    It uses the future. The run must have `cheat` in its tag (04a checks this).
+'''
+
+import math
+
 import numpy as np
+import polars as pl
+
+_TWO32 = 4294967296.0
+MAX_IC = 0.99
 
 
-# -----------------------------------------------------------------------------
-# Expr-based transforms (compatible with make_signal)
-# -----------------------------------------------------------------------------
-
-def cheat_perfect_expr(base_expr: pl.Expr, **kwargs) -> pl.Expr:
-    """
-    Perfect foresight: normalized forward return.
-
-    Usage in SIGNAL_SPECS:
-        ('fwdret20', 'cheat_perfect', {})
-
-    Output column: fwdret20_cheat_perfect
-    """
-    # Cross-sectional z-score normalization
-    return (base_expr - base_expr.mean().over('date')) / base_expr.std().over('date')
+def cheat_name(horizon: int, ic: float) -> str:
+    '''Column name of a cheat signal. Example: (20, 0.05) -> cheat_h20_ic050 ; (20, 0.9) -> cheat_h20_ic900.'''
+    return f'cheat_h{horizon}_ic{int(round(ic * 1000)):03d}'
 
 
-def cheat_rank_expr(base_expr: pl.Expr, **kwargs) -> pl.Expr:
-    """
-    Rank-based perfect signal: ranks stocks by future return each day.
-    Scaled to [-1, 1] like rank_scaled_expr.
-
-    Usage in SIGNAL_SPECS:
-        ('fwdret20', 'cheat_rank', {})
-
-    Output column: fwdret20_cheat_rank
-    """
-    # Rank within each date (1 = best/lowest return if descending=False)
-    # We want highest future return = highest rank = long signal
-    rank = base_expr.rank(method='ordinal', descending=True).over('date')
-    max_rank = rank.max().over('date')
-    # Scale to [-1, 1]: 2 * (rank - 1) / (max_rank - 1) - 1
-    return (2 * (rank - 1) / (max_rank - 1) - 1)
-
-
-def cheat_decile_expr(base_expr: pl.Expr, n_buckets: int = 10, **kwargs) -> pl.Expr:
-    """
-    Decile-based perfect signal: +1 for top decile, -1 for bottom, 0 otherwise.
-
-    Usage in SIGNAL_SPECS:
-        ('fwdret20', 'cheat_decile', {'n_buckets': 10})
-
-    Output column: fwdret20_cheat_decile
-    """
-    decile = base_expr.qcut(n_buckets, labels=range(n_buckets)).over('date')
-    return pl.when(decile == n_buckets - 1).then(1.0) \
-             .when(decile == 0).then(-1.0) \
-             .otherwise(0.0)
+def validate_cheat_specs(specs: list, horizons: list) -> list:
+    '''
+    Check the list [(horizon, ic), ...]. Raises ValueError on a mistake. Returns the list as tuples.
+    The horizon must be one of the label horizons of 04a, and 0 < ic <= 0.99. Two equal names are an error.
+    IC 1 is refused: the IC would be the same on every date (std 0), so its t-statistic does not exist and 04b drops it.
+    '''
+    out, seen = [], set()
+    for spec in specs:
+        h, ic = spec
+        if h not in horizons:
+            raise ValueError(f'cheat horizon {h} is not in HORIZONS {horizons}')
+        if not 0 < ic <= MAX_IC:
+            raise ValueError(f'cheat IC must be in (0, {MAX_IC}], got {ic}')
+        name = cheat_name(h, ic)
+        if name in seen:
+            raise ValueError(f'cheat signal {name} is defined twice')
+        seen.add(name)
+        out.append((int(h), float(ic)))
+    return out
 
 
-def cheat_noisy_expr(base_expr: pl.Expr, signal_to_noise: float = 1.0, **kwargs) -> pl.Expr:
-    """
-    Noisy perfect signal: forward return + deterministic pseudo-noise.
-
-    signal_to_noise = 1.0 -> expected IC ~ 0.71
-    signal_to_noise = 2.0 -> expected IC ~ 0.89
-    signal_to_noise = 5.0 -> expected IC ~ 0.98
-
-    Usage in SIGNAL_SPECS:
-        ('fwdret20', 'cheat_noisy', {'signal_to_noise': 1.0})
-
-    Output column: fwdret20_cheat_noisy
-    """
-    # Deterministic pseudo-noise from ticker hash (reproducible)
-    noise = (c('ticker').hash() % 10000 / 10000.0 - 0.5)
-    # Scale noise relative to signal std
-    signal_std = base_expr.std().over('date')
-    noisy_signal = base_expr + noise * signal_std / signal_to_noise
-    # Cross-sectional z-score
-    return (noisy_signal - noisy_signal.mean().over('date')) / noisy_signal.std().over('date')
+def _uniform(seed: int) -> pl.Expr:
+    '''Pseudo-random numbers in (0, 1), one per (ticker, date). The same input and seed give the same number.'''
+    h = pl.struct(['ticker', 'date']).hash(seed=seed)
+    return ((h % 4294967296).cast(pl.Float64) + 0.5) / _TWO32
 
 
-# -----------------------------------------------------------------------------
-# Register with make_signal
-# -----------------------------------------------------------------------------
-
-# Map method names to expr functions
-_CHEAT_METHODS = {
-    'cheat_perfect': cheat_perfect_expr,
-    'cheat_rank': cheat_rank_expr,
-    'cheat_decile': cheat_decile_expr,
-    'cheat_noisy': cheat_noisy_expr,
-}
+def _normal_noise(seed: int) -> pl.Expr:
+    '''Standard normal noise per (ticker, date), from two uniforms (Box-Muller).'''
+    u1, u2 = _uniform(2 * seed + 1), _uniform(2 * seed + 2)
+    return (-2.0 * u1.log()).sqrt() * (2.0 * math.pi * u2).cos()
 
 
-def register_cheat_methods():
-    """
-    Register cheat methods with make_signal.
-    Call this before using cheat methods in SIGNAL_SPECS.
-
-    Example:
-        from src.signals.cheat import register_cheat_methods
-        register_cheat_methods()
-
-        # Now you can use in SIGNAL_SPECS:
-        SIGNAL_SPECS = [
-            ('fwdret20', 'cheat_perfect', {}),
-            ('fwdret20', 'cheat_rank', {}),
-            ('fwdret20', 'cheat_noisy', {'signal_to_noise': 1.0}),
-        ]
-    """
-    from src.signals.combine import _METHOD_REGISTRY
-    _METHOD_REGISTRY.update(_CHEAT_METHODS)
+def _probit(u: pl.Expr) -> pl.Expr:
+    '''Inverse normal CDF of u in (0, 1). Abramowitz and Stegun 26.2.23: absolute error below 5e-4.'''
+    p = pl.min_horizontal(u, 1.0 - u)
+    s = (-2.0 * p.log()).sqrt()
+    x = s - (2.515517 + 0.802853 * s + 0.010328 * s * s) / (1.0 + 1.432788 * s + 0.189269 * s * s + 0.001308 * s * s * s)
+    return pl.when(u < 0.5).then(-x).otherwise(x)
 
 
-# -----------------------------------------------------------------------------
-# Convenience functions for batch adding
-# -----------------------------------------------------------------------------
-
-def add_all_cheat_signals(lf: pl.LazyFrame, horizons: list[int] = None,
-                           include_perfect: bool = True,
-                           include_rank: bool = True,
-                           include_decile: bool = True,
-                           include_noisy: bool = True,
-                           noisy_snrs: list[float] = None) -> pl.LazyFrame:
-    """
-    Add all cheating signals at once for a comprehensive benchmark.
-
-    Requires fwdret{h} columns to exist in the LazyFrame.
-
-    Args:
-        lf: LazyFrame with fwdret columns
-        horizons: List of horizons to create signals for (default: [1, 5, 10, 20])
-        include_perfect: Add perfect normalized signal
-        include_rank: Add rank-based perfect signal
-        include_decile: Add decile-based perfect signal
-        include_noisy: Add noisy perfect signals
-        noisy_snrs: Signal-to-noise ratios for noisy signals (default: [0.5, 1.0, 2.0, 5.0])
-
-    Returns:
-        LazyFrame with all cheat signals added
-    """
-    if horizons is None:
-        horizons = [1, 5, 10, 20]
-    if noisy_snrs is None:
-        noisy_snrs = [0.5, 1.0, 2.0, 5.0]
-
-    # Check which forward return columns exist
-    schema = lf.collect_schema()
-    available_horizons = [h for h in horizons if f'fwdret{h}' in schema.names()]
-
-    if not available_horizons:
-        available = [c for c in schema.names() if c.startswith('fwdret')]
-        raise ValueError(f'No fwdret columns found for horizons {horizons}. Available: {available}')
-
-    print(f'Adding cheat signals for horizons: {available_horizons}')
-
-    for h in available_horizons:
-        fwd_col = f'fwdret{h}'
-        if include_perfect:
-            lf = lf.with_columns(cheat_perfect_expr(c(fwd_col)).alias(f'{fwd_col}_cheat_perfect'))
-            print(f'  Added {fwd_col}_cheat_perfect')
-        if include_rank:
-            lf = lf.with_columns(cheat_rank_expr(c(fwd_col)).alias(f'{fwd_col}_cheat_rank'))
-            print(f'  Added {fwd_col}_cheat_rank')
-        if include_decile:
-            lf = lf.with_columns(cheat_decile_expr(c(fwd_col)).alias(f'{fwd_col}_cheat_decile'))
-            print(f'  Added {fwd_col}_cheat_decile')
-        if include_noisy:
-            for snr in noisy_snrs:
-                lf = lf.with_columns(cheat_noisy_expr(c(fwd_col), signal_to_noise=snr).alias(f'{fwd_col}_cheat_noisy_sn{snr:.1f}'))
-                print(f'  Added {fwd_col}_cheat_noisy_sn{snr:.1f}')
-
-    return lf
+def cheat_expr(horizon: int, ic: float, seed: int = 0) -> pl.Expr:
+    '''
+    Expression of one cheat signal. The column fwdret{horizon} must exist in the frame.
+    Rows without a label (the last rows of a ticker) get no signal (null).
+    '''
+    fwd = pl.col(f'fwdret{horizon}')
+    n = fwd.count().over('date')                                    # stocks with a label on this date
+    u = (fwd.rank(method='average').over('date') - 0.5) / n         # uniform rank in (0, 1)
+    z_true = _probit(u)                                              # normal scores: N(0, 1), monotone in the return
+    rho = 2.0 * math.sin(math.pi * ic / 6.0)                        # Pearson rho that gives a Spearman IC of `ic`
+    return rho * z_true + math.sqrt(1.0 - rho * rho) * _normal_noise(seed)
 
 
-def theoretical_ic(signal_to_noise: float) -> float:
-    """
-    Theoretical IC for a noisy perfect signal.
-
-    If signal = true_return + noise, where noise ~ N(0, sigma_n)
-    and true_return ~ N(0, sigma_s), then:
-    IC = corr(signal, true_return) = sigma_s / sqrt(sigma_s^2 + sigma_n^2)
-       = SNR / sqrt(1 + SNR^2) where SNR = sigma_s / sigma_n
-    """
-    return signal_to_noise / np.sqrt(1 + signal_to_noise**2)
-
-
-# Expected ICs for default noisy SNRs
-EXPECTED_ICS = {snr: theoretical_ic(snr) for snr in [0.5, 1.0, 2.0, 5.0]}
-# {0.5: 0.447, 1.0: 0.707, 2.0: 0.894, 5.0: 0.981}
+def add_cheat_signals(lf: pl.LazyFrame, specs: list, seed: int = 0) -> "tuple[pl.LazyFrame, list]":
+    '''
+    Add one cheat column per (horizon, ic). Lazy. The labels fwdret{h} must already be in `lf`.
+    Every signal has its OWN noise (the stream depends on the position in `specs`). This is important: with a shared
+    noise, a linear model could subtract one signal from another, cancel the noise and rebuild the future return.
+    Use another `seed` for another draw.
+    Returns (lf, names).
+    '''
+    have = set(lf.collect_schema().names())
+    exprs, names = [], []
+    for i, (h, ic) in enumerate(specs):
+        if f'fwdret{h}' not in have:
+            raise ValueError(f'fwdret{h} is missing: add the labels before the cheat signals')
+        name = cheat_name(h, ic)
+        exprs.append(cheat_expr(h, ic, seed=1000 * seed + i).alias(name))
+        names.append(name)
+    return lf.with_columns(exprs), names

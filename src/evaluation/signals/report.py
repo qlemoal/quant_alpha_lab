@@ -8,18 +8,29 @@ import time
 
 from src.evaluation.signals.ic.core import compute_ic, summarize_ic
 from src.evaluation.signals.ic.metrics import newey_west_ic_tstat, ic_pvalue_nw, ic_decay
-from src.evaluation.signals.performance import max_drawdown, compute_stability, decile_longshort_returns, sharpe_ratio
+from src.evaluation.signals.performance import (
+    max_drawdown, compute_stability, decile_longshort_returns, sharpe_ratio, horizon_from_col,
+)
 from src.utils.stats import autocorrelation, get_recent_coverage, compute_pval_from_tstat
 
 
 
 
-def signal_report(lf, signal_col, fwd_ret_col='fwdret'):#, decay_horizons=(1, 5, 10, 20)):
+def signal_report(lf, signal_col, fwd_ret_col='fwdret', horizon=None):
+    '''
+    Numeric health check of ONE signal. One row of statistics.
+
+    horizon: label horizon in days. None = read it from the column name ('fwdret20' -> 20).
+        The labels of consecutive dates overlap by horizon-1 days. The horizon is therefore passed to
+        the Newey-West lag, the Sharpe (sqrt(252/h)) and the drawdown (non-overlapping compounding).
+    '''
+    if horizon is None:
+        horizon = horizon_from_col(fwd_ret_col)
     ic_lf = compute_ic(lf, signal_col, fwd_ret_col)
     ic_collected = ic_lf.collect()
 
     basic = summarize_ic(ic_collected)
-    nw = newey_west_ic_tstat(ic_collected['ic'].to_numpy())
+    nw = newey_west_ic_tstat(ic_collected['ic'].to_numpy(), horizon=horizon)
     pval = compute_pval_from_tstat(nw['t_stat'])
 
     ac = autocorrelation(ic_collected, 'ic', lags=(1,))
@@ -39,8 +50,9 @@ def signal_report(lf, signal_col, fwd_ret_col='fwdret'):#, decay_horizons=(1, 5,
         'hit_rate': basic['hit_rate'], 'n_days': basic['n_days'],
         'recent_coverage': recent_coverage,
         'avg_turnover': turnover_df['turnover'].mean(),
-        'long_short_sharpe': sharpe_ratio(spread_returns),
-        'long_short_max_dd': max_drawdown(spread_returns),
+        'long_short_sharpe': sharpe_ratio(spread_returns, horizon=horizon),
+        'long_short_max_dd': max_drawdown(spread_returns, horizon=horizon),
+        'horizon': horizon,
     }
 
     # if I want to show the ic_decay for multiple horizons, use that, but felt useless
