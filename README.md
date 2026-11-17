@@ -2,7 +2,7 @@
 
 **An end-to-end research pipeline for cross-sectional equity long-short strategies, built to answer one question honestly: does this signal still work after costs, on data the model never saw?**
 
-It takes raw S&P 500 prices and produces a dollar-neutral, risk-managed portfolio. It then reports a net-of-cost Sharpe ratio with its confidence interval, measured only on a holdout period that was never used to pick, tune or fit anything.
+It takes raw S&P 500 prices (for now) and produces a dollar-neutral, risk-managed portfolio. It then reports a net-of-cost Sharpe ratio with its confidence interval, measured only on a holdout period that was never used to pick, tune or fit anything.
 
 **What makes it different from a typical backtest repo**
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 04a: Generate Signals
+Phase 04: Generate Signals
 ===============================================
 
 QUESTION ANSWERED
@@ -32,9 +32,9 @@ WHERE IS THE COMPLICATED PART?
     src/signals/combine.py           the transforms (zscore_tanh, zscore_clip, rank, decile)
     This script only lists the signals you want and calls them, in order.
 
-WHAT 04a NEVER DOES
+WHAT 04 NEVER DOES
     It never measures how well a signal predicts returns (no IC, no Sharpe, no drawdown).
-    That is stage 04b, on the search period only. Looking at IC over all dates here would let the
+    That is stage 05, on the search period only. Looking at IC over all dates here would let the
     holdout influence which signals you decide to build. The statistics in config.json use no returns.
 
 THE CLOCK
@@ -42,15 +42,15 @@ THE CLOCK
     The label of row t is the return from the open of t+1 to the open of t+1+h. It uses only later prices.
 
 CHEATING SIGNALS (a benchmark, option --cheat)
-    python scripts/pipeline/04a_generate_signals.py --date 2026-11-14 --tag cheat --cheat
+    python scripts/pipeline/04_generate_signals.py --date 2026-11-14 --tag cheat --cheat
     adds signals built from the FUTURE return plus noise, with a known IC (CHEAT_SIGNALS below).
-    They show what 04b, 04c and 04f do with a signal of a known strength. See src/signals/cheat.py.
+    They show what 05, 06 and 09 do with a signal of a known strength. See src/signals/cheat.py.
     The tag MUST contain the word "cheat", so that a cheat run never replaces a real run.
     Never quote a result of a cheat run as a strategy result.
 
 HOW TO ADD A SIGNAL
-    Add one line to SIGNAL_SPECS: (feature column, transform, parameters). Then run 04a, 04b, ...
-    Every signal you ever try counts as one test for the false discovery rate in 04b.
+    Add one line to SIGNAL_SPECS: (feature column, transform, parameters). Then run 04, 05, ...
+    Every signal you ever try counts as one test for the false discovery rate in 05.
     Keep the list of what you tried, also the ones you removed.
 
 INPUTS    {clean_base}/features/features.parquet
@@ -59,7 +59,7 @@ OUTPUTS   {clean_base}/signals/{run_id}/
     config.json       specs, skipped specs, hashes, git commit, statistics, label checks
 
 USAGE
-    python scripts/pipeline/04a_generate_signals.py --date 2026-11-07 --tag default
+    python scripts/pipeline/04_generate_signals.py --date 2026-11-07 --tag default
 '''
 
 import argparse
@@ -103,7 +103,7 @@ SIGNAL_SPECS = [
     ('mom120', 'zscore_tanh', {}),
     ('mom252', 'zscore_tanh', {}),
 
-    # Volatility (the sign is NOT flipped here: 04b and the combiner learn the sign from the data)
+    # Volatility (the sign is NOT flipped here: 05 and the combiner learn the sign from the data)
     ('vol5',   'zscore_clip', {'low': -3, 'high': 3}),
     ('vol10',  'zscore_clip', {'low': -3, 'high': 3}),
     ('vol20',  'zscore_clip', {'low': -3, 'high': 3}),
@@ -125,7 +125,7 @@ SIGNAL_SPECS = [
     # ('beta252', 'rank', {'descending': True}),
 ]
 
-# Forward-return horizons (trading days). 04b and 04c use ONE of them (default 20).
+# Forward-return horizons (trading days). 05 and 06 use ONE of them (default 20).
 HORIZONS = [1, 5, 10, 20]
 
 # Optional date cut, 'YYYY-MM-DD' or None. The labels are built after the cut, so the last rows have no label.
@@ -160,7 +160,7 @@ def main(run_date: str, tag: str, cheat: bool = False):
         raise FileNotFoundError(f'Missing input: {cfg.features_file}. Run 03_build_features.py first.')
 
     print('=' * 70)
-    print('PHASE 04a: GENERATE SIGNALS')
+    print('PHASE 04: GENERATE SIGNALS')
     print('=' * 70)
     print(f'Run ID:    {run_id}')
     print(f'Dataset:   {cfg.asset}/{cfg.region}/{cfg.universe}/{cfg.freq}')
@@ -280,7 +280,7 @@ def main(run_date: str, tag: str, cheat: bool = False):
     print(f'  signals: {out_file}')
     print(f'  config:  {out_dir / "config.json"}')
     print(f'\nDone in {time.time() - start:.1f} s.')
-    print(f'Next: python scripts/pipeline/04b_evaluate_signals.py --date {run_date} --tag {tag}')
+    print(f'Next: python scripts/pipeline/05_evaluate_signals.py --date {run_date} --tag {tag}')
 
 
 if __name__ == '__main__':

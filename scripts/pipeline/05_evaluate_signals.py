@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 04b: Evaluate Signals (IC, FDR, Decay)
+Phase 05: Evaluate Signals (IC, FDR, Decay)
 ===============================================
 
 Evaluates generated signals: Rank IC, Newey-West, IC decay, FDR (BH/BY/q-value).
@@ -11,8 +11,8 @@ WHAT CHANGED vs the previous version (and why)
 ----------------------------------------------
 1. NO HOLDOUT LEAKAGE.
    Before: IC, p-values and the selection used ALL dates, including the 200-date
-   holdout that 04c uses as its final out-of-sample test.
-   Now: only dates <= train_end are used. train_end is computed with the SAME rule as 04c:
+   holdout that 06 uses as its final out-of-sample test.
+   Now: only dates <= train_end are used. train_end is computed with the SAME rule as 06:
        train_end = unique_dates[-holdout_dates - embargo_w]
        embargo_w = (horizon + 1) + EMBARGO_WINDOW
    The gap between train_end and the holdout start (embargo_w dates) is larger than
@@ -38,7 +38,7 @@ Outputs:
     └── selected_signals.json   # List of signals passing FDR (for combiner)
 
 Usage:
-    python scripts/pipeline/04b_evaluate_signals.py --date 2026-11-06 --tag default --horizon 20 --alpha 0.2
+    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-06 --tag default --horizon 20 --alpha 0.2
 '''
 
 import argparse
@@ -81,7 +81,7 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
     config_file = cfg.stage_dir('signals') / 'config.json'
 
     if not signals_file.exists():
-        raise FileNotFoundError(f'Signals file not found: {signals_file}. Run 04a_generate_signals.py first.')
+        raise FileNotFoundError(f'Signals file not found: {signals_file}. Run 04_generate_signals.py first.')
 
     with open(config_file) as f:
         config = json.load(f)
@@ -94,12 +94,12 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
 
     FWD_RET_COL = f'fwdret{horizon}'
 
-    # Same split rule as 04c (see src/models/elastic_net_combiner.py, run_en_combiner)
+    # Same split rule as 06 (see src/models/elastic_net_combiner.py, run_en_combiner)
     purge_w = horizon + 1
     embargo_w = purge_w + EMBARGO_WINDOW
 
     print('=' * 70)
-    print('PHASE 04b: EVALUATE SIGNALS')
+    print('PHASE 05: EVALUATE SIGNALS')
     print('=' * 70)
     print(f'Run ID:        {run_id}')
     print(f'Date:          {date}')
@@ -240,7 +240,7 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
         print(f'  WARNING: selected but non-overlapping |t| < 1: {disagree}')
 
     if not selected:
-        print('  WARNING: no signal selected. 04c will have nothing to combine. Try a larger --alpha or more signals.')
+        print('  WARNING: no signal selected. 06 will have nothing to combine. Try a larger --alpha or more signals.')
 
     print(f'\n  Selected for combiner: {selected}')
 
@@ -273,15 +273,15 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
             'signals': selected,
             'fwd_ret_col': FWD_RET_COL,
             'horizon': horizon,
-            'train_end': str(train_end),        # 04c checks that it computes the same cut
+            'train_end': str(train_end),        # 06 checks that it computes the same cut
             'holdout_start': str(holdout_start),
-            'holdout_dates': holdout_dates,     # 04c reads these: one source of truth for the split
+            'holdout_dates': holdout_dates,     # 06 reads these: one source of truth for the split
             'embargo_w': embargo_w,
         }, f, indent=2)
 
     print(f'\n✓ Evaluation complete. Results in {OUTPUT_DIR}/')
     print(f'  Selected signals saved to {OUTPUT_DIR}/selected_signals.json')
-    print(f'\nNext: python scripts/pipeline/04c_fit_combiner.py --date {date} --tag {tag}')
+    print(f'\nNext: python scripts/pipeline/06_fit_combiner.py --date {date} --tag {tag}')
 
 
 if __name__ == '__main__':
@@ -292,6 +292,6 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=0.2, help='FDR alpha threshold')
     parser.add_argument('--min_ir', type=float, default=0.0, help='Minimum |IC IR| for signal selection')
     parser.add_argument('--holdout_dates', type=int, default=200,
-                        help='Number of final dates reserved for the 04c holdout (must match 04c)')
+                        help='Number of final dates reserved for the 06 holdout (must match 06)')
     args = parser.parse_args()
     main(args.date, args.tag, args.horizon, args.alpha, args.min_ir, args.holdout_dates)

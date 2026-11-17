@@ -1,6 +1,7 @@
+#!/usr/bin/env python
 '''
 ===============================================
-Phase 04f: Run Backtest
+Phase 09: Run Backtest
 ===============================================
 
 QUESTION ANSWERED
@@ -8,7 +9,7 @@ QUESTION ANSWERED
 
 THE STAGE IN ONE PICTURE
 
-    weights.parquet (04e)      ohlcv.parquet + features.parquet      model.json (04c)
+    weights.parquet (08)      ohlcv.parquet + features.parquet      model.json (06)
     (signal date, ticker, w)   (open_adj, ADV, volatility)           (holdout length, horizon)
             |                              |                                |
             v                              v                                v
@@ -52,7 +53,7 @@ OUTPUTS   {clean_base}/backtest/{run_id}/
     config.json
 
 USAGE
-    python scripts/pipeline/04f_run_backtest.py --date 2026-11-07 --tag default
+    python scripts/pipeline/09_run_backtest.py --date 2026-11-07 --tag default
 '''
 
 import argparse
@@ -89,8 +90,8 @@ BACKTEST_CONFIG = {
 
 def holdout_start_date(model_file: Path, features_file: Path):
     '''
-    First date of the 04c holdout, or None if it cannot be determined.
-    Uses model.json['holdout_start'] if 04c saved it. Otherwise it applies the 04c rule:
+    First date of the 06 holdout, or None if it cannot be determined.
+    Uses model.json['holdout_start'] if 06 saved it. Otherwise it applies the 06 rule:
     the last `holdout_dates` dates that have a forward-return label.
     '''
     if not model_file.exists():
@@ -128,7 +129,7 @@ def main(run_date: str, tag: str):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print('=' * 70)
-    print('PHASE 04f: RUN BACKTEST')
+    print('PHASE 09: RUN BACKTEST')
     print('=' * 70)
     print(f'Run ID:  {run_id}')
     print(f'Config:  {BACKTEST_CONFIG}')
@@ -201,7 +202,7 @@ def main(run_date: str, tag: str):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Backtest the 04e weights with trading costs')
+    parser = argparse.ArgumentParser(description='Backtest the 08 weights with trading costs')
     parser.add_argument('--date', type=str, required=True, help='Run date, YYYY-MM-DD (used in the run_id)')
     parser.add_argument('--tag', type=str, default='default', help='Run tag (default: default)')
     args = parser.parse_args()

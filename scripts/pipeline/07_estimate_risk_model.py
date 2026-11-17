@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 04d: Estimate Risk Model (Covariance + Clusters)
+Phase 07: Estimate Risk Model (Covariance + Clusters)
 ===============================================
 
 QUESTION ANSWERED
@@ -56,8 +56,8 @@ OUTPUTS   {clean_base}/risk_model/{run_id}/
     Read a matrix back with src.utils.risk_io.load_matrix_for_date().
 
 USAGE
-    python scripts/pipeline/04d_estimate_risk_model.py --date 2026-11-07 --tag default
-    QUANTALPHA_TEST_MODE=1 python scripts/pipeline/04d_estimate_risk_model.py --date 2026-11-07 --tag test
+    python scripts/pipeline/07_estimate_risk_model.py --date 2026-11-07 --tag default
+    QUANTALPHA_TEST_MODE=1 python scripts/pipeline/07_estimate_risk_model.py --date 2026-11-07 --tag test
         (test mode: only the last 10 rebalance dates)
 '''
 
@@ -115,7 +115,7 @@ def main(run_date: str, tag: str):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print('=' * 70)
-    print('PHASE 04d: ESTIMATE RISK MODEL')
+    print('PHASE 07: ESTIMATE RISK MODEL')
     print('=' * 70)
     print(f'Run ID:   {run_id}')
     print(f'Config:   {RISK_CONFIG}')
@@ -197,7 +197,7 @@ def main(run_date: str, tag: str):
     print(f'  average median vol: {summary["avg_median_vol"]}   (annualised, equities: about 0.2 to 0.5)')
     print(f'  average clusters:   {summary["avg_n_clusters"]}')
     print(f'  output: {out_dir}/')
-    print(f'\nNext: python scripts/pipeline/04e_construct_weights.py --date {run_date} --tag {tag}')
+    print(f'\nNext: python scripts/pipeline/08_construct_weights.py --date {run_date} --tag {tag}')
 
 
 if __name__ == '__main__':

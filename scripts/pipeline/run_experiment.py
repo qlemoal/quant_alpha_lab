@@ -1,36 +1,39 @@
-#!/usr/bin/env python
+
 '''
 ===============================================
-Run the Full Pipeline (or some phases of it)
+Run One Experiment: stages 04 to 09
 ===============================================
 
 WHAT IT DOES
-    Runs the phase scripts one after the other. Each phase is a normal script that you can also run by hand.
+    Stages 01 to 03 prepare the data. You run them once, by hand (01 downloads, 02 cleans, 03 builds the features).
+    This script runs the EXPERIMENT: stages 04 to 09, from the signals to the backtest, under one run_id.
+    Change a signal, a parameter or the tag, and run it again.
+    It runs the stage scripts one after the other. Each phase is a normal script that you can also run by hand.
     Before a phase starts, the runner checks that the files this phase reads exist.
     If a phase fails, the runner stops. Later phases do not run on stale inputs.
 
 THE PIPELINE
 
-    04a  generate signals        features.parquet, ohlcv.parquet  ->  signals/
+    04  generate signals        features.parquet, ohlcv.parquet  ->  signals/
      |
-    04b  evaluate signals        signals/                         ->  signal_eval/   (IC, FDR, selection)
+    05  evaluate signals        signals/                         ->  signal_eval/   (IC, FDR, selection)
      |
-    04c  fit the combiner        signals/, signal_eval/           ->  en_scores/, en_model/
+    06  fit the combiner        signals/, signal_eval/           ->  en_scores/, en_model/
      |
-    04d  estimate risk model     en_scores/, features.parquet     ->  risk_model/
+    07  estimate risk model     en_scores/, features.parquet     ->  risk_model/
      |
-    04e  construct weights       en_scores/, risk_model/          ->  weights/
+    08  construct weights       en_scores/, risk_model/          ->  weights/
      |
-    04f  run the backtest        weights/, ohlcv, features        ->  backtest/      (judge the HOLDOUT block)
+    09  run the backtest        weights/, ohlcv, features        ->  backtest/      (judge the HOLDOUT block)
 
     Every stage folder is {clean_base}/{stage}/{run_id}/, with run_id = {date}_{tag}.
 
 USAGE
-    python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default                 # all phases
-    python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default --from 04d      # from 04d to the end
-    python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default --only 04f      # one phase
-    python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default --check         # inputs only, run nothing
-    python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag cheat --cheat           # with the cheating benchmark signals
+    python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default                 # stages 04 to 09
+    python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default --from 07      # from stage 07 to the end
+    python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default --only 09      # one stage
+    python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default --check         # inputs only, run nothing
+    python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag cheat --cheat           # with the cheating benchmark signals
 
 NOTES
     - --from re-uses the outputs of the earlier phases as they are on disk. If you changed an earlier phase
@@ -58,12 +61,12 @@ from config.paths import get_paths, run_id_from_args
 # =============================================================================
 
 PHASES = [
-    ('04a', '04a_generate_signals.py',     'Generate signals'),
-    ('04b', '04b_evaluate_signals.py',     'Evaluate signals (IC, Newey-West, FDR, selection)'),
-    ('04c', '04c_fit_combiner.py',         'Fit the Elastic Net combiner (CPCV + holdout)'),
-    ('04d', '04d_estimate_risk_model.py',  'Estimate the risk model (covariance, clusters)'),
-    ('04e', '04e_construct_weights.py',    'Construct the portfolio weights'),
-    ('04f', '04f_run_backtest.py',         'Backtest with trading costs'),
+    ('04', '04_generate_signals.py',     'Generate signals'),
+    ('05', '05_evaluate_signals.py',     'Evaluate signals (IC, Newey-West, FDR, selection)'),
+    ('06', '06_fit_combiner.py',         'Fit the Elastic Net combiner (CPCV + holdout)'),
+    ('07', '07_estimate_risk_model.py',  'Estimate the risk model (covariance, clusters)'),
+    ('08', '08_construct_weights.py',    'Construct the portfolio weights'),
+    ('09', '09_run_backtest.py',         'Backtest with trading costs'),
 ]
 PHASE_IDS = [p[0] for p in PHASES]
 
@@ -78,12 +81,12 @@ def required_inputs(phase_id: str, cfg) -> list:
     risk = cfg.stage_dir('risk_model')
     weights = cfg.stage_dir('weights')
     return {
-        '04a': [cfg.features_file, cfg.ohlcv_file],
-        '04b': [signals / 'signals.parquet', signals / 'config.json'],
-        '04c': [signals / 'signals.parquet', cfg.stage_dir('signal_eval') / 'selected_signals.json'],
-        '04d': [en_scores, cfg.features_file],
-        '04e': [en_scores, risk / 'cov.parquet', risk / 'clusters.parquet', risk / 'summary.json'],
-        '04f': [weights / 'weights.parquet', weights / 'weights_diag.parquet', cfg.ohlcv_file, cfg.features_file],
+        '04': [cfg.features_file, cfg.ohlcv_file],
+        '05': [signals / 'signals.parquet', signals / 'config.json'],
+        '06': [signals / 'signals.parquet', cfg.stage_dir('signal_eval') / 'selected_signals.json'],
+        '07': [en_scores, cfg.features_file],
+        '08': [en_scores, risk / 'cov.parquet', risk / 'clusters.parquet', risk / 'summary.json'],
+        '09': [weights / 'weights.parquet', weights / 'weights_diag.parquet', cfg.ohlcv_file, cfg.features_file],
     }[phase_id]
 
 
@@ -108,8 +111,8 @@ def run_phase(phase_id: str, script: str, title: str, date: str, tag: str, cheat
         return False
 
     cmd = [sys.executable, str(ROOT / 'scripts' / 'pipeline' / script), '--date', date, '--tag', tag]
-    if cheat and phase_id == '04a':
-        cmd.append('--cheat')                       # only 04a builds the cheat signals
+    if cheat and phase_id == '04':
+        cmd.append('--cheat')                       # only stage 04 builds the cheat signals
     print(f'Command: {" ".join(cmd)}\n')
     env = {**os.environ, 'PYTHONPATH': str(ROOT) + os.pathsep + os.environ.get('PYTHONPATH', '')}
     start = time.time()
@@ -139,14 +142,14 @@ def print_headline(cfg) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run the pipeline phases 04a to 04f')
+    parser = argparse.ArgumentParser(description='Run the pipeline phases 04 to 09')
     parser.add_argument('--date', type=str, required=True, help='Run date, YYYY-MM-DD (used in the run_id)')
     parser.add_argument('--tag', type=str, default='default', help='Run tag (default: default)')
-    parser.add_argument('--from', dest='from_phase', type=str, default='04a', choices=PHASE_IDS,
-                        help='First phase to run (default: 04a)')
+    parser.add_argument('--from', dest='from_phase', type=str, default='04', choices=PHASE_IDS,
+                        help='First phase to run (default: 04)')
     parser.add_argument('--only', dest='only_phase', type=str, choices=PHASE_IDS, help='Run this phase only')
     parser.add_argument('--cheat', action='store_true',
-                        help='Add the cheating benchmark signals in 04a (the tag must contain "cheat")')
+                        help='Add the cheating benchmark signals in 04 (the tag must contain "cheat")')
     parser.add_argument('--check', action='store_true', help='Check the inputs of the phases and run nothing')
     args = parser.parse_args()
 
@@ -154,7 +157,7 @@ def main():
         parser.error(f'--date must be YYYY-MM-DD, got {args.date!r}')
     if args.cheat and 'cheat' not in args.tag.lower():
         parser.error('--cheat needs a tag that contains "cheat", for example --tag cheat')
-    if args.only_phase and args.from_phase != '04a':
+    if args.only_phase and args.from_phase != '04':
         parser.error('use --only or --from, not both')
 
     run_id = run_id_from_args(args.date, args.tag)

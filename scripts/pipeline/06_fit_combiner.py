@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 04c: Fit the Elastic Net Combiner
+Phase 06: Fit the Elastic Net Combiner
 ===============================================
 
 QUESTION ANSWERED
-    "How do the signals that survived 04b combine into ONE score per stock and date,
+    "How do the signals that survived 05 combine into ONE score per stock and date,
      and is that score honest?"
 
 THE STAGE IN ONE PICTURE
 
-    signals.parquet            selected_signals.json (04b)         fdr_report.parquet (04b)
+    signals.parquet            selected_signals.json (05)         fdr_report.parquet (05)
     (signals + fwdret)         (signals, horizon, split dates)     (q-value of each signal)
             |                              |                               |
             v                              v                               v
@@ -43,11 +43,11 @@ WHERE IS THE COMPLICATED PART?
 
 WHY THE SCORE IS HONEST (and where it is not)
     - search period : the score is OUT-OF-FOLD. The model that scored a row never trained on it
-                      (labels overlapping the row are purged, see 04b header).
+                      (labels overlapping the row are purged, see 05 header).
                       Weak spot: alpha and l1_ratio were picked with the same folds.
     - gap           : final model. Not trained on, but too close to the search period to be a clean test.
     - holdout       : final model, trained on dates that end before the gap. THE CLEAN TEST.
-                      Judge every later result (04e, 04f) on the holdout.
+                      Judge every later result (08, 09) on the holdout.
 
 UNITS
     Coefficients in model.json are given twice:
@@ -61,11 +61,11 @@ INPUTS
 OUTPUTS
     {clean_base}/en_scores/{run_id}/en_scores.parquet   [date, ticker, combined_score, period, <signals>]
     {clean_base}/en_scores/{run_id}/config.json
-    {clean_base}/en_model/{run_id}/model.json           (includes train_end and holdout_start: 04f reads them)
+    {clean_base}/en_model/{run_id}/model.json           (includes train_end and holdout_start: 09 reads them)
     {clean_base}/en_model/{run_id}/stability.parquet    coefficients of each CV fold
 
 USAGE
-    python scripts/pipeline/04c_fit_combiner.py --date 2026-11-07 --tag default
+    python scripts/pipeline/06_fit_combiner.py --date 2026-11-07 --tag default
 '''
 
 import argparse
@@ -151,7 +151,7 @@ def main(date: str, tag: str = 'default'):
     cfg = get_paths(run_id=run_id)
 
     print('=' * 70)
-    print('PHASE 04c: FIT ELASTIC NET COMBINER (CPCV search + holdout)')
+    print('PHASE 06: FIT ELASTIC NET COMBINER (CPCV search + holdout)')
     print('=' * 70)
     print(f'Run ID:  {run_id}')
     print(f'Config:  {EN_CONFIG}')
@@ -159,19 +159,19 @@ def main(date: str, tag: str = 'default'):
     # ------------------------------------------------------------------
     # [1/6] Load the selection, the split rule, the q-values
     # ------------------------------------------------------------------
-    print('\n[1/6] Loading the selection from 04b...')
+    print('\n[1/6] Loading the selection from 05...')
     selected_file = cfg.stage_dir('signal_eval') / 'selected_signals.json'
     if not selected_file.exists():
-        raise FileNotFoundError(f'Not found: {selected_file}. Run 04b_evaluate_signals.py first.')
+        raise FileNotFoundError(f'Not found: {selected_file}. Run 05_evaluate_signals.py first.')
     with open(selected_file) as f:
         selected = json.load(f)
 
     signal_cols = selected['signals']
     if not signal_cols:
-        raise ValueError('04b selected no signal. Nothing to combine.')
+        raise ValueError('05 selected no signal. Nothing to combine.')
     fwd_ret_col = selected['fwd_ret_col']
     horizon = selected.get('horizon', EN_CONFIG['horizon'])
-    # The split must be the one 04b used. 04b writes it; we only fall back to the config for old files.
+    # The split must be the one 05 used. 05 writes it; we only fall back to the config for old files.
     holdout_dates = selected.get('holdout_dates', EN_CONFIG['holdout_dates'])
     print(f'  {len(signal_cols)} signals: {signal_cols}')
     print(f'  label {fwd_ret_col}   horizon {horizon}   holdout {holdout_dates} dates')
@@ -203,10 +203,10 @@ def main(date: str, tag: str = 'default'):
     train_end = _to_date(result['train_end'])
     holdout_start = _to_date(result['holdout_start'])
 
-    # Same cut as 04b? If not, the signals were selected on dates the combiner may use differently.
+    # Same cut as 05? If not, the signals were selected on dates the combiner may use differently.
     if selected.get('train_end') and str(train_end) != selected['train_end']:
-        raise ValueError(f'train_end differs: 04b {selected["train_end"]} vs 04c {train_end}. '
-                         f'Rerun 04b with the same holdout and horizon.')
+        raise ValueError(f'train_end differs: 05 {selected["train_end"]} vs 06 {train_end}. '
+                         f'Rerun 05 with the same holdout and horizon.')
 
     # ------------------------------------------------------------------
     # [3/6] Checks
@@ -329,7 +329,7 @@ def main(date: str, tag: str = 'default'):
         }), f, indent=2, default=str)
     print(f'  scores: {scores_dir / "en_scores.parquet"}')
     print(f'  model:  {model_dir / "model.json"}')
-    print(f'\nNext: python scripts/pipeline/04d_estimate_risk_model.py --date {date} --tag {tag}')
+    print(f'\nNext: python scripts/pipeline/07_estimate_risk_model.py --date {date} --tag {tag}')
 
 
 if __name__ == '__main__':

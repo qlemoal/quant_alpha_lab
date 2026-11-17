@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 04e: Construct Portfolio Weights
+Phase 08: Construct Portfolio Weights
 ===============================================
 
 QUESTION ANSWERED
@@ -9,7 +9,7 @@ QUESTION ANSWERED
 
 THE STAGE IN ONE PICTURE
 
-    en_scores.parquet            risk_model/ (from 04d)
+    en_scores.parquet            risk_model/ (from 07)
     (date, ticker, score)        cov.parquet, clusters.parquet, summary.json
             |                               |
             v                               v
@@ -40,7 +40,7 @@ UNITS
 
 INPUTS
     {clean_base}/en_scores/{run_id}/en_scores.parquet      (date, ticker, combined_score)
-    {clean_base}/risk_model/{run_id}/                      (04d outputs)
+    {clean_base}/risk_model/{run_id}/                      (07 outputs)
 
 OUTPUTS   {clean_base}/weights/{run_id}/
     weights.parquet        [date, ticker, score, cluster_id, raw_weight, capped_weight, weight]
@@ -48,11 +48,11 @@ OUTPUTS   {clean_base}/weights/{run_id}/
     config.json
 
 HONEST USE OF THE RESULT
-    The scores of the search period are out-of-fold (see 04c), the holdout scores are out-of-sample.
+    The scores of the search period are out-of-fold (see 06), the holdout scores are out-of-sample.
     Judge any later backtest on the holdout dates only.
 
 USAGE
-    python scripts/pipeline/04e_construct_weights.py --date 2026-11-07 --tag default
+    python scripts/pipeline/08_construct_weights.py --date 2026-11-07 --tag default
 '''
 
 import argparse
@@ -106,7 +106,7 @@ def main(run_date: str, tag: str):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print('=' * 70)
-    print('PHASE 04e: CONSTRUCT PORTFOLIO WEIGHTS')
+    print('PHASE 08: CONSTRUCT PORTFOLIO WEIGHTS')
     print('=' * 70)
     print(f'Run ID:  {run_id}')
     print(f'Config:  {PORTFOLIO_CONFIG}')
@@ -163,7 +163,7 @@ def main(run_date: str, tag: str):
     print(f'  max |net exposure|  {diag_df["net_exposure"].abs().max():.2e}   (must be about 0)')
     print(f'  one-way turnover per rebalance  mean {diag_df["turnover"].mean():.3f}')
     print(f'  output: {out_dir}/')
-    print(f'\nNext: python scripts/pipeline/04f_run_backtest.py --date {run_date} --tag {tag}')
+    print(f'\nNext: python scripts/pipeline/09_run_backtest.py --date {run_date} --tag {tag}')
 
 
 if __name__ == '__main__':
