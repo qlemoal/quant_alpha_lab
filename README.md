@@ -1,17 +1,24 @@
 # quant_alpha_lab
 
-**A research framework for cross-sectional equity long-short strategies.**
-It goes from raw data to a risk-managed, dollar-neutral portfolio. It reports the result after trading costs, on dates the model never saw.
+**An end-to-end research pipeline for cross-sectional equity long-short strategies, built to answer one question honestly: does this signal still work after costs, on data the model never saw?**
 
-Each stage is one script. Each script reads files and writes files.
-Every run has a `run_id` and can be reproduced.
-The logic is in tested library modules (`src/`). The scripts only call them, in order.
+It takes raw S&P 500 prices and produces a dollar-neutral, risk-managed portfolio. It then reports a net-of-cost Sharpe ratio with its confidence interval, measured only on a holdout period that was never used to pick, tune or fit anything.
 
-> **How to read this repo.** This is a research project, not a finished product.
-> LLMs are used since step 04 of the pipeline. Now code is LLM-generated, but logic and bug-detection are human-generated.
-> They are listed in [section 11](#11-bugs-found-by-review-and-the-test-that-guards-each), each with the test that guards it.
-> The data has known limits for now ([section 10](#10-known-limitations)). Read them before you trust a number.
-> **No performance number is quoted in this README.** Run the pipeline and read the holdout block ([section 5](#5-quick-start)).
+**What makes it different from a typical backtest repo**
+
+- **No look-ahead, by construction and by test.** Signal at the close of t, trade at the open of t+1, label from the same open. A test cuts the prices at a date and checks that no earlier feature changes.
+- **Overlapping returns are handled everywhere.** 20-day labels overlap, so the Newey-West lag, the purge and embargo in the cross-validation, and the Sharpe annualisation all account for it.
+- **Many signals are tested, so false discoveries are controlled.** Signals are selected with BH, BY and Storey q-value FDR on the search period only.
+- **Out-of-fold scores, then one untouched holdout.** The Elastic Net is tuned by combinatorial purged cross-validation.
+- **A real risk model.** Marchenko-Pastur cleaning, Ledoit-Wolf shrinkage and Louvain clusters drive the volatility target and the cluster caps.
+- **Costs are part of the result.** Half-spread, square-root market impact and commission. The Sharpe is also shown at 2× and 3× costs.
+- **Known limits are written down.** Survivorship bias and the unmodelled borrow and financing costs are listed in [section 10](#10-known-limitations).
+
+**Every stage is one script, and every run is reproducible.** Each script reads files and writes files, under a `run_id` that stores the git commit and the hash of the inputs. The logic lives in tested library modules in `src/`. The scripts only call them, in order.
+
+**How it was built.** I use LLMs openly, and I think that is the right way to build software now. Stages 01 to 03 were written mostly by hand, with a light use of LLMs where I read and checked every line. From stage 04 on, most of the code is written by LLMs (Claude, and Nemotron Ultra through Cline), working under my direction. My job is the part a model cannot do for me: the research question, the pipeline design, the statistical choices (what to test, how to correct it, where the holdout starts), and the review. Every bug the review found is listed in [section 11](#11-bugs-found-by-review-and-the-test-that-guards-each) with the regression test that guards it. I also check the code against simulations with a known answer, such as a planted signal with a known IC. I don't need to type every line myself. I need to know what each line must do, and to prove that it does it.
+
+> **No performance number is quoted here.** Run the pipeline and read the holdout block printed by stage 04f ([section 5](#5-quick-start)). It is the only number I trust.
 
 ---
 
