@@ -1,63 +1,63 @@
+'''
+Returns: the past return of each day (a FEATURE) and the future returns (LABELS).
+
+FEATURE versus LABEL: the rule that matters most in this file
+-------------------------------------------------------------
+    logret   uses the close of day t and of day t-1.       Known at the close of t.  A FEATURE.
+    fwdret*  use prices AFTER day t.                        Unknown at t.             A LABEL.
+
+    A label is only for measuring a signal (IC) or training a model against it.
+    Never build a signal from a label. Stage 04 rebuilds the labels it needs itself.
+
+THE CLOCK OF THE LABELS (open to open)
+--------------------------------------
+    day t           day t+1                 day t+1+h
+    close: signal   open: we trade (entry)  open: exit
+                    |<------ fwdret{h} ---->|
+
+    fwdret{h}[t] = log(open_adj[t+1+h]) - log(open_adj[t+1])
+
+All functions work per ticker. The frame must have the columns ticker and date. Rows are sorted by
+ticker and date inside each function. A shift moves by ROWS: it equals trading days only if the ticker
+has a row for every trading day (stage 04 reports the missing rows).
+'''
+
 import polars as pl
 from polars import col as c
 
 
-
-
-
-def _add_log_returns_per_ticker(df: pl.DataFrame) -> pl.DataFrame:
-    '''Compute log returns per ticker (eager).'''
-    return df.sort('date').with_columns(
-        logret=c('close').log().diff()
-    )
-
-
-def _add_fwd_returns_per_ticker(df: pl.DataFrame) -> pl.DataFrame:
-    '''Compute forward returns per ticker using adjusted open (eager).'''
-    return df.sort('date').with_columns(
-        fwdret=c('open_adj').log().diff().shift(-2)
-    )
-
-
 def add_log_returns(lf: pl.LazyFrame) -> pl.LazyFrame:
     '''
-    Computes log-returns 'logret' from 'close' prices column.
-    Uses map_groups to avoid window expressions in LazyFrame query plan.
+    logret[t] = log(close[t]) - log(close[t-1]), per ticker. 'close' is the ADJUSTED close
+    (splits and dividends), so logret is a total return. The first row of a ticker is null.
     '''
-    schema = dict(lf.collect_schema())
-    schema['logret'] = pl.Float64
-    return lf.sort(['ticker', 'date']).group_by('ticker', maintain_order=True).map_groups(_add_log_returns_per_ticker, schema=schema)
+    return lf.sort(['ticker', 'date']).with_columns(
+        c('close').log().diff().over('ticker').alias('logret')
+    )
 
 
 def add_fwd_returns(lf: pl.LazyFrame) -> pl.LazyFrame:
     '''
-    Forward returns using adjusted open prices (open_adj).
-    fwdret = log(open_adj[t+2]) - log(open_adj[t+1]) — models next-day execution at open.
-    Uses map_groups to avoid window expressions in LazyFrame query plan.
+    LABEL (legacy name). One-day forward return with next-day execution:
+    fwdret[t] = log(open_adj[t+2]) - log(open_adj[t+1]). Same as add_fwdret_horizon(lf, 1).
+    Kept for the research scripts that read the column 'fwdret'.
     '''
-    schema = dict(lf.collect_schema())
-    schema['fwdret'] = pl.Float64
-    return lf.sort(['ticker', 'date']).group_by('ticker', maintain_order=True).map_groups(_add_fwd_returns_per_ticker, schema=schema)
-    
+    return lf.sort(['ticker', 'date']).with_columns(
+        c('open_adj').log().diff().shift(-2).over('ticker').alias('fwdret')
+    )
 
 
-def add_fwdret_horizon(lf:pl.LazyFrame, horizon=1) -> pl.LazyFrame:
+def add_fwdret_horizon(lf: pl.LazyFrame, horizon: int = 1) -> pl.LazyFrame:
     '''
-    Forward log-returns using adjusted open prices (total return series).
-    We use open_adj(t+1+horizon) relative to open_adj(t+1) - skip execution day (t+1).
-    So fwdret{h} = log(open_adj[t+1+h]) - log(open_adj[t+1])
+    LABEL. Forward log-return over `horizon` trading days, open to open, with one day of delay:
+
+        fwdret{h}[t] = log(open_adj[t+1+h]) - log(open_adj[t+1])
+
+    The last h+1 rows of each ticker are null: those prices do not exist yet.
     '''
     # The shift MUST happen inside the per-ticker window: `.over('ticker')` is applied to the whole
     # expression. (Applied to the log only, the shift runs over the full frame and the last rows of a ticker
     # read the prices of the NEXT ticker: wrong labels, not null, in the last horizon+1 rows of every ticker.)
     log_open = c('open_adj').log()
     fwd_expr = (log_open.shift(-(horizon + 1)) - log_open.shift(-1)).over('ticker')
-    return lf.sort(['ticker', 'date']).with_columns(**{f'fwdret{horizon}': fwd_expr})
-    # Previous version using Close prices
-    # '''
-    # Adds forward log-returns, horizon trading days ahead, per ticker.
-    #     Using log-returns, it's simply a sum of the 'horizon' next days. 
-    # '''
-    # return lf.sort(['ticker', 'date']).with_columns(
-    #     c('logret').rolling_sum(horizon).over('ticker').shift(-horizon).alias(f'fwd_ret_{horizon}')
-    # )
+    return lf.sort(['ticker', 'date']).with_columns(fwd_expr.alias(f'fwdret{horizon}'))

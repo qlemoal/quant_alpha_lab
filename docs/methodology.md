@@ -8,14 +8,14 @@ Math is written in plain text (no LaTeX), so it reads the same everywhere.
 1. [Conventions](#1-conventions)
 2. [Data layer (01, 02)](#2-data-layer-stages-01-and-02)
 3. [Features (03)](#3-features-stage-03)
-4. [Signals (04a)](#4-signals-stage-04a)
-5. [Signal evaluation (04b)](#5-signal-evaluation-stage-04b)
+4. [Signals (04)](#4-signals-stage-04)
+5. [Signal evaluation (05)](#5-signal-evaluation-stage-05)
 6. [False discovery rate](#6-false-discovery-rate)
 7. [Validation: CPCV, purge, embargo, holdout](#7-validation)
-8. [Combination: Elastic Net (04c)](#8-combination-stage-04c)
-9. [Risk model (04d)](#9-risk-model-stage-04d)
-10. [Portfolio construction (04e)](#10-portfolio-construction-stage-04e)
-11. [Backtest (04f)](#11-backtest-stage-04f)
+8. [Combination: Elastic Net (06)](#8-combination-stage-06)
+9. [Risk model (07)](#9-risk-model-stage-07)
+10. [Portfolio construction (08)](#10-portfolio-construction-stage-08)
+11. [Backtest (09)](#11-backtest-stage-09)
 12. [Metrics: definitions](#12-metrics-definitions)
 13. [Library modules not in the pipeline](#13-library-modules-not-in-the-pipeline)
 14. [Limitations](#14-limitations)
@@ -42,7 +42,7 @@ flowchart LR
 
 | Quantity | Unit |
 |---|---|
-| Weight | fraction of net asset value (NAV). Gross = Σ|w|. Gross 1 means 50% long and 50% short. |
+| Weight | fraction of NAV. Gross = Σ|w|. Gross 1 means 50% long and 50% short. |
 | Volatility, covariance | annualised (daily × 252) |
 | Costs | basis points of traded dollars, then returned as fractions of NAV |
 | Sharpe | annualised. For h-day returns: mean / std × √(252 / h) |
@@ -56,7 +56,7 @@ flowchart LR
 
 - **Holdout:** the last 200 dates that have a label.
 - **Gap:** `embargo` dates between the end of the search period and the start of the holdout, so no search label reaches into the holdout.
-- 04b and 04c use the search period only. 04f reports the holdout separately.
+- 05 and 06 use the search period only. 09 reports the holdout separately.
 
 ---
 
@@ -109,13 +109,13 @@ flowchart TB
 - **Liquidity** `log_adv_w`: log of the average dollar volume. It uses `close_raw`, because dollars traded = price as traded × shares.
 - **Beta** `beta_w`: regression slope on the equal-weighted market return (a proxy; section 14).
 
-**Why windows from 5 to 252:** short windows capture reversal, long windows capture trend. The data decides which is useful (stage 04b). The number of candidates is counted in the false discovery rate.
+**Why windows from 5 to 252:** short windows capture reversal, long windows capture trend. The data decides which is useful (stage 05). The number of candidates is counted in the false discovery rate.
 
 **Check:** all features are computed per ticker with trailing windows. A test cuts the prices at a date and confirms that no earlier feature changes (no look-ahead).
 
 ---
 
-## 4. Signals (stage 04a)
+## 4. Signals (stage 04)
 
 ```mermaid
 flowchart LR
@@ -143,13 +143,13 @@ flowchart LR
 - **Check `check_labels`:** if any of those rows has a value, the label crossed a ticker boundary and the script stops. This guards bug 1 of the README table.
 - **Check `calendar_gaps`:** labels shift by rows. A row shift equals trading days only if the ticker has a row for every date. The script reports the missing share.
 
-### 4.3 What 04a never does
+### 4.3 What 04 never does
 
 It never computes a return-based statistic of a signal. Looking at IC over all dates here would let the holdout influence which signals you decide to build. The descriptive statistics (null share, mean, std, names per date) use no returns.
 
 ---
 
-## 5. Signal evaluation (stage 04b)
+## 5. Signal evaluation (stage 05)
 
 ```mermaid
 flowchart LR
@@ -202,7 +202,7 @@ flowchart LR
 | BY (Benjamini-Yekutieli) | BH with α divided by c(m) = Σ 1/j | any dependence. More strict. |
 | Storey q-value | q(i) = π₀ × m × p(i) / i, made monotone. π₀ = share of true nulls, estimated from large p-values. | the selection rule used here: q < α (default 0.2) |
 
-**Selection weights.** 04c uses `(1 − q)` as a prior weight for each selected signal. A weaker signal enters with a smaller weight.
+**Selection weights.** 06 uses `(1 − q)` as a prior weight for each selected signal. A weaker signal enters with a smaller weight.
 
 **Honest warning.** Transforms of one feature (mom20 with tanh and with rank) are not independent tests. BH can then be too permissive. The BY column and the non-overlapping t-statistic are there for this reason.
 
@@ -241,11 +241,11 @@ A score for date d comes from models that never saw d (nor its overlapping neigh
 
 ---
 
-## 8. Combination (stage 04c)
+## 8. Combination (stage 06)
 
 ```mermaid
 flowchart TB
-    SEL["selected signals<br/>(from 04b)"] --> STD["standardise each signal<br/>(mean and std from the training rows)"]
+    SEL["selected signals<br/>(from 05)"] --> STD["standardise each signal<br/>(mean and std from the training rows)"]
     STD --> PW["multiply by (1 − q)"]
     Y["target = fwdret_h minus its<br/>cross-sectional mean per date"] --> EN
     PW --> EN["Elastic Net<br/>grid over alpha, l1_ratio"]
@@ -287,7 +287,7 @@ Elastic Net minimises: `mean squared error + alpha × (l1_ratio × Σ|beta| + (1
 
 ---
 
-## 9. Risk model (stage 04d)
+## 9. Risk model (stage 07)
 
 **Goal:** an estimate of the covariance Σ of the stock returns, good enough to size the book and to cap clusters.
 
@@ -324,7 +324,7 @@ Check: a simulation with a known covariance (error against the truth: shrunk ≈
 
 ### 9.5 Louvain clusters
 
-Build a graph where the stocks are nodes and the edges are positive cleaned correlations. Louvain maximises modularity. There is **no k to choose**. The clusters are used in 04e as exposure caps.
+Build a graph where the stocks are nodes and the edges are positive cleaned correlations. Louvain maximises modularity. There is **no k to choose**. The clusters are used in 08 as exposure caps.
 
 ### 9.6 Dates
 
@@ -332,11 +332,11 @@ The model is estimated on **weekly rebalance dates**, each with the trailing 252
 
 ---
 
-## 10. Portfolio construction (stage 04e)
+## 10. Portfolio construction (stage 08)
 
 ```mermaid
 flowchart LR
-    S["score<br/>(04c)"] --> W["1. raw weights<br/>proportional to the<br/>demeaned score"]
+    S["score<br/>(06)"] --> W["1. raw weights<br/>proportional to the<br/>demeaned score"]
     W --> CAP["2. cluster caps<br/>limit gross exposure<br/>of each cluster"]
     CAP --> NEU["3. re-neutralise<br/>long = short"]
     NEU --> VT["4. volatility target<br/>scale so w'Σw = 10%²"]
@@ -359,7 +359,7 @@ flowchart LR
 
 ---
 
-## 11. Backtest (stage 04f)
+## 11. Backtest (stage 09)
 
 ```mermaid
 flowchart LR
@@ -425,7 +425,7 @@ The backtest prints three blocks: whole period, before the holdout, **holdout**.
 | Max drawdown | on the **compounded** curve of non-overlapping returns: min over t of (equity_t / max_{s ≤ t} equity_s − 1) |
 | Market beta | slope of the strategy return on the equal-weighted market return |
 | Turnover | one-way: Σ |Δw| / 2 per rebalance, summed over a year (multiples of NAV) |
-| Realised / ex-ante vol | std of net daily returns × √252 divided by the mean ex-ante vol of 04d |
+| Realised / ex-ante vol | std of net daily returns × √252 divided by the mean ex-ante vol of 07 |
 
 **Why compounded drawdown:** a cumulated sum of overlapping h-day returns counts each day h times. The drawdown looked about 20 times too large in the first version.
 
@@ -433,7 +433,7 @@ The backtest prints three blocks: whole period, before the holdout, **holdout**.
 
 ## 13. Library modules not in the pipeline
 
-These modules are tested, but 04a to 04f do not call them.
+These modules are tested, but 04 to 09 do not call them.
 
 | Module | What it offers | Why not wired yet |
 |---|---|---|
@@ -465,7 +465,7 @@ These modules are tested, but 04a to 04f do not call them.
 - Every stage reads files and writes files under `data/clean/.../{stage}/{run_id}/`.
 - `config.json` in each stage stores: parameters, a hash of the parameters, a hash of the input file, the git commit, and whether the working tree had uncommitted changes.
 - Random seeds are fixed where randomness exists (cross-validation, Louvain).
-- `04_run_all.py` runs the chain and stops at the first failure.
+- `run_experiment.py` runs the chain and stops at the first failure.
 - Tests: `pytest -q`.
 
 ---

@@ -19,7 +19,7 @@ HOW IT IS BUILT (for one date, across the stocks)
             |
             v
     rho = 2 sin(pi * ic / 6)  makes the RANK correlation (Spearman) of the signal with fwdret{h} equal to `ic`
-    (for normal variables, Spearman = 6/pi * asin(rho / 2)). The IC measured in 04b is a Spearman IC.
+    (for normal variables, Spearman = 6/pi * asin(rho / 2)). The IC measured in 05 is a Spearman IC.
 
 WHY THE NOISE IS BUILT FROM (ticker, date)
     A new noise value for every stock AND every date, so the noise is independent across days.
@@ -27,10 +27,10 @@ WHY THE NOISE IS BUILT FROM (ticker, date)
     way a real error does. The noise is a hash of (ticker, date, seed), so a run can be repeated exactly.
 
 WHERE IT IS USED
-    04a_generate_signals.py with the option --cheat. See CHEAT_SIGNALS in that script.
+    04_generate_signals.py with the option --cheat. See CHEAT_SIGNALS in that script.
 
 NEVER READ A RESULT FROM A CHEAT RUN AS A STRATEGY RESULT.
-    It uses the future. The run must have `cheat` in its tag (04a checks this).
+    It uses the future. The run must have `cheat` in its tag (04 checks this).
 '''
 
 import math
@@ -50,8 +50,8 @@ def cheat_name(horizon: int, ic: float) -> str:
 def validate_cheat_specs(specs: list, horizons: list) -> list:
     '''
     Check the list [(horizon, ic), ...]. Raises ValueError on a mistake. Returns the list as tuples.
-    The horizon must be one of the label horizons of 04a, and 0 < ic <= 0.99. Two equal names are an error.
-    IC 1 is refused: the IC would be the same on every date (std 0), so its t-statistic does not exist and 04b drops it.
+    The horizon must be one of the label horizons of 04, and 0 < ic <= 0.99. Two equal names are an error.
+    IC 1 is refused: the IC would be the same on every date (std 0), so its t-statistic does not exist and 05 drops it.
     '''
     out, seen = [], set()
     for spec in specs:

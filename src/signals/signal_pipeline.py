@@ -1,8 +1,8 @@
 '''
-Plumbing for stage 04a (signal generation). The script 04a_generate_signals.py only calls these functions.
+Plumbing for stage 04 (signal generation). The script 04_generate_signals.py only calls these functions.
 The transforms themselves (z-score, tanh, rank...) are in src/signals/combine.py and its helpers.
 
-WHAT STAGE 04a DOES, AND WHAT IT NEVER DOES
+WHAT STAGE 04 DOES, AND WHAT IT NEVER DOES
 -------------------------------------------
 
     features.parquet  (one row per date and ticker: mom20, vol60, log_adv60, open_adj, ...)
@@ -13,10 +13,10 @@ WHAT STAGE 04a DOES, AND WHAT IT NEVER DOES
           v
     signals.parquet   [date, ticker, <signals>, fwdret1, fwdret5, ...]
 
-    04a never measures how well a signal predicts returns. No IC, no Sharpe, no drawdown.
-    That is the job of 04b, which uses the search period only. If 04a printed IC on all dates, the holdout
+    04 never measures how well a signal predicts returns. No IC, no Sharpe, no drawdown.
+    That is the job of 05, which uses the search period only. If 04 printed IC on all dates, the holdout
     would leak into the choice of signals through the eyes of the researcher.
-    04a only checks that the signals and the labels are well formed (coverage, scale, label alignment).
+    04 only checks that the signals and the labels are well formed (coverage, scale, label alignment).
 
 THE CLOCK
 ---------
@@ -219,7 +219,7 @@ def _f(x):
 def signal_warnings(stats: dict, max_null_pct: float = 50.0) -> list:
     '''
     Plain-language warnings about signals that will not be usable:
-    all null, constant, or mostly null. A warning is not an error: 04b decides what to keep.
+    all null, constant, or mostly null. A warning is not an error: 05 decides what to keep.
     '''
     warns = []
     for s, st in stats.items():

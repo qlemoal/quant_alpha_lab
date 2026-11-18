@@ -40,7 +40,7 @@ def register_method(name: str, func):
         register_method('my_transform', lambda base, **kw: base.rank().over('date'))
 
     The cheating benchmark signals are NOT made here: they need the labels. See src/signals/cheat.py and
-    the option --cheat of 04a_generate_signals.py.
+    the option --cheat of 04_generate_signals.py.
     """
     _METHOD_REGISTRY[name] = func
 

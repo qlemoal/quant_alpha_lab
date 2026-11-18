@@ -1,5 +1,5 @@
 '''
-Plumbing for stage 04d (risk model). The script 04d_estimate_risk_model.py only calls these functions.
+Plumbing for stage 07 (risk model). The script 07_estimate_risk_model.py only calls these functions.
 The maths is NOT here: it lives in src/risk/risk_model.py (one date at a time).
 
 WHAT THIS FILE DOES
@@ -268,7 +268,7 @@ def build_summary(summaries: list, skipped: list) -> dict:
     '''
     The content of summary.json.
 
-    NOTE for readers (04e, 04f): this is a DICT. The list of dates is in summary['per_date'].
+    NOTE for readers (08, 09): this is a DICT. The list of dates is in summary['per_date'].
     '''
     if not summaries:
         raise ValueError('no rebalance date was processed, nothing to summarise')

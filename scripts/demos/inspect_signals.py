@@ -35,8 +35,12 @@ Usage (with 2026-10-29_default as run ID):
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from datetime import datetime
+
+# Make `import src...` work wherever the script is started from.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import polars as pl
 import numpy as np
@@ -45,11 +49,14 @@ import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 
 from src.evaluation.signals.ic.core import compute_ic, summarize_ic
+from src.evaluation.signals.ic.metrics import newey_west_ic_tstat
 from src.evaluation.signals.performance import (
     decile_longshort_returns, sharpe_ratio, max_drawdown, compute_stability
 )
 from src.utils.helpers import file_hash
 
+
+Path('tmp').mkdir(exist_ok=True)          # the plots go to ./tmp/
 
 # New structure: clean/equities/US/SP500/daily/{step}/{run_id}/{data_file}.parquet + config.json
 BASE = Path('data/clean/equities/US/SP500/daily')
@@ -185,36 +192,20 @@ def cmd_stats(args):
     
     print(f'\n=== DETAILED STATS: {args.run} ===')
     
-    # Signal stats
-    print('\n--- Signal Statistics ---')
-    for sig, stats in config.get('signal_stats', {}).items():
-        print(f'{sig:25s} mean={stats["mean"]:.4f} std={stats["std"]:.4f} '
-              f'min={stats["min"]:.4f} max={stats["max"]:.4f} '
-              f'nulls={stats["null_count"]} ({stats["null_pct"]:.2f}%)')
-    
-    # Cross-sectional stats
-    print('\n--- Cross-Sectional Statistics ---')
-    for sig, stats in config.get('cross_sectional_stats', {}).items():
-        print(f'{sig:25s} avg_cs_mean={stats["avg_cs_mean"]:.4f} avg_cs_std={stats["avg_cs_std"]:.4f}')
-    
-    # IC stats
-    print('\n--- IC Statistics (fwdret20) ---')
-    for sig, stats in config.get('ic_stats', {}).items():
-        if 'error' in stats:
-            print(f'{sig:25s} ERROR: {stats["error"]}')
-        else:
-            print(f'{sig:25s} mean={stats["mean"]:.4f} std={stats["std"]:.4f} '
-                  f'IR={stats["ir"]:.4f} hit_rate={stats["hit_rate"]:.2%} n_days={int(stats["n_days"])}')
-    
-    # Performance stats
-    print('\n--- Performance Statistics (decile LS, fwdret20) ---')
-    for sig, stats in config.get('performance_stats', {}).items():
-        if 'error' in stats:
-            print(f'{sig:25s} ERROR: {stats["error"]}')
-        else:
-            print(f'{sig:25s} Sharpe={stats["sharpe"]:.3f} MaxDD={stats["max_dd"]:.3f} '
-                  f'Turnover={stats["turnover_mean"]:.4f}±{stats["turnover_std"]:.4f} '
-                  f'SpreadMean={stats["spread_mean"]:.6f}')
+    # Statistics written by 04. They use NO returns (04 never looks at the labels).
+    print('\n--- Signal statistics (no returns used) ---')
+    for sig, st in config.get('signal_stats', {}).items():
+        def f(x):
+            return 'nan' if x is None else f'{x:.4f}'
+        print(f'{sig:25s} mean={f(st["mean"])} std={f(st["std"])} min={f(st["min"])} max={f(st["max"])} '
+              f'null={st["null_pct"]:.2f}%  names/date={f(st["avg_names_per_date"])}  '
+              f'cs_mean={f(st["avg_cs_mean"])} cs_std={f(st["avg_cs_std"])}')
+
+    for w in config.get('warnings', []):
+        print(f'WARNING: {w}')
+
+    print('\nFor IC and performance run the commands `ic` and `perf` (04 does not compute them on purpose:')
+    print('IC over all dates would include the holdout. 05 evaluates the search period only).')
 
 
 def cmd_ic(args):
@@ -242,12 +233,16 @@ def cmd_ic(args):
         print(f'  Mean IC: {stats["mean"]:.4f}')
         print(f'  Std IC:  {stats["std"]:.4f}')
         print(f'  IR:      {stats["ir"]:.4f}')
-        print(f'  t-stat:  {stats["t_stat"]:.2f}')
+        ic_df = ic_lf.collect()
+        nw = newey_west_ic_tstat(ic_df['ic'].drop_nulls().to_numpy(), horizon=args.horizon)
+        print(f'  t-stat (naive):        {stats["t_stat"]:.2f}   <- ignores the overlap of the labels ({args.horizon - 1} days): do not use')
+        nw_t = 'nan' if nw['t_stat'] is None else f'{nw["t_stat"]:.2f}'
+        print(f'  t-stat (Newey-West, lag {nw["max_lag"]}): {nw_t}')
         print(f'  Hit rate: {stats["hit_rate"]:.2%}')
         print(f'  n_days:  {int(stats["n_days"])}')
+        print('  NOTE: all dates are used here, including the holdout. Use 05 for any decision.')
         
         # Show IC time series stats
-        ic_df = ic_lf.collect()
         print(f'  IC range: [{ic_df["ic"].min():.4f}, {ic_df["ic"].max():.4f}]')
         
         if args.plot:
@@ -290,8 +285,8 @@ def cmd_perf(args):
             print(f'{sig}: No data')
             continue
         
-        sharpe = sharpe_ratio(ls_df['spread_ret'].values)
-        dd = max_drawdown(ls_df['spread_ret'].values)
+        sharpe = sharpe_ratio(ls_df['spread_ret'].values, horizon=args.horizon)
+        dd = max_drawdown(ls_df['spread_ret'].values, horizon=args.horizon)
         
         print(f'\n{sig}:')
         print(f'  Spread mean: {ls_df["spread_ret"].mean():.6f}')
@@ -307,7 +302,7 @@ def cmd_perf(args):
             ls_df['spread_ret'].plot(ax=axes[0, 0], title=f'Daily Spread Return: {sig}')
             ls_df['spread_ret'].cumsum().plot(ax=axes[0, 1], title='Cumulative Return')
             ls_df[['long_ret', 'short_ret']].plot(ax=axes[1, 0], title='Long/Short Leg Returns')
-            ls_df['spread_ret'].rolling(60).apply(lambda x: sharpe_ratio(x.values)).plot(
+            ls_df['spread_ret'].rolling(60).apply(lambda x: sharpe_ratio(x.values, horizon=args.horizon)).plot(
                 ax=axes[1, 1], title='60-day Rolling Sharpe')
             plt.tight_layout()
             plt.savefig(f'tmp/perf_{sig}.png', dpi=150)

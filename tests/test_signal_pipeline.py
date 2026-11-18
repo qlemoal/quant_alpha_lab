@@ -1,4 +1,4 @@
-'''Tests for the forward-return labels and the 04a helpers.'''
+'''Tests for the forward-return labels and the 04 helpers.'''
 
 import numpy as np
 import polars as pl

@@ -1,24 +1,17 @@
 # quant_alpha_lab
 
-**An end-to-end research pipeline for cross-sectional equity long-short strategies, built to answer one question honestly: does this signal still work after costs, on data the model never saw?**
+**A research framework for cross-sectional equity long-short strategies.**
+It goes from raw data to a risk-managed, dollar-neutral portfolio. It reports the result after trading costs, on dates the model never saw.
 
-It takes raw S&P 500 prices (for now) and produces a dollar-neutral, risk-managed portfolio. It then reports a net-of-cost Sharpe ratio with its confidence interval, measured only on a holdout period that was never used to pick, tune or fit anything.
+Each stage is one script. Each script reads files and writes files.
+Every run has a `run_id` and can be reproduced.
+The logic is in tested library modules (`src/`). The scripts only call them, in order.
 
-**What makes it different from a typical backtest repo**
-
-- **No look-ahead, by construction and by test.** Signal at the close of t, trade at the open of t+1, label from the same open. A test cuts the prices at a date and checks that no earlier feature changes.
-- **Overlapping returns are handled everywhere.** 20-day labels overlap, so the Newey-West lag, the purge and embargo in the cross-validation, and the Sharpe annualisation all account for it.
-- **Many signals are tested, so false discoveries are controlled.** Signals are selected with BH, BY and Storey q-value FDR on the search period only.
-- **Out-of-fold scores, then one untouched holdout.** The Elastic Net is tuned by combinatorial purged cross-validation.
-- **A real risk model.** Marchenko-Pastur cleaning, Ledoit-Wolf shrinkage and Louvain clusters drive the volatility target and the cluster caps.
-- **Costs are part of the result.** Half-spread, square-root market impact and commission. The Sharpe is also shown at 2× and 3× costs.
-- **Known limits are written down.** Survivorship bias and the unmodelled borrow and financing costs are listed in [section 10](#10-known-limitations).
-
-**Every stage is one script, and every run is reproducible.** Each script reads files and writes files, under a `run_id` that stores the git commit and the hash of the inputs. The logic lives in tested library modules in `src/`. The scripts only call them, in order.
-
-**How it was built.** I use LLMs openly, and I think that is the right way to build software now. Stages 01 to 03 were written mostly by hand, with a light use of LLMs where I read and checked every line. From stage 04 on, most of the code is written by LLMs (Claude, and Nemotron Ultra through Cline), working under my direction. My job is the part a model cannot do for me: the research question, the pipeline design, the statistical choices (what to test, how to correct it, where the holdout starts), and the review. Every bug the review found is listed in [section 11](#11-bugs-found-by-review-and-the-test-that-guards-each) with the regression test that guards it. I also check the code against simulations with a known answer, such as a planted signal with a known IC. I don't need to type every line myself. I need to know what each line must do, and to prove that it does it.
-
-> **No performance number is quoted here.** Run the pipeline and read the holdout block printed by stage 04f ([section 5](#5-quick-start)). It is the only number I trust.
+> **How to read this repo.** This is a research project, not a finished product.
+> LLMs are used since step 04 of the pipeline. Now code is LLM-generated, but logic and bug-detection are human-generated.
+> They are listed in [section 11](#11-bugs-found-by-review-and-the-test-that-guards-each), each with the test that guards it.
+> The data has known limits for now ([section 10](#10-known-limitations)). Read them before you trust a number.
+> **No performance number is quoted in this README.** Run the pipeline and read the holdout block ([section 5](#5-quick-start)).
 
 ---
 
@@ -60,16 +53,16 @@ flowchart LR
     end
     subgraph RESEARCH["RESEARCH"]
         direction TB
-        D["04a Signals<br/>Which candidates do we test?<br/>signals.parquet"]
-        E["04b Evaluate<br/>Which carry information?<br/>selected_signals.json"]
-        F["04c Combine<br/>One honest score?<br/>en_scores.parquet"]
+        D["04 Signals<br/>Which candidates do we test?<br/>signals.parquet"]
+        E["05 Evaluate<br/>Which carry information?<br/>selected_signals.json"]
+        F["06 Combine<br/>One honest score?<br/>en_scores.parquet"]
         D --> E --> F
     end
     subgraph PORTFOLIO["PORTFOLIO"]
         direction TB
-        G["04d Risk model<br/>How do stocks move together?<br/>cov, clusters"]
-        H["04e Weights<br/>How much long or short?<br/>weights.parquet"]
-        I["04f Backtest<br/>What after costs?<br/>metrics.json"]
+        G["07 Risk model<br/>How do stocks move together?<br/>cov, clusters"]
+        H["08 Weights<br/>How much long or short?<br/>weights.parquet"]
+        I["09 Backtest<br/>What after costs?<br/>metrics.json"]
         G --> H --> I
     end
     DATA --> RESEARCH --> PORTFOLIO
@@ -80,8 +73,8 @@ flowchart LR
 | 01 | `scripts/pipeline/01_download_data.py` |
 | 02 | `scripts/pipeline/02_etl_prices.py` |
 | 03 | `scripts/pipeline/03_build_features.py` |
-| 04a to 04f | `scripts/pipeline/04a_generate_signals.py` … `04f_run_backtest.py` |
-| 04a to 04f in one command | `scripts/pipeline/04_run_all.py` |
+| 04 to 09 | `scripts/pipeline/04_generate_signals.py` … `09_run_backtest.py` |
+| 04 to 09 in one command | `scripts/pipeline/run_experiment.py` |
 
 ---
 
@@ -115,7 +108,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    S["SEARCH period<br/>04b selects signals<br/>04c tunes the Elastic Net<br/>scores are out-of-fold"] --> G["GAP<br/>37 days<br/>(embargo)"] --> H["HOLDOUT<br/>last 200 dates<br/>never used to select,<br/>tune or fit"]
+    S["SEARCH period<br/>stage 05 selects signals<br/>stage 06 tunes the Elastic Net<br/>scores are out-of-fold"] --> G["GAP<br/>37 days<br/>(embargo)"] --> H["HOLDOUT<br/>last 200 dates<br/>never used to select,<br/>tune or fit"]
 ```
 
 | Period | What the score is | Can I quote a result from it? |
@@ -124,7 +117,7 @@ flowchart LR
 | Gap | Final model. Too close to the search period (labels overlap). | No. |
 | **Holdout** | Final model, on dates it never saw. | **Yes. This is the number.** |
 
-04f prints the holdout block. No parameter is changed because of what the holdout shows.
+Stage 09 prints the holdout block. No parameter is changed because of what the holdout shows.
 
 ---
 
@@ -140,12 +133,12 @@ python scripts/pipeline/01_download_data.py      # Wikipedia + Yahoo, one CSV pe
 python scripts/pipeline/02_etl_prices.py         # ohlcv.parquet
 python scripts/pipeline/03_build_features.py     # features.parquet
 
-# Stages 04a to 04f in one command (stops at the first failure):
-python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default
+# Stages 04 to 09 in one command, one experiment (stops at the first failure):
+python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default
 
 # Part of the chain:
-python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default --from 04d
-python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag default --only 04f
+python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default --from 07
+python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default --only 09
 
 pytest -q                                        # unit and regression tests, a few seconds
 ```
@@ -155,15 +148,15 @@ pytest -q                                        # unit and regression tests, a 
 To check what the pipeline does with a signal of a **known** strength, add signals built from the future return plus noise:
 
 ```bash
-python scripts/pipeline/04_run_all.py --date 2026-11-07 --tag cheat --cheat
+python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag cheat --cheat
 ```
 
-- Edit `CHEAT_SIGNALS` in `04a_generate_signals.py`: one line `(horizon, rank IC)`, for example `(20, 0.05)`. Typical real signal: 0.02. Very strong: 0.30.
+- Edit `CHEAT_SIGNALS` in `04_generate_signals.py`: one line `(horizon, rank IC)`, for example `(20, 0.05)`. Typical real signal: 0.02. Very strong: 0.30.
 - The tag **must** contain `cheat`, so that a cheat run never replaces a real run.
 - A cheat run is a sanity check of the chain (selection, combiner, costs). It is **not** a strategy: it uses the future.
 - Each cheat signal has its own independent noise (`src/signals/cheat.py`, tested). With a shared noise a linear model could cancel it and rebuild the future return.
 
-Read the **HOLDOUT** block printed by 04f. It gives the net Sharpe, its 95% interval, the annual return, the drawdown, the market beta and the Sharpe at higher costs.
+Read the **HOLDOUT** block printed by stage 09. It gives the net Sharpe, its 95% interval, the annual return, the drawdown, the market beta and the Sharpe at higher costs.
 
 ---
 
@@ -204,7 +197,7 @@ flowchart LR
 - **Why `close_raw`:** dollars traded = price as traded × shares traded. The adjusted close understates old dollar volume.
 - **Guard:** no-look-ahead test. The script stops on duplicate rows, bad prices, NaN or inf.
 
-### 04a · Signals
+### 04 · Signals
 
 ```mermaid
 flowchart LR
@@ -213,9 +206,9 @@ flowchart LR
 ```
 - **Transforms:** `zscore_tanh`, `zscore_clip`, `rank`, `decile`.
 - **Why cross-sectional:** the strategy bets on the order of stocks on one date, not on the market level.
-- **Guard:** 04a never measures return prediction (no IC, no Sharpe). The holdout cannot influence which signals you build. A check proves that no label crosses from one ticker to the next.
+- **Guard:** stage 04 never measures return prediction (no IC, no Sharpe). The holdout cannot influence which signals you build. A check proves that no label crosses from one ticker to the next.
 
-### 04b · Evaluate
+### 05 · Evaluate
 
 ```mermaid
 flowchart LR
@@ -224,7 +217,7 @@ flowchart LR
 - **Why a long Newey-West lag:** labels of consecutive days overlap by h − 1 days. The IC series is autocorrelated by construction.
 - **Guard:** a non-overlapping t-statistic (one IC every h days) is the cross-check. Selection uses the search period only.
 
-### 04c · Combine
+### 06 · Combine
 
 ```mermaid
 flowchart TB
@@ -235,7 +228,7 @@ flowchart TB
 - **Why out-of-fold:** a model that scores the data it trained on gives a score that looks too good.
 - **Guard:** the holdout labels can be destroyed without changing the model (test).
 
-### 04d · Risk model
+### 07 · Risk model
 
 ```mermaid
 flowchart LR
@@ -245,7 +238,7 @@ flowchart LR
 - **Why:** 500 stocks over 252 days give a noisy correlation matrix. Cleaning keeps the market and sector factors and removes noise.
 - **Guard:** the diagonal of Σ equals the stock variances (test). Shrinkage is checked on a simulation with a known truth.
 
-### 04e · Weights
+### 08 · Weights
 
 ```mermaid
 flowchart LR
@@ -254,7 +247,7 @@ flowchart LR
 - **Units:** weights are fractions of capital. gross = Σ|w|. gross 1 = 50% long + 50% short.
 - **Guard:** the stage stops if the book is not dollar-neutral, not finite, or above the leverage cap.
 
-### 04f · Backtest
+### 09 · Backtest
 
 ```mermaid
 flowchart LR
@@ -294,29 +287,30 @@ data/
 quant_alpha_lab/
 ├── config/                  paths.py (all paths in one place), constants.py
 ├── scripts/
-│   ├── pipeline/            01 … 04f and 04_run_all.py     thin scripts, heavy comments
+│   ├── pipeline/            01 … 09, run_experiment.py      thin scripts, heavy comments
 │   ├── research/            standalone research scripts
+│   ├── archive/             old scripts, kept for reference
 │   └── demos/               inspect_signals.py, GBM vs EN (PBO), coefficient stability
 ├── src/
 │   ├── data/                download.py, prices_etl.py                       stages 01, 02
 │   ├── features/            returns, momentum, volatility, adv, beta         stage 03
-│   ├── signals/             combine, normalize, ranking, signal_pipeline,    stage 04a
+│   ├── signals/             combine, normalize, ranking, signal_pipeline,    stage 04
 │   │                        cheat (benchmark signals with a known IC)
-│   ├── evaluation/signals/  ic/, FDR.py, performance.py, report.py           stage 04b
+│   ├── evaluation/signals/  ic/, FDR.py, performance.py, report.py           stage 05
 │   ├── validation/          cpcv.py (+ PBO), walk_forward_cv.py
-│   ├── models/              elastic_net_combiner.py (04c), gbm_combiner.py
-│   ├── risk/                risk_model, covariance, correlation_cleaning,    stages 04d, 04e
+│   ├── models/              elastic_net_combiner.py (06), gbm_combiner.py
+│   ├── risk/                risk_model, covariance, correlation_cleaning,    stages 07, 08
 │   │                        clustering, portfolio_construction, weights_pipeline
-│   ├── portfolio/           weights_backtest.py (04f), costs.py,
+│   ├── portfolio/           weights_backtest.py (09), costs.py,
 │   │                        backtest.py, optimization.py (library, see below)
 │   └── utils/               helpers, panels, stats
 ├── tests/                   unit tests, regression tests, edge-case fixtures
 └── docs/                    methodology.md, findings.md, tips_and_tricks.md
 ```
 
-**Library modules that are not in the main pipeline** (tested pieces, not wired into 04a to 04f):
+**Library modules that are not in the main pipeline** (tested pieces, not wired into 04 to 09):
 `optimization.py` (HRP, ERC, Black-Litterman, cost-aware MVO), `gbm_combiner.py` with the PBO comparison, `walk_forward_cv.py`, and the older engine `backtest.py`.
-`04_build_portfolio.py` is a legacy script, kept until it is archived.
+`scripts/archive/build_portfolio_legacy.py` is the old portfolio script, kept for reference only.
 
 ---
 
@@ -327,16 +321,16 @@ quant_alpha_lab/
 | 01 Download | rewritten | fake downloader | needs network to run |
 | 02 ETL | rewritten | yes | |
 | 03 Features | rewritten | no-look-ahead test | |
-| 04a Signals | rewritten | label alignment | |
-| 04b Evaluate | rewritten | FDR, Newey-West | selection on the search period only |
-| 04c Combine | rewritten | holdout untouched | |
-| 04d Risk model | rewritten | covariance, shrinkage | |
-| 04e Weights | rewritten | partial | checks at every date |
-| 04f Backtest | rewritten | partial | costs are assumptions (section 10) |
+| 04 Signals | rewritten | label alignment | |
+| 05 Evaluate | rewritten | FDR, Newey-West | selection on the search period only |
+| 06 Combine | rewritten | holdout untouched | |
+| 07 Risk model | rewritten | covariance, shrinkage | |
+| 08 Weights | rewritten | partial | checks at every date |
+| 09 Backtest | rewritten | partial | costs are assumptions (section 10) |
 | PBO, walk-forward, HRP, ERC, BL, MVO | library | partial | not wired into the pipeline |
 
 All stages were run end to end on synthetic data with a known truth. **They have not yet been run on the real data after the fixes.**
-Earlier outputs came from code with the label bug (section 11) and are not valid. Rerun 02 → 04f.
+Earlier outputs came from code with the label bug (section 11) and are not valid. Rerun 02 → 09.
 
 ---
 
@@ -358,20 +352,20 @@ These are written down on purpose.
 
 | # | Where | What was wrong | Effect | Guard |
 |---|---|---|---|---|
-| 1 | `features/returns.py` | The label shift ran over the whole table, not per ticker. | The end of each ticker held the prices of the next ticker, including the last dates (holdout). | regression test + `check_labels` in 04a |
+| 1 | `features/returns.py` | The label shift ran over the whole table, not per ticker. | The end of each ticker held the prices of the next ticker, including the last dates (holdout). | regression test + `check_labels` in stage 04 |
 | 2 | `performance.py` | Sharpe of overlapping h-day returns annualised with √252. | Sharpe too large by about √h. | `test_performance` |
 | 3 | `performance.py` | Drawdown on a cumulated sum of overlapping returns. | Drawdown wrong by a large factor. | `test_performance` |
 | 4 | `ic/metrics.py` | Newey-West lag too short for the label overlap. | Too many false positives. | simulation, `test_newey_west` |
-| 5 | 04b | Selection used all dates, holdout included. | Holdout leaked into the choice of signals. | search-period rule shared with 04c |
-| 6 | 04c | One static model scored the whole history. | In-sample scores looked too good. | out-of-fold scores, `test_en_combiner` |
+| 5 | stage 05 | Selection used all dates, holdout included. | Holdout leaked into the choice of signals. | search-period rule shared with stage 06 |
+| 6 | stage 06 | One static model scored the whole history. | In-sample scores looked too good. | out-of-fold scores, `test_en_combiner` |
 | 7 | `risk_model.py` | The shrunk correlation was returned as covariance. | Volatility target wrong by a large factor. | `test_risk_model` (diagonal = variance) |
 | 8 | `covariance.py` | Ledoit-Wolf intensity lacked the division by N. | Matrix collapsed to the identity: error 848 against 56 for the sample matrix. | `test_covariance` |
 | 9 | `covariance.py` | The OAS formula was wrong. | Intensity near 0. | test against sklearn |
 | 10 | `liquidity.py` | Dollar volume used the adjusted close. | Old liquidity too small for dividend payers. | `test_dollar_volume_uses_the_raw_close` |
 | 11 | `02_etl_prices.py` | `SELECT DISTINCT` kept duplicates that differed in one value. | Two rows for one (ticker, date). | `test_prices_etl` |
 | 12 | `01_download_data.py` | Tickers with a dot were not converted. | BRK.B and BF.B silently missing. | `test_to_yahoo_symbol` |
-| 13 | `04_run_all.py` | It crashed at import and after a good run. | No one-command pipeline. | run from another directory |
-| 14 | 04c | NaN labels passed the null filter. | Holdout IC was NaN. | `is_not_nan` filters, test |
+| 13 | `run_experiment.py` | It crashed at import and after a good run. | No one-command pipeline. | run from another directory |
+| 14 | stage 06 | NaN labels passed the null filter. | Holdout IC was NaN. | `is_not_nan` filters, test |
 
 ---
 
@@ -416,7 +410,7 @@ These are written down on purpose.
 
 ## 14. Roadmap
 
-- [ ] Run 02 → 04f on the real data and fill in a results section
+- [ ] Run 02 → 09 on the real data and fill in a results section
 - [ ] Point-in-time constituents (a free approximation, then CRSP if available)
 - [ ] Index as market proxy for beta
 - [ ] Borrow and financing costs in the backtest
