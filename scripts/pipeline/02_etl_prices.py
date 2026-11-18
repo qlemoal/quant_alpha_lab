@@ -1,111 +1,140 @@
+#!/usr/bin/env python
 '''
-Added Adj_Open because because we want to be realistic in the trading available to us.
-    Therefore we want to work with t+1 open price, but we adjust it for events using 
-    the same relation between Close and Adj_Close.
+===============================================
+Phase 02: ETL of the Prices
+===============================================
 
-Usage:
+QUESTION ANSWERED
+    "Can we turn the raw Yahoo files into ONE clean price table that every later stage can trust?"
+
+THE STAGE IN ONE PICTURE
+
+    data/raw/yfinance/.../ohlcv/AAPL.csv, MSFT.csv, ...      (from 01_download_data.py)
+            |
+            v
+     [1] read all the CSV files into one table (every column as text)
+            |
+            v
+     [2] src/data/prices_etl.py  build_clean_table()
+            unreadable rows         removed, counted
+            price or volume <= 0    removed, counted
+            duplicate (ticker,date) one kept, counted
+            open_adj = open * close / close_raw
+            |
+            v
+     [3] quality report: impossible highs and lows, bad adjustment factors, short histories
+            |
+            v
+     [4] ohlcv.parquet + config.json (with the counts)
+
+WHERE IS THE COMPLICATED PART?
+    src/data/prices_etl.py   the SQL and the checks. This script only calls it, in order.
+
+THE COLUMNS OF ohlcv.parquet
+    ticker, date
+    open, high, low   as traded
+    close_raw         close as traded
+    close             ADJUSTED close (splits and dividends). Used for returns.
+    volume            shares traded
+    open_adj          open on the adjusted scale. Used for the labels and the backtest (we trade at the open).
+
+KNOWN LIMITS OF THE DATA (they bias the results, read them before you quote a number)
+    - Survivorship: the tickers are today's S&P 500 members. Companies that left the index (bankrupt,
+      acquired, demoted) are missing. Backtests look better than reality, mostly before 2015.
+    - Source: Yahoo Finance, adjusted by Yahoo. Good for research, not for production.
+    - A day without volume is removed. It leaves a gap in the ticker's dates (04 reports the gaps).
+
+INPUT     data/raw/{source}/{asset}/{region}/{universe}/{freq}/ohlcv/*.csv
+OUTPUTS   {clean_base}/ohlcv/ohlcv.parquet, {clean_base}/ohlcv/config.json
+
+USAGE
     python scripts/pipeline/02_etl_prices.py
-
-With:
-    loading and saving directories set here.
 '''
 
-
+import json
+import sys
+import time
+from datetime import datetime
 from pathlib import Path
-from datetime import date
+
+# Make `import src...` and `import config...` work wherever the script is started from.
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 import duckdb
 
-RAW_DIR = Path('data/raw/yfinance/equities/US/SP500/daily/ohlcv')
-RUN_DATE = date.today().isoformat()
-SIGNAL_TAG = 'default'
-OUT_DIR = Path(f'data/clean/equities/US/SP500/daily/ohlcv')
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+from config.paths import get_paths
+from src.data.etl_prices import read_raw_prices, build_clean_table, quality_report, write_parquet
+from src.utils.helpers import get_git_commit, file_hash
 
-print(f'Aggregating all prices from {RAW_DIR}')
+MIN_HISTORY = 252          # a ticker with fewer rows than this is reported as "short history"
 
 
-#  Aggregate all the CSVs into one prices table
-con = duckdb.connect()
-con.execute(f'''
-CREATE OR REPLACE TABLE prices AS
-SELECT
-    filename, Date, Open, High, Low, "Adj Close", Close, Volume
-FROM            
-    read_csv_auto('{RAW_DIR}/*.csv', filename=True)
-''')
+def main():
+    start = time.time()
+    paths = get_paths()
+    raw_dir, out_file = paths.raw_ohlcv_dir, paths.ohlcv_file
 
-#  Clean the data types, extract the ticker name, lowercase column names, and filter positive prices and volume days
-con.execute('''
-CREATE OR REPLACE TABLE clean AS
-SELECT  
-    regexp_extract(filename,'([^/]+)\.csv',1) AS ticker,
-    CAST(Date AS DATE) AS date,
-    CAST(Open AS DOUBLE) AS open,
-    CAST(High AS DOUBLE) AS high,
-    CAST(Low AS DOUBLE) AS low,
-    CAST(Close AS DOUBLE) AS close_raw,
-    CAST("Adj Close" AS DOUBLE) AS close,
-    CAST(Volume AS BIGINT) AS volume
-FROM 
-    prices
-WHERE
-    "Adj Close" > 0
-AND 
-    Close > 0
-AND 
-    Volume > 0
-''')
+    print('=' * 70)
+    print('PHASE 02: ETL OF THE PRICES')
+    print('=' * 70)
+    print(f'Raw files: {raw_dir}')
+    print(f'Output:    {out_file}')
 
-# Add adjusted open
-con.execute('''
-CREATE OR REPLACE TABLE clean AS
-SELECT 
-    *,
-    CAST(open * close / close_raw AS DOUBLE) AS open_adj
-FROM 
-    clean
-''')
+    con = duckdb.connect()
 
+    # ------------------------------------------------------------------
+    # [1/4] Read
+    # ------------------------------------------------------------------
+    print('\n[1/4] Reading the raw CSV files...')
+    n_raw = read_raw_prices(con, raw_dir)
+    print(f'  {n_raw:,} raw rows')
 
-#  Remove duplicates
-con.execute('''
-CREATE OR REPLACE TABLE clean AS
-SELECT DISTINCT 
-    *
-FROM 
-    clean
-''')
+    # ------------------------------------------------------------------
+    # [2/4] Clean
+    # ------------------------------------------------------------------
+    print('\n[2/4] Cleaning...')
+    removed = build_clean_table(con)
+    for reason, n in removed.items():
+        print(f'  removed {n:>9,}  {reason}')
 
+    # ------------------------------------------------------------------
+    # [3/4] Quality report
+    # ------------------------------------------------------------------
+    print('\n[3/4] Quality report...')
+    report = quality_report(con, MIN_HISTORY)
+    print(f'  {report["n_rows"]:,} rows, {report["n_tickers"]} tickers, {report["n_dates"]} dates '
+          f'({report["first_date"]} to {report["last_date"]})')
+    for key, text in [
+        ('high_below_low', 'rows with high < low'),
+        ('open_outside_range', 'rows with the open outside [low, high]'),
+        ('adj_factor_above_one', 'rows with close / close_raw > 1.001'),
+        ('short_history', f'tickers with fewer than {MIN_HISTORY} rows'),
+    ]:
+        flag = '' if report[key] == 0 else '   <-- look at it'
+        print(f'  {report[key]:>9,}  {text}{flag}')
 
-#  Sort by ticker and date, and write the final parquet file to OUT_DIR
-con.execute(f'''
-COPY(
-    SELECT 
-        *
-    FROM 
-        clean
-    ORDER BY 
-        ticker, date
-)
-TO '{OUT_DIR}/ohlcv.parquet'
-(FORMAT PARQUET);
-''')
+    # ------------------------------------------------------------------
+    # [4/4] Save
+    # ------------------------------------------------------------------
+    print('\n[4/4] Saving...')
+    write_parquet(con, out_file)
+    with open(out_file.parent / 'config.json', 'w') as f:
+        json.dump({
+            'run_timestamp': datetime.now().isoformat(),
+            'source': paths.source,
+            'raw_dir': str(raw_dir),
+            'output_file': out_file.name,
+            'output_hash': file_hash(out_file),
+            'git_commit': get_git_commit(ROOT),
+            'n_raw_rows': n_raw,
+            'removed': removed,
+            'quality': report,
+        }, f, indent=2, default=str)
+    print(f'  ohlcv: {out_file}')
+    print(f'\nDone in {time.time() - start:.1f} s.')
+    print('Next: python scripts/pipeline/03_build_features.py')
 
 
-
-# Save config
-import json
-config = {
-    'run_date': RUN_DATE,
-    'signal_tag': SIGNAL_TAG,
-    'source': 'yfinance',
-    'start_date': '2000-01-01',
-    'raw_dir': str(RAW_DIR),
-    'output_file': 'ohlcv.parquet',
-}
-with open(OUT_DIR / 'config.json', 'w') as f:
-    json.dump(config, f, indent=2)
-
-print(f"Saved to {OUT_DIR}/ohlcv.parquet")
-print(f"Config saved to {OUT_DIR}/config.json")
+if __name__ == '__main__':
+    main()
