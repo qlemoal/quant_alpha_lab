@@ -4,6 +4,8 @@
 Phase 08: Construct Portfolio Weights
 ===============================================
 
+TODO: Parallelise the construction of weights, as in 07, even if not that long to finish.
+
 QUESTION ANSWERED
     "At each rebalance date, how much capital goes long or short in each stock?"
 

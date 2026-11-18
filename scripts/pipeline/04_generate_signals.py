@@ -60,6 +60,8 @@ OUTPUTS   {clean_base}/signals/{run_id}/
 
 USAGE
     python scripts/pipeline/04_generate_signals.py --date 2026-11-07 --tag default
+    Add --cheat to add cheating signals (tag must contain 'cheat')
+
 '''
 
 import argparse
