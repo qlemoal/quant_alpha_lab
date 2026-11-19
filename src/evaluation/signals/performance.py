@@ -80,6 +80,8 @@ def sharpe_ratio(returns, periods_per_year: int = 252, horizon: int = 1):
 
         Sharpe = mean(r) / std(r) * sqrt(periods_per_year / horizon)
 
+        Note: predicted Sharpe for a given IC: IC × √(N_assets × 252/horizon)
+
     returns:  one value per date. Each value is a return over `horizon` days.
               (overlapping windows are fine: the mean and the std of an h-day return are still valid)
     horizon:  h of the label. 1 = daily returns (no rescaling).

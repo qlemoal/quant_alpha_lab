@@ -1,0 +1,107 @@
+{
+  "full": {
+    "start": "2001-01-08",
+    "end": "2026-11-16",
+    "n_days": 6503.0,
+    "years": 25.81,
+    "ann_return": 0.10557157716529564,
+    "ann_vol": 0.11108737829784349,
+    "sharpe": 0.9591231019982309,
+    "sharpe_ci95": [
+      0.4929258282618469,
+      1.425320375734615
+    ],
+    "sharpe_gross": 1.4496618882544545,
+    "max_drawdown": -0.24593830990908072,
+    "calmar": 0.42926039950556577,
+    "hit_rate": 0.5206827618022452,
+    "long_contribution_ann": 0.28339053581179646,
+    "short_contribution_ann": -0.12233658171917376,
+    "market_beta": 0.3041684481436257,
+    "market_corr": 0.530815648798772,
+    "n_rebalances": 1350.0,
+    "avg_turnover_per_rebalance": 0.4116098496301583,
+    "annual_turnover": 21.53308793544208,
+    "annual_cost_bps": 544.4582720315906,
+    "avg_gross_exposure": 2.5192496208320696,
+    "avg_untradable_names": 0.0,
+    "sharpe_vs_cost_multiplier": {
+      "0x": 1.4496618882544545,
+      "1x": 0.9591231019982309,
+      "2x": 0.4663741989178779,
+      "3x": -0.02192757474909492
+    },
+    "ex_ante_vol": 0.09863138230025253,
+    "realised_over_ex_ante_vol": 1.1262883648905229
+  },
+  "pre_holdout": {
+    "start": "2001-01-08",
+    "end": "2025-12-30",
+    "n_days": 6282.0,
+    "years": 24.93,
+    "ann_return": 0.10664417276848304,
+    "ann_vol": 0.11087860397796911,
+    "sharpe": 0.9694705730369946,
+    "sharpe_ci95": [
+      0.4935256736825783,
+      1.4454154723914108
+    ],
+    "sharpe_gross": 1.468056717480114,
+    "max_drawdown": -0.24593830990908072,
+    "calmar": 0.4336216379136199,
+    "hit_rate": 0.521808341292582,
+    "long_contribution_ann": 0.28373173553101827,
+    "short_contribution_ann": -0.12092825028569487,
+    "market_beta": 0.3014034400145809,
+    "market_corr": 0.5328689171921691,
+    "n_rebalances": 1304.0,
+    "avg_turnover_per_rebalance": 0.4107992183917642,
+    "annual_turnover": 21.488683469799565,
+    "annual_cost_bps": 552.458198470428,
+    "avg_gross_exposure": 2.5196062995660125,
+    "avg_untradable_names": 0.0,
+    "sharpe_vs_cost_multiplier": {
+      "0x": 1.468056717480114,
+      "1x": 0.9694705730369946,
+      "2x": 0.4685276539923991,
+      "3x": -0.02781735027340515
+    },
+    "ex_ante_vol": 0.09863138230025253,
+    "realised_over_ex_ante_vol": 1.1241716519842917
+  },
+  "holdout": {
+    "start": "2025-12-31",
+    "end": "2026-11-16",
+    "n_days": 221.0,
+    "years": 0.88,
+    "ann_return": 0.07551362698735131,
+    "ann_vol": 0.11711762246461702,
+    "sharpe": 0.6798772161730269,
+    "sharpe_ci95": [
+      -1.642377125212417,
+      3.002131557558471
+    ],
+    "sharpe_gross": 0.9525492012645959,
+    "max_drawdown": -0.07391015645106525,
+    "calmar": 1.0216948605344611,
+    "hit_rate": 0.48868778280542985,
+    "long_contribution_ann": 0.273691818001158,
+    "short_contribution_ann": -0.16236888065634356,
+    "market_beta": 0.5266654570284713,
+    "market_corr": 0.5252135777344084,
+    "n_rebalances": 46.0,
+    "avg_turnover_per_rebalance": 0.4345894829968082,
+    "annual_turnover": 22.795299940719463,
+    "annual_cost_bps": 317.05764810047293,
+    "avg_gross_exposure": 2.5091385541133433,
+    "avg_untradable_names": 0.0,
+    "sharpe_vs_cost_multiplier": {
+      "0x": 0.9525492012645959,
+      "1x": 0.6798772161730269,
+      "2x": 0.40789057047754634,
+      "3x": 0.1375240387846977
+    },
+    "ex_ante_vol": 0.09863138230025253,
+    "realised_over_ex_ante_vol": 1.1874275685206244
+  }
+}
