@@ -41,12 +41,16 @@ THE CLOCK
     The signal of row t uses data up to the close of day t.
     The label of row t is the return from the open of t+1 to the open of t+1+h. It uses only later prices.
 
-CHEATING SIGNALS (a benchmark, option --cheat)
-    python scripts/pipeline/04_generate_signals.py --date 2026-11-14 --tag cheat --cheat
-    adds signals built from the FUTURE return plus noise, with a known IC (CHEAT_SIGNALS below).
-    They show what 05, 06 and 09 do with a signal of a known strength. See src/signals/cheat.py.
-    The tag MUST contain the word "cheat", so that a cheat run never replaces a real run.
-    Never quote a result of a cheat run as a strategy result.
+BENCHMARK SIGNALS (two options, both for testing the pipeline, never for a strategy)
+    --cheat     python scripts/pipeline/04_generate_signals.py --date 2026-11-07 --tag cheat --cheat
+                adds signals built from the FUTURE return plus noise, with a known IC (CHEAT_SIGNALS below).
+                They show what 05, 06 and 09 do with a signal of a known strength.
+                The tag MUST contain the word "cheat".
+    --placebo   python scripts/pipeline/04_generate_signals.py --date 2026-11-07 --tag placebo --placebo
+                adds PLACEBO_COUNT signals of pure noise (true IC = 0). No return is used.
+                A sound pipeline selects none of them, and gives them no weight in 06. The tag MUST contain "placebo".
+    Both:       --tag cheat_placebo --cheat --placebo
+    See src/signals/cheat.py. Never quote a result of such a run as a strategy result.
 
 HOW TO ADD A SIGNAL
     Add one line to SIGNAL_SPECS: (feature column, transform, parameters). Then run 04, 05, ...
@@ -60,8 +64,6 @@ OUTPUTS   {clean_base}/signals/{run_id}/
 
 USAGE
     python scripts/pipeline/04_generate_signals.py --date 2026-11-07 --tag default
-    Add --cheat to add cheating signals (tag must contain 'cheat')
-
 '''
 
 import argparse
@@ -81,7 +83,7 @@ from src.signals.signal_pipeline import (
     validate_specs, clean_features, build_signals, add_labels, restrict_dates,
     check_labels, calendar_gaps, signal_descriptives, signal_warnings,
 )
-from src.signals.cheat import add_cheat_signals, validate_cheat_specs
+from src.signals.cheat import add_cheat_signals, add_placebo_signals, validate_cheat_specs, check_benchmark_tag
 from src.utils.helpers import get_git_commit, get_git_diff, file_hash, params_hash
 
 
@@ -135,24 +137,31 @@ DATE_START = None
 DATE_END = None
 
 # Cheating signals, added ONLY with the option --cheat. One line per signal: (label horizon, wanted rank IC).
-#   IC 0.02 weak (a typical real signal)   0.05 good   0.10 strong   0.30 very strong   0.90 near-perfect (max 0.99)
-# The horizon must be in HORIZONS. The column name is cheat_h{horizon}_ic{IC x 1000}, for example cheat_h20_ic050.
+#   IC 0.01 very weak   0.02 weak (a typical real signal)   0.03 and 0.05 good   0.10 strong   0.30 very strong
+#   (max 0.99). The horizon must be in HORIZONS. The column name is cheat_h{horizon}_ic{IC x 1000}, e.g. cheat_h20_ic050.
 CHEAT_SIGNALS = [
+    (20, 0.01),
     (20, 0.02),
+    (20, 0.03),
     (20, 0.05),
-    (20, 0.10),
-    (20, 0.30),
 ]
 CHEAT_SEED = 0                  # another seed gives another draw of the noise
+CHEAT_NOISE_DAYS = 20           # 1 = new noise every day. 20 = noise that changes slowly, like a real signal.
+                                # A persistent signal trades less, and its IC series has fewer independent dates.
+
+# Placebo signals, added ONLY with the option --placebo: how many signals of pure noise (placebo_01, ...).
+# They count as tests in the false discovery rate, like every signal you try. About 20 is a good size:
+# at a 5% level, 1 of them is expected to look significant by chance, and no more.
+PLACEBO_COUNT = 20
+PLACEBO_SEED = 0
+PLACEBO_NOISE_DAYS = [1, 5, 20, 60]   # the placebos use these persistences in turn (fast junk and slow junk)
 
 MAX_MISSING_SHARE = 0.01        # warn if more than 1% of the expected (ticker, date) rows are missing
 
 
-def main(run_date: str, tag: str, cheat: bool = False):
+def main(run_date: str, tag: str, cheat: bool = False, placebo: bool = False):
     start = time.time()
-    if cheat and 'cheat' not in tag.lower():
-        raise ValueError(f'--cheat needs a tag that contains "cheat" (got {tag!r}). '
-                         f'Example: --tag cheat. This keeps cheat runs apart from real runs.')
+    check_benchmark_tag(tag, cheat, placebo)       # a run with benchmark signals must say so in its tag
     cheat_specs = validate_cheat_specs(CHEAT_SIGNALS, HORIZONS) if cheat else []
     run_id = run_id_from_args(run_date, tag)
     cfg = get_paths(run_id=run_id)
@@ -171,6 +180,8 @@ def main(run_date: str, tag: str, cheat: bool = False):
     print(f'Horizons:  {HORIZONS}')
     if cheat:
         print('\n  *** CHEAT RUN: the cheat signals use FUTURE returns. Benchmark only, not a strategy. ***\n')
+    if placebo:
+        print(f'  *** PLACEBO RUN: {PLACEBO_COUNT} signals of pure noise are added (true IC = 0). ***\n')
     print(f'Dates:     {DATE_START or "first"} to {DATE_END or "last"}')
 
     # ------------------------------------------------------------------
@@ -199,13 +210,19 @@ def main(run_date: str, tag: str, cheat: bool = False):
     lf, label_cols = add_labels(lf, HORIZONS)
     cheat_cols = []
     if cheat:
-        lf, cheat_cols = add_cheat_signals(lf, cheat_specs, seed=CHEAT_SEED)      # needs the labels, so after them
+        lf, cheat_cols = add_cheat_signals(lf, cheat_specs, seed=CHEAT_SEED, noise_days=CHEAT_NOISE_DAYS)      # needs the labels, so after them
         signal_cols = signal_cols + cheat_cols
+    placebo_cols = []
+    if placebo:
+        lf, placebo_cols = add_placebo_signals(lf, PLACEBO_COUNT, seed=PLACEBO_SEED, noise_days=PLACEBO_NOISE_DAYS)
+        signal_cols = signal_cols + placebo_cols
     for s in signal_cols:
         print(f'  {s}')
     print(f'  labels: {label_cols}')
     if cheat:
         print(f'  cheat signals: {cheat_cols}')
+    if placebo:
+        print(f'  placebo signals: {placebo_cols[0]} ... {placebo_cols[-1]} ({len(placebo_cols)})')
 
     output_cols = ['date', 'ticker'] + signal_cols + label_cols
     df = lf.select(output_cols).collect()
@@ -256,6 +273,11 @@ def main(run_date: str, tag: str, cheat: bool = False):
         'cheat_specs': cheat_specs,
         'cheat_cols': cheat_cols,
         'cheat_seed': CHEAT_SEED if cheat else None,
+        'cheat_noise_days': CHEAT_NOISE_DAYS if cheat else None,
+        'placebo': placebo,
+        'placebo_cols': placebo_cols,
+        'placebo_seed': PLACEBO_SEED if placebo else None,
+        'placebo_noise_days': PLACEBO_NOISE_DAYS if placebo else None,
         'horizons': HORIZONS,
         'date_start': DATE_START,
         'date_end': DATE_END,
@@ -268,7 +290,9 @@ def main(run_date: str, tag: str, cheat: bool = False):
         'git_diff': get_git_diff() or None,
         'features_file': str(cfg.features_file),
         'features_hash': file_hash(cfg.features_file),
-        'params_hash': params_hash([SIGNAL_SPECS, HORIZONS, DATE_START, DATE_END, cheat_specs, CHEAT_SEED if cheat else None]),
+        'params_hash': params_hash([SIGNAL_SPECS, HORIZONS, DATE_START, DATE_END, cheat_specs, CHEAT_SEED if cheat else None,
+                                    CHEAT_NOISE_DAYS if cheat else None, PLACEBO_COUNT if placebo else None,
+                                    PLACEBO_SEED if placebo else None, PLACEBO_NOISE_DAYS if placebo else None]),
         'script_path': str(Path(__file__).resolve()),
         # statistics that use NO returns
         'signal_stats': stats,
@@ -291,5 +315,7 @@ if __name__ == '__main__':
     parser.add_argument('--tag', type=str, default='default', help='Run tag (default: default)')
     parser.add_argument('--cheat', action='store_true',
                         help='Add the cheating benchmark signals (CHEAT_SIGNALS). The tag must contain "cheat".')
+    parser.add_argument('--placebo', action='store_true',
+                        help='Add PLACEBO_COUNT signals of pure noise (true IC = 0). The tag must contain "placebo".')
     args = parser.parse_args()
-    main(args.date, args.tag, args.cheat)
+    main(args.date, args.tag, args.cheat, args.placebo)

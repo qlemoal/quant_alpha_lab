@@ -400,17 +400,139 @@ The "ADV effect" is actually: **"among S&P 500 survivors, mega-caps (higher ADV)
 
 ---
 
+## 2026-11-19: Benchmark signals (cheat and placebo): what the first cheat run showed
+
+### Test
+First end-to-end run with cheating signals on the real data (run `2026-11-07_cheat`, 513 tickers, 2000 to 2026): four signals built from the future return plus noise, with a wanted rank IC of 0.02, 0.05, 0.10 and 0.30, next to the 15 real signals.
+
+### Finding
+1. **The chain recovers a planted signal.** Measured IC: 0.0202, 0.0503, 0.0995, 0.2996.
+2. **The combiner reaches the best possible IC.** The out-of-fold IC of the Elastic Net is 0.3167. Four independent cheats with these ICs give at best 0.3172 (optimal linear combination, normal variables, Spearman). The real signals add about nothing.
+3. **Real signals keep non-zero weights.** The Elastic Net chose `l1_ratio` = 0.05 (the lowest value of the grid, almost ridge) and `alpha` = 0.0024. 15 of 17 coefficients are non-zero. The real ones are at least 16 times smaller than the cheat with IC 0.30 (largest real: log_adv20, −0.0014, against +0.0223). They are economically irrelevant, but not zero.
+4. **Selection by the FDR step was generous.** 17 of 19 signals were selected at q < 0.2, among them vol60 to vol252 (Newey-West t 2.2 to 2.4, non-overlapping t 1.9 to 2.3), which are marginal. Most real signals are in the same few families (vol5 to vol252, log_adv10 to 60), so they are not independent tests.
+
+### Why the benchmark can mislead
+- **Dilution.** A step-up FDR procedure (BH, BY) compares the p-value of rank k with `k × alpha / m`. Signals that are surely true raise k for everybody. The same share of false discoveries then allows more weak signals. A unit test shows a signal with p = 0.04 that is rejected alone and accepted next to four sure signals. A cheat run therefore selects more real signals than a real run would. Stage 05 now prints the selection of the real signals with and without the benchmarks.
+- **The opposite effect.** Useless tests make `m` larger and every threshold stricter. Placebo signals have this cost. It is also printed.
+- **A strong cheat hides everything else.** With a cheat of IC 0.30 in the model, the optimum puts about no weight on any other signal, real or not. This run cannot tell whether real signals are discarded for the right reason. The placebo run can.
+- **A noise that is new every day is not a realistic signal.** The first cheat noise was independent across dates. The IC series was almost independent from day to day (Newey-West t of 534 against a non-overlapping t of 129 for IC 0.30) and the signal reshuffled daily: one-way turnover 2.47 of NAV per week, 127 times per year, 5460 bps of cost per year. Real signals are persistent. The noise is now an average of the last k daily draws (`CHEAT_NOISE_DAYS`, default 20).
+- **The weak cheats are weaker now.** 0.01, 0.02, 0.03 and 0.05 replace 0.02 to 0.30. 0.30 is far above any real signal.
+
+### Implication
+Use placebo signals to measure false discoveries. Use cheats of realistic strength (0.01 to 0.05) to measure power, and compare with real signals only in runs where the benchmark does not dominate. Never quote a cheat run as a result.
+
+### Files
+- `src/signals/cheat.py`, `src/evaluation/signals/benchmarks.py`
+- `scripts/pipeline/04_generate_signals.py` (`--cheat`, `--placebo`), `05_evaluate_signals.py`, `06_fit_combiner.py`
+- `tests/test_cheat.py`, `tests/test_benchmarks.py`
+
+---
+
+## 2026-11-19: Newey-West calibration on persistent null signals
+
+### Test
+Simulation: 2500 dates, 100 stocks, random-walk prices, 20-day overlapping labels. 100 placebo signals for each noise persistence (average of the last 5, 60 and 120 daily draws). Share of placebos with a Newey-West p-value below 5% and 10%.
+
+### Finding
+| Noise persistence | p < 0.05 | p < 0.10 |
+|---|---|---|
+| 5 days | 4% | 5% |
+| 60 days | 7% | 14% |
+| 120 days | 6% | 16% |
+
+(100 placebos per row: the standard error is about 2 points at the 5% level.) The test is close to its level for fast signals, and a little liberal for very persistent null signals, mostly at the 10% level.
+
+### Implication
+The lag rule `max(1, 4 (n / 100)^(2/9), 2 (h − 1))` is acceptable, not conservative. Do not read a Newey-West t of 2 as strong evidence for a slow signal. Require the non-overlapping t-statistic to agree, and watch the placebos in real runs (`--placebo`).
+
+### Files
+- `src/evaluation/signals/ic/metrics.py`, `src/signals/cheat.py`
+
+---
+
+## 2026-11-19: Cluster caps are almost inert, and Louvain with the market mode merges sectors
+
+### Test
+(a) Real run: average number of Louvain clusters per date, and the leverage cap. (b) Simulation: 500 stocks, 10 sectors of 50, one market factor, 252 days. Louvain on the correlation matrix with the market mode, and with the first principal component removed. Resolution 1.0, 1.5 and 2.0. Adjusted Rand index (ARI) against the true sectors.
+
+### Finding
+- **Real run:** 3.1 clusters on average. The cap is `2 × gross / K` per cluster, so it is 67% of gross at K = 3, and 100% at K = 2 (no effect). The cap limits the **gross** exposure of a cluster, not its **net** exposure, so it does not prevent a long-only-tech, short-only-energy book.
+- **Simulation:** with the market mode, resolution 1.0 gives 8 clusters (two sectors merged, ARI 0.81), resolution 1.5 gives 14 or 256 clusters depending on the sector strength, and resolution 2.0 gives 212 to 466. The result depends strongly on the resolution. With the market mode removed: 10 clusters of 50 and ARI 1.00 at all three resolutions.
+
+### Implication
+Cluster the correlation **after removing the market mode** (the first eigenvector), then cap the **net** exposure of each cluster, or neutralise it. The module `src/risk/clustering.py` is still marked "NOT YET TESTED".
+
+### Files
+- `src/risk/clustering.py`, `src/risk/risk_model.py`, `src/risk/portfolio_construction.py`
+
+---
+
+## 2026-11-19: Why the holdout Sharpe of a cheat run was better than the earlier period
+
+### Test
+Run `2026-11-07_cheat`: gross and net Sharpe, turnover and cost, before the holdout (2001 to 2025) and in the holdout (2025-12-31 to 2026-11-16).
+
+### Finding
+| | Gross Sharpe | Net Sharpe | Cost per year | Turnover per year |
+|---|---|---|---|---|
+| Before holdout | 14.66 | 6.62 | 5569 bps | 127.8 |
+| Holdout | 13.77 | 11.59 | 2374 bps | 114.6 |
+
+The gross Sharpe is lower in the holdout. The net Sharpe is higher because the costs are lower. The likely cause: AUM is fixed at 100 million dollars for 25 years, and the impact term depends on the trade size relative to the average daily volume, which was much smaller in 2001 (to be checked with the per-year table). The 95% interval of the holdout Sharpe, [−5.7, 28.9], contains the earlier value.
+
+### Implication
+Costs must be read by era, or AUM must grow with the market. A holdout that looks better than the search period is not evidence of anything when the cost model changes with the era. Add a per-year table of gross Sharpe, cost and turnover to stage 09.
+
+### Files
+- `src/portfolio/weights_backtest.py`, `src/portfolio/costs.py`
+
+---
+
+## 2026-11-19: Risk calibration and leverage in the cheat run
+
+### Finding
+- Realised volatility is 1.57 to 1.68 times the ex-ante volatility (mean ex-ante 8.0%, realised 12.6% to 13.4%). Part of this is the cheat itself: a book built on the future return holds the stocks with the largest moves, and the risk model does not know it. The ratio must be checked again on a real run.
+- The leverage cap of 4 binds on 937 of 1346 rebalance dates, and the mean gross exposure is 3.66 (183% long and 183% short against NAV). A diversified dollar-neutral book has little volatility per unit of gross (here about 2.2%), so 10% volatility needs a gross of 3 to 5. That is why the mean ex-ante volatility (8%) is below the 10% target.
+
+### Implication
+Show, for every run, the share of dates where the cap binds, the volatility realised against the ex-ante volatility by year, and a rolling 63-day version. Decide whether a leverage cap of 4 is a real constraint (prime broker, margin) or a safety net.
+
+### Files
+- `src/risk/weights_pipeline.py`, `scripts/pipeline/08_construct_weights.py`, `scripts/pipeline/09_run_backtest.py`
+
+---
+
+## 2026-11-19: Data quality warnings from the first real run
+
+### Finding
+- 4 labels with |fwdret20| above 2 (a 20-day log return beyond a factor 7 or below 0.14), 3 for fwdret10 and 2 for fwdret5. The tickers and dates are not printed yet.
+- Ticker SW has 2745 missing dates inside its life. Labels shift by rows, so for SW the horizon is longer than 20 trading days.
+- Overall, 0.21% of the (ticker, date) rows inside the life of the tickers are missing.
+
+### Implication
+Adjusted prices remove splits and dividends, but not vendor errors, bad prints, symbol reuse or mergers under one symbol. Stage 02 needs a quality report per ticker (gaps, stale prices, extreme returns, price jumps without a matching split) with explicit exclusion rules, before the universe grows.
+
+### Files
+- `scripts/pipeline/02_etl_prices.py`, `src/data/prices_etl.py`, `scripts/pipeline/04_generate_signals.py`
+
+---
+
+
 ## Summary of Open Questions
 
 | # | Question | Priority | Owner |
 |---|----------|----------|-------|
-| 1 | What drives lags 15–16 and 32 autocorrelation? | Medium | Research |
-| 2 | Median imputation vs drop for missing signals in EN? | High | Engineering |
-| 3 | Iterative cluster cap redistribution needed? | Low | Research (wait for backtest) |
-| 4 | CPCV as default for EN hyperparameter search? | High | Engineering |
-| 5 | Point-in-time constituent list (free approx)? | High | Data |
-| 6 | Beta market proxy: SPY index vs EW biased universe? | High | Data |
-| 7 | Seasonality features (turn-of-month, earnings)? | Medium | Research |
-| 8 | Fundamentals integration (earnings, book value)? | Medium | Data/Engineering |
-
+| 01 | What drives lags 15–16 and 32 autocorrelation? | Medium | Research |
+| 02 | Median imputation vs drop for missing signals in EN? | High | Engineering |
+| 03 | Iterative cluster cap redistribution needed? | Low | Research (wait for backtest) |
+| 04 | CPCV as default for EN hyperparameter search? | High | Engineering |
+| 05 | Point-in-time constituent list (free approx)? | High | Data |
+| 06 | Beta market proxy: SPY index vs EW biased universe? | High | Data |
+| 07 | Seasonality features (turn-of-month, earnings)? | Medium | Research |
+| 08 | Fundamentals integration (earnings, book value)? | Medium | Data/Engineering |
+| 09 | Combiner: positive-sign Elastic Net, one-standard-error rule, IC-based cross-validation, signal families? Decide after the placebo run. | High | Research |
+| 10 | Cluster the correlation without the market mode, cap or neutralise the net cluster exposure? | High | Research |
+| 11 | Cost model by era (AUM growth, volume) and per-year Sharpe table in stage 09? | High | Engineering |
+| 12 | Quality stage for prices (gaps, jumps, stale, bad ticks) before widening the universe? | High | Data |
+| 13 | Entry price sensitivity: open of t+1 against close of t+1? | Medium | Research |
 ---

@@ -87,8 +87,10 @@ from src.models.elastic_net_combiner import (
     coefficient_stability_by_fold,
     combined_score_column,
     raw_unit_coefficients,
+    score_contributions,
 )
 from src.evaluation.signals.report import signal_report
+from src.signals.cheat import signal_group
 
 
 # =============================================================================
@@ -224,6 +226,19 @@ def main(date: str, tag: str = 'default'):
         raise ValueError('All coefficients are zero: the combined score would be constant. '
                          'The signals carry no usable information, or alpha is too large.')
 
+    # Role of each signal in the score: share of the score variance (the coefficient alone depends on units)
+    share = score_contributions(result, result['search_panel'])
+    group_share = {}
+    for k, v in share.items():
+        group_share[signal_group(k)] = group_share.get(signal_group(k), 0.0) + v
+    print('  share of the score variance, by signal:')
+    for k in sorted(share, key=lambda k: -abs(share[k])):
+        print(f'    {k:<28} {share[k]:+8.2%}')
+    print('  by group: ' + '   '.join(f'{g} {v:.2%}' for g, v in sorted(group_share.items())))
+    if group_share.get('placebo', 0.0) > 0.01:
+        print(f'  WARNING: placebo signals (pure noise) carry {group_share["placebo"]:.1%} of the score variance. '
+              f'The combiner fits noise. Use a stronger penalty or a stricter selection.')
+
     stability_df = coefficient_stability_by_fold(result, result['search_panel'])
     sign_flips = [k for k in signal_cols if (stability_df[k] > 1e-9).any() and (stability_df[k] < -1e-9).any()]
     zero_some = [k for k in nonzero if (stability_df[k].abs() <= 1e-9).any()]
@@ -308,6 +323,8 @@ def main(date: str, tag: str = 'default'):
             'l1_ratio': model.l1_ratio_,
             'coefficients_standardised': coef_std,
             'coefficients_raw_units': coef_raw,
+            'score_variance_share': share,
+            'score_variance_share_by_group': group_share,
             'intercept_raw_units': const_raw,
             'cv_method': 'cpcv',
             'n_blocks': EN_CONFIG['n_blocks'],

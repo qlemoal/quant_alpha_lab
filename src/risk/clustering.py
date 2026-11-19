@@ -1,5 +1,3 @@
-# NOT YET TESTED
-
 import numpy as np
 import polars as pl
 import networkx as nx

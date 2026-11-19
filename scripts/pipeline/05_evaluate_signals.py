@@ -38,7 +38,7 @@ Outputs:
     └── selected_signals.json   # List of signals passing FDR (for combiner)
 
 Usage:
-    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-07 --tag default --horizon 20 --alpha 0.2
+    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-06 --tag default --horizon 20 --alpha 0.2
 '''
 
 import argparse
@@ -63,6 +63,8 @@ from src.evaluation.signals.ic.metrics import (
     ic_tstat_non_overlapping,
 )
 from src.evaluation.signals.fdr import fdr_report
+from src.evaluation.signals.benchmarks import benchmark_report, format_benchmark_report
+from src.signals.cheat import signal_group
 
 
 def _fmt(x, spec):
@@ -215,12 +217,29 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
     )
     fdr_pl.write_parquet(OUTPUT_DIR / 'fdr_report.parquet')
 
+    # Benchmark signals (cheat, placebo)? Then also test the real signals ALONE, to see what the benchmarks change.
+    fdr_real = None
+    real_names = [s for s in ic_df['signal'].to_list() if signal_group(s) == 'real']
+    if len(real_names) < ic_df.height:
+        keep = ic_df['signal'].is_in(real_names)
+        fdr_real = fdr_report(
+            signal_names=ic_df.filter(keep)['signal'].to_list(),
+            tstats=[float('nan') if x is None else x for x in ic_df.filter(keep)['nw_tstat'].to_list()],
+            pvalues=[float('nan') if x is None else x for x in ic_df.filter(keep)['p_value'].to_list()],
+            alpha=alpha,
+        )
+    bench = benchmark_report(fdr_pl, fdr_real, alpha)
+
     n_bh = int(fdr_pl['survives_bh'].sum())
     n_by = int(fdr_pl['survives_by'].sum())
     n_q = int((fdr_pl['qvalue'] < alpha).sum())
     print(f'  BH survivors:      {n_bh:3d} / {len(fdr_pl)}')
     print(f'  BY survivors:      {n_by:3d} / {len(fdr_pl)}')
     print(f'  q-value survivors: {n_q:3d} / {len(fdr_pl)} (q < {alpha})')
+    if bench:
+        print()
+        for line in format_benchmark_report(bench):
+            print(line)
 
     # ------------------------------------------------------------------
     # [5/5] Selection for the combiner
@@ -263,6 +282,7 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
         'selected_signals': selected,
         'ic_summary': ic_df.to_dicts(),
         'fdr_summary': {'bh': n_bh, 'by': n_by, 'qvalue': n_q},
+        'benchmark_report': bench,
         'config': config,
     }
     with open(OUTPUT_DIR / 'signal_report.json', 'w') as f:

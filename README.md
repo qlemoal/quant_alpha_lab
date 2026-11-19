@@ -143,18 +143,27 @@ python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default --only
 pytest -q                                        # unit and regression tests, a few seconds
 ```
 
-### Benchmark with cheating signals
+### Benchmarks: cheating signals and placebo signals
 
-To check what the pipeline does with a signal of a **known** strength, add signals built from the future return plus noise:
+Two options test the pipeline itself, with signals whose true strength is **known**:
 
 ```bash
-python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag cheat --cheat
+python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag placebo --placebo           # 20 signals of pure noise
+python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag cheat --cheat               # future return + noise
+python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag cheat_placebo --cheat --placebo
 ```
 
-- Edit `CHEAT_SIGNALS` in `04_generate_signals.py`: one line `(horizon, rank IC)`, for example `(20, 0.05)`. Typical real signal: 0.02. Very strong: 0.30.
-- The tag **must** contain `cheat`, so that a cheat run never replaces a real run.
-- A cheat run is a sanity check of the chain (selection, combiner, costs). It is **not** a strategy: it uses the future.
-- Each cheat signal has its own independent noise (`src/signals/cheat.py`, tested). With a shared noise a linear model could cancel it and rebuild the future return.
+| Option | What is added | What it checks |
+|---|---|---|
+| `--placebo` | `PLACEBO_COUNT` signals of pure noise (true IC = 0, no return used) | Stage 05 must select none of them. Stage 06 must give them no weight. About 1 in 20 may look significant at the 5% level by chance. |
+| `--cheat` | signals built from the **future** return plus noise, with a known IC (`CHEAT_SIGNALS`: 0.01, 0.02, 0.03, 0.05) | Does the chain find a signal of a known strength, and what Sharpe does it give after costs? |
+
+- Edit `CHEAT_SIGNALS`, `PLACEBO_COUNT` and the noise persistence in `04_generate_signals.py`. Typical real signal: IC 0.02.
+- The tag **must** contain `cheat` or `placebo`, so that a benchmark run never replaces a real run.
+- A cheat run is a sanity check of the chain. It is **not** a strategy: it uses the future.
+- The noise of every signal is independent (`src/signals/cheat.py`, tested). With a shared noise, a linear model could cancel it and rebuild the future return.
+- The noise changes slowly (`CHEAT_NOISE_DAYS = 20`, placebos 1 to 60 days), like a real signal. With a new noise every day, the signal would reshuffle daily and look too significant.
+- Stage 05 prints how many placebos were selected, and how the real signals' selection changes with and without the benchmarks (an FDR step lets more weak signals pass when sure signals are in the family). Stage 06 prints the share of the score variance by group.
 
 Read the **HOLDOUT** block printed by stage 09. It gives the net Sharpe, its 95% interval, the annual return, the drawdown, the market beta and the Sharpe at higher costs.
 
@@ -295,8 +304,9 @@ quant_alpha_lab/
 │   ├── data/                download.py, prices_etl.py                       stages 01, 02
 │   ├── features/            returns, momentum, volatility, adv, beta         stage 03
 │   ├── signals/             combine, normalize, ranking, signal_pipeline,    stage 04
-│   │                        cheat (benchmark signals with a known IC)
-│   ├── evaluation/signals/  ic/, FDR.py, performance.py, report.py           stage 05
+│   │                        cheat (benchmark signals: known IC, placebo)
+│   ├── evaluation/signals/  ic/, FDR.py, performance.py, report.py,          stage 05
+│   │                        benchmarks.py (reads cheat and placebo signals)
 │   ├── validation/          cpcv.py (+ PBO), walk_forward_cv.py
 │   ├── models/              elastic_net_combiner.py (06), gbm_combiner.py
 │   ├── risk/                risk_model, covariance, correlation_cleaning,    stages 07, 08

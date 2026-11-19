@@ -147,6 +147,41 @@ flowchart LR
 
 It never computes a return-based statistic of a signal. Looking at IC over all dates here would let the holdout influence which signals you decide to build. The descriptive statistics (null share, mean, std, names per date) use no returns.
 
+
+### 4.4 Benchmark signals: cheat and placebo (options of stage 04)
+
+Two kinds of signal have a **known** true strength. They test the pipeline, not the market.
+
+```mermaid
+flowchart TB
+    subgraph CH["CHEAT: uses the future"]
+        direction LR
+        F["fwdret h<br/>rank across stocks"] --> Z["normal scores z"] --> S1["rho · z + sqrt(1 − rho²) · noise"]
+    end
+    subgraph PL["PLACEBO: uses nothing"]
+        direction LR
+        N2["noise only<br/>N(0, 1) per stock and date"] --> S2["true IC = 0"]
+    end
+    S1 --> P["same pipeline<br/>stages 05 to 09"]
+    S2 --> P
+    P --> Q["Is the IC found = the IC planted?<br/>Is any placebo selected, or weighted?"]
+```
+
+- **Cheat:** `signal = rho × z + sqrt(1 − rho²) × noise`, with `rho = 2 sin(pi × IC / 6)`, so that the **rank** correlation with the forward return is the wanted IC. IC 1 is refused: the IC would be the same every day, and its t-statistic would not exist.
+- **Placebo:** pure noise, no return used. Its true IC is 0. Over many placebos, about 5% should have p < 0.05, and after the FDR step almost none should be selected.
+- **Independent noise for each signal.** With one shared noise, a linear model subtracts one cheat from another, removes the noise and finds the future return exactly (IC = 1). A test guards this.
+- **Persistent noise** (`noise_days = k`): the noise is the average of the last k daily draws. A real signal changes slowly, so its IC series is autocorrelated and its turnover is moderate. A noise that is new every day gives a huge t-statistic (almost independent daily ICs) and a huge turnover. Placebos mix fast and slow noise (1, 5, 20 and 60 days): slow junk is the case where a wrong Newey-West lag gives false discoveries.
+- **Tags:** a run with cheat signals needs `cheat` in its tag, a run with placebos needs `placebo`.
+
+**What stages 05 and 06 print for them**
+
+| Stage | Output |
+|---|---|
+| 05 | Placebos selected, and placebos with raw p < 0.05 against the 5% expected by chance. The real signals' selection **inside the full family** against **alone**. |
+| 06 | Share of the score variance by signal and by group (real, cheat, placebo). A warning if placebos carry more than 1%. |
+
+**Dilution.** The FDR step controls the *share* of false signals among the selected ones. If sure signals are in the family, the same share allows more weak signals to pass: the threshold of rank k is `k × alpha / m`, and k includes the sure signals. The opposite also happens: many useless tests (placebos) make `m` larger and every threshold stricter. The report shows both effects.
+
 ---
 
 ## 5. Signal evaluation (stage 05)

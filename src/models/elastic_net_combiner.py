@@ -1,5 +1,5 @@
 '''
-GOAL: combine several already-evaluated candidate signals (the survivors of 04b: IC + Newey-West + FDR)
+GOAL: combine several already-evaluated candidate signals (the survivors of 05: IC + Newey-West + FDR)
     into ONE score, using an Elastic Net regression against forward returns.
     The hyper-parameters (alpha, l1_ratio) are chosen with the leakage-safe combinatorial purged CV
     (src/validation/cpcv.py), NOT with sklearn's random k-fold (which would leak overlapping labels).
@@ -204,6 +204,27 @@ def _prepare_X(panel: pl.DataFrame, fit_result: dict) -> np.ndarray:
     return X * fit_result['col_weights'][np.newaxis, :]
 
 
+def score_contributions(fit_result: dict, panel: pl.DataFrame) -> "dict[str, float]":
+    '''
+    Share of the variance of the combined score that each signal brings: Cov(term_j, score) / Var(score).
+    term_j = coefficient_j x (standardised, q-weighted signal j). The shares add up to 1 (they can be
+    negative for a signal that hedges the others). This is a better size of a signal's role than its
+    coefficient: the coefficient depends on the units, the share does not.
+    Rows with a missing signal are ignored. Returns {signal: share}; all zeros if the score is constant.
+    '''
+    X = _prepare_X(panel, fit_result)
+    ok = np.isfinite(X).all(axis=1)
+    terms = X[ok] * fit_result['model'].coef_[np.newaxis, :]
+    score = terms.sum(axis=1)
+    var = float(score.var())
+    cols = fit_result['signal_cols']
+    if var <= 0 or len(score) < 2:
+        return {c: 0.0 for c in cols}
+    centred = terms - terms.mean(axis=0)
+    cov = (centred * (score - score.mean())[:, np.newaxis]).mean(axis=0)
+    return {c: float(v / var) for c, v in zip(cols, cov)}
+
+
 # =============================================================================
 # STEP 4: fit (hyper-parameters chosen with the project's own CV folds)
 # =============================================================================
@@ -394,7 +415,7 @@ def run_en_combiner(
     '''
     CPCV search + untouched holdout.
 
-    Date layout (same rule as 04b, so both stages cut at the same date):
+    Date layout (same rule as 05, so both stages cut at the same date):
 
         |------------ search_panel ------------|--- gap ---|------ holdout ------|
         dates <= gap_cutoff                      embargo_w     last `holdout_dates`
