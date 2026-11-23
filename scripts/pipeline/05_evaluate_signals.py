@@ -1,11 +1,18 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 05: Evaluate Signals (IC, FDR, Decay)
+Phase 05: Evaluate Signals and Select (strict gates)
 ===============================================
 
-Evaluates generated signals: Rank IC, Newey-West, IC decay, FDR (BH/BY/q-value).
-Produces a report and a filtered signal list for the combiner.
+Evaluates generated signals: Rank IC, Newey-West, IC decay, FDR (BH/BY/q-value), deflated Sharpe.
+Then it ADMITS a signal to the combiner only if it passes every gate (src/evaluation/signals/selection.py):
+
+    prior -> sign -> Newey-West t >= 3 -> non-overlapping t >= 2 -> q < 0.05 -> deflated Sharpe >= 0.95
+
+The priors (family, sign, rationale) are written in src/signals/priors.py BEFORE the data are seen.
+The default mode is 'strict'. The old rule (q < --alpha only) is kept as --mode legacy, for exploration:
+a legacy selection is NOT evidence of a strategy.
+Admitting no signal is a valid result. It means the data show no robust signal.
 
 WHAT CHANGED vs the previous version (and why)
 ----------------------------------------------
@@ -34,11 +41,13 @@ Outputs:
     ├── ic_summary.parquet      # Per-signal IC stats (training dates only)
     ├── ic_decay.parquet        # IC vs horizon (training dates only)
     ├── fdr_report.parquet      # BH, BY, q-value per signal
+    ├── selection_gates.parquet # one row per signal: statistics, one pass/fail per gate, first failed gate
     ├── signal_report.json      # Human-readable summary
-    └── selected_signals.json   # List of signals passing FDR (for combiner)
+    └── selected_signals.json   # Admitted signals + family and sign of each (for the combiner)
 
 Usage:
-    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-06 --tag default --horizon 20 --alpha 0.2
+    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-06 --tag default --horizon 20
+    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-06 --tag default --mode legacy --alpha 0.2
 '''
 
 import argparse
@@ -64,7 +73,10 @@ from src.evaluation.signals.ic.metrics import (
 )
 from src.evaluation.signals.fdr import fdr_report
 from src.evaluation.signals.benchmarks import benchmark_report, format_benchmark_report
+from src.evaluation.signals.dsr import deflated_sharpe_table
+from src.evaluation.signals.selection import SelectionConfig, apply_gates, gate_summary, config_dict
 from src.signals.cheat import signal_group
+from src.signals.priors import priors_table
 
 
 def _fmt(x, spec):
@@ -75,7 +87,11 @@ def _fmt(x, spec):
 
 
 def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
-         min_ir: float = 0.0, holdout_dates: int = 200):
+         min_ir: float = 0.0, holdout_dates: int = 200, mode: str = 'strict',
+         selection: "SelectionConfig | None" = None):
+    if mode not in ('strict', 'legacy'):
+        raise ValueError(f"mode must be 'strict' or 'legacy', got {mode!r}")
+    selection = selection or SelectionConfig()
     run_id = run_id_from_args(date, tag)
     cfg = get_paths(run_id=run_id)
 
@@ -151,10 +167,12 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
     # ------------------------------------------------------------------
     print('\n[2/5] Computing Rank IC...')
     ic_results = []
+    ic_series = {}                                        # daily IC of each signal, for the deflated Sharpe
     for col in signal_cols:
         ic_df_col = compute_ic(df.lazy(), col, FWD_RET_COL).collect()   # one IC per date
         summary = summarize_ic(ic_df_col)
         ic_values = ic_df_col['ic'].to_numpy()
+        ic_series[col] = ic_values
 
         # Main test: Newey-West with lag >= 2(h-1), covers the label overlap
         nw_result = newey_west_ic_tstat(ic_values, horizon=horizon)
@@ -244,11 +262,44 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
     # ------------------------------------------------------------------
     # [5/5] Selection for the combiner
     # ------------------------------------------------------------------
-    selected = fdr_pl.filter(pl.col('qvalue') < alpha)['signal'].to_list()
-    if min_ir > 0:
-        before = len(selected)
-        selected = [s for s in selected if abs(ic_df.filter(pl.col('signal') == s)['ir'][0]) >= min_ir]
-        print(f'  After min_ic_ir filter: {len(selected)} (removed {before - len(selected)})')
+    names = ic_df['signal'].to_list()
+    meta = priors_table(names)                                          # family, sign, rationale (ex ante)
+    signs = {k: (v['sign'] if v else None) for k, v in meta.items()}
+    dsr_tab = deflated_sharpe_table(ic_series, signs, step=horizon, n_trials_extra=selection.n_trials_extra,
+                                   var_mode=selection.dsr_variance)
+    qmap = dict(zip(fdr_pl['signal'].to_list(), fdr_pl['qvalue'].to_list()))
+    stats = []
+    for row in ic_df.iter_rows(named=True):
+        k = row['signal']
+        stats.append({
+            'signal': k, 'sign': signs[k], 'family': meta[k]['family'] if meta[k] else None,
+            'mean_ic': row['mean_ic'], 'nw_tstat': row['nw_tstat'],
+            'nonoverlap_tstat': row['nonoverlap_tstat'], 'qvalue': qmap.get(k), 'dsr': dsr_tab[k]['dsr'],
+        })
+    gates = apply_gates(stats, selection)
+    gates.write_parquet(OUTPUT_DIR / 'selection_gates.parquet')
+    summary = gate_summary(gates)
+
+    if mode == 'strict':
+        print(f'  STRICT selection: {config_dict(selection)}')
+        print(f'  Trials in the deflated Sharpe: N = {len(signal_cols) + selection.n_trials_extra}, '
+              f'expected best luck SR0 = {next(iter(dsr_tab.values()))["sr0"]:.3f} per observation')
+        print('  Signals stopped by each gate: ' + ', '.join(f'{g} {n}' for g, n in summary.items() if g not in ('admitted', 'tested')))
+        selected = gates.filter(pl.col('selected'))['signal'].to_list()
+    else:
+        print(f'  LEGACY selection: q < {alpha} only. Exploration. This is NOT evidence of a strategy.')
+        selected = fdr_pl.filter(pl.col('qvalue') < alpha)['signal'].to_list()
+        if min_ir > 0:
+            before = len(selected)
+            selected = [s for s in selected if abs(ic_df.filter(pl.col('signal') == s)['ir'][0]) >= min_ir]
+            print(f'  After min_ic_ir filter: {len(selected)} (removed {before - len(selected)})')
+
+    print('\n  Gate table (aligned t = t x prior sign):')
+    for row in gates.sort('aligned_nw_t', descending=True, nulls_last=True).head(15).iter_rows(named=True):
+        flags = ''.join('Y' if row[f'pass_{g}'] else '.' for g in ('prior', 'sign', 't_nw', 't_nonov', 'fdr', 'dsr'))
+        print(f'    {row["signal"]:28s} [{flags}] t_nw {_fmt(row["aligned_nw_t"], "6.2f")}  t_no {_fmt(row["aligned_nonoverlap_t"], "6.2f")}'
+              f'  q {_fmt(row["qvalue"], "6.3f")}  DSR {_fmt(row["dsr"], "5.2f")}  {row["failed_gate"] or "ADMITTED"}')
+    print('    flags: prior sign t_nw t_nonov fdr dsr   (Y pass, . fail)')
 
     # Warn when the two tests disagree: sign of a possible overlap problem
     disagree = ic_df.filter(
@@ -259,7 +310,8 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
         print(f'  WARNING: selected but non-overlapping |t| < 1: {disagree}')
 
     if not selected:
-        print('  WARNING: no signal selected. 06 will have nothing to combine. Try a larger --alpha or more signals.')
+        print('  NO SIGNAL ADMITTED. 06 will stop. This is a valid result: no signal passed every gate.')
+        print('  To explore anyway (not evidence): --mode legacy, or lower a threshold on purpose and say so.')
 
     print(f'\n  Selected for combiner: {selected}')
 
@@ -272,6 +324,10 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
         'horizon': horizon,
         'n_signals': len(signal_cols),
         'fdr_alpha': alpha,
+        'selection_mode': mode,
+        'selection_config': config_dict(selection),
+        'gate_summary': summary,
+        'gates': gates.to_dicts(),
         'min_ic_ir': min_ir,
         'train_start': str(df['date'].min()),
         'train_end': str(train_end),
@@ -291,6 +347,9 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
     with open(OUTPUT_DIR / 'selected_signals.json', 'w') as f:
         json.dump({
             'signals': selected,
+            'mode': mode,                       # 06 uses the family combiner for 'strict', one-per-signal for 'legacy'
+            'signal_meta': {k: meta[k] for k in selected},    # family, sign, rationale of each admitted signal
+            'selection_config': config_dict(selection),
             'fwd_ret_col': FWD_RET_COL,
             'horizon': horizon,
             'train_end': str(train_end),        # 06 checks that it computes the same cut
@@ -309,9 +368,25 @@ if __name__ == '__main__':
     parser.add_argument('--date', required=True, help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
     parser.add_argument('--tag', type=str, default='default', help='Signal tag (default: default)')
     parser.add_argument('--horizon', type=int, default=20, help='Forward return horizon for evaluation')
-    parser.add_argument('--alpha', type=float, default=0.2, help='FDR alpha threshold')
+    parser.add_argument('--mode', choices=['strict', 'legacy'], default='strict',
+                        help="strict = all gates (default). legacy = q < --alpha only (exploration, not evidence)")
+    parser.add_argument('--alpha', type=float, default=0.2, help='FDR alpha for the report and for --mode legacy')
+    parser.add_argument('--min_t', type=float, default=SelectionConfig.min_t, help='strict: min aligned Newey-West t')
+    parser.add_argument('--min_nonoverlap_t', type=float, default=SelectionConfig.min_nonoverlap_t,
+                        help='strict: min aligned non-overlapping t')
+    parser.add_argument('--fdr_alpha', type=float, default=SelectionConfig.fdr_alpha, help='strict: q-value below this')
+    parser.add_argument('--min_dsr', type=float, default=SelectionConfig.min_dsr, help='strict: min deflated Sharpe')
+    parser.add_argument('--n_trials_extra', type=int, default=0,
+                        help='strict: signals tried and removed earlier (they count as trials in the deflated Sharpe)')
+    parser.add_argument('--dsr_variance', choices=['null', 'trials'], default='null',
+                        help="strict: variance of skill-less Sharpe ratios in the DSR. null = 1/(T-1) (default), trials = across the run's signals (stricter)")
+    parser.add_argument('--no_require_prior', action='store_true',
+                        help='strict: let signals without a prior skip gates 1 and 2 (exploration only)')
     parser.add_argument('--min_ir', type=float, default=0.0, help='Minimum |IC IR| for signal selection')
     parser.add_argument('--holdout_dates', type=int, default=200,
                         help='Number of final dates reserved for the 06 holdout (must match 06)')
     args = parser.parse_args()
-    main(args.date, args.tag, args.horizon, args.alpha, args.min_ir, args.holdout_dates)
+    sel = SelectionConfig(min_t=args.min_t, min_nonoverlap_t=args.min_nonoverlap_t, fdr_alpha=args.fdr_alpha,
+                          min_dsr=args.min_dsr, require_prior=not args.no_require_prior,
+                          n_trials_extra=args.n_trials_extra, dsr_variance=args.dsr_variance)
+    main(args.date, args.tag, args.horizon, args.alpha, args.min_ir, args.holdout_dates, args.mode, sel)

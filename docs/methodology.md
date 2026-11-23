@@ -186,6 +186,8 @@ flowchart TB
 
 ## 5. Signal evaluation (stage 05)
 
+> The selection rule (six gates: prior, sign, Newey-West t >= 3, non-overlapping t >= 2, q < 0.05, deflated Sharpe >= 0.95) and the family combination of stage 06 are described in [selection.md](selection.md).
+
 ```mermaid
 flowchart LR
     S["signals + labels<br/>search period only"] --> I["daily IC<br/>Spearman(signal, fwdret)"] --> N["IC series"]
@@ -278,6 +280,8 @@ A score for date d comes from models that never saw d (nor its overlapping neigh
 
 ## 8. Combination (stage 06)
 
+> Default mode after a strict 05: sign-aligned family scores, non-negative Elastic Net, one-standard-error rule, drop-one test. See [selection.md](selection.md). The text below describes the per-signal mode (`--combine signal`).
+
 ```mermaid
 flowchart TB
     SEL["selected signals<br/>(from 05)"] --> STD["standardise each signal<br/>(mean and std from the training rows)"]
@@ -357,9 +361,41 @@ Check: a simulation with a known covariance (error against the truth: shrunk ≈
 
 `Σ = D × C × D` with `D = diag(daily vol) × √252`. The diagonal of Σ equals the annualised stock variances. **A test checks this** (bug 7 returned C as if it were Σ).
 
-### 9.5 Louvain clusters
+### 9.5 Louvain clusters (what they are and why)
 
-Build a graph where the stocks are nodes and the edges are positive cleaned correlations. Louvain maximises modularity. There is **no k to choose**. The clusters are used in 08 as exposure caps.
+**Why clusters.** 500 stocks are not 500 independent bets. Banks move together, oil stocks move together, chip stocks move together. If the portfolio puts most of its risk in one such group, it makes a sector bet, not a stock-picking bet. We have no sector table, so we find the groups from the data.
+
+```mermaid
+flowchart LR
+    R["cleaned<br/>correlation matrix<br/>(07)"] --> G["graph<br/>node = stock<br/>edge = positive correlation,<br/>weight = its size"]
+    G --> L["Louvain<br/>move stocks between groups<br/>while modularity rises"]
+    L --> C["clusters<br/>(number not chosen)"]
+    C --> P["08: cap the exposure<br/>of each cluster"]
+```
+
+1. **Graph.** Every stock is a node. Two stocks are linked if their correlation is positive. The link weight is the correlation. Negative correlations are dropped: two stocks with correlation −0.8 hedge each other, so they must not be grouped.
+2. **Modularity.** For a partition, modularity is the share of link weight inside groups minus the share expected in a random graph where every node keeps its total link weight. High modularity means groups are much denser inside than chance.
+3. **Louvain.** Each stock starts alone. It moves to the neighbouring group that raises modularity most. Then each group becomes one node and the process repeats. It stops when no move helps. The number of groups is a result, not an input.
+4. **Resolution.** A value above 1 gives more and smaller groups. The default is 1.
+5. **Cap in 08.** No cluster may take more than 2 × gross / K of the gross exposure, where K is the number of clusters.
+
+**Known weakness: the market mode.** All stocks share a market-wide factor, so almost every pair is positively correlated. The graph is then one dense blob and Louvain finds only about 3 large groups. Caps on 3 groups protect little. The fix is to remove the market mode before clustering (section 9.5b).
+
+### 9.5b Removing the market mode before clustering (design, not yet in the code)
+
+```mermaid
+flowchart TD
+    A["cleaned correlation C<br/>(RMT + Ledoit-Wolf)"] --> B["eigendecomposition<br/>C = sum of lambda_k v_k v_k'"]
+    B --> C1["check: top eigenvector v1<br/>has entries of one sign<br/>and lambda_1 is far above the rest"]
+    C1 --> D["C_res = C - lambda_1 v1 v1'"]
+    D --> E["rescale to unit diagonal<br/>C_res_ij / sqrt(C_res_ii C_res_jj)"]
+    E --> F["Louvain on positive entries"]
+    F --> G["more and smaller clusters<br/>(industry-like groups)"]
+```
+
+The top eigenvector of a stock correlation matrix is the market: all entries have the same sign and its eigenvalue is much larger than the others. Subtracting its part leaves the correlation between stocks that is not explained by the market. Industry groups then stand out. Checks to run: the sign check of v1, the number of clusters (expect roughly 8 to 15), and the stability of the groups across dates. A second option is to regress each stock on the equal-weighted market return and correlate the residuals. It is easier to explain but needs the return history, not only the matrix.
+
+---
 
 ### 9.6 Dates
 
@@ -389,6 +425,24 @@ flowchart LR
 | 6 | Checks at each date | the stage stops on a book that is not neutral or not finite |
 
 **Weights are fractions of NAV.** Gross 1 = 50% long, 50% short. After step 4, the gross can be above or below 1.
+
+### 10.1 Leverage explained from scratch
+
+```mermaid
+flowchart LR
+    N["NAV = 1<br/>(your capital)"] --> L["long book<br/>+183% of NAV"]
+    N --> S["short book<br/>-183% of NAV"]
+    L --> GR["gross = 366% = 3.66 x NAV"]
+    S --> GR
+    GR --> V["volatility = gross x vol per unit of gross<br/>3.66 x 2.7% = 10%"]
+```
+
+- **NAV** is the capital. A weight of 0.2% means 0.2 of money per 100 of capital.
+- **Gross** is the sum of |weights|. A book with 250 longs and 250 shorts at 0.2% each has gross 1.0: 0.5 long and 0.5 short.
+- **Why the gross is above 1.** A long-short book is diversified: the random moves of 500 names partly cancel, and the market move cancels between long and short. The volatility per unit of gross is therefore small, about 2.2% in the equal-weight example and about 2.7% in the real book of that date (10% / 3.66). To reach 10% volatility you must scale the whole book up: gross = 10% / vol per unit of gross.
+- **Gross 3.66 means** 183% of NAV long and 183% of NAV short. The extra money comes from borrowing (margin at a prime broker).
+- **What it costs.** A 1% move of the whole book is a 3.66% move of NAV, and trading costs are paid on the full gross. A weak signal at high leverage pays costs it cannot earn back. This is why the book is cost-fragile.
+- **The cap (gross at most 4).** An assumption on how much you could borrow. It binds when the book is very diversified (low vol per unit of gross).
 
 **Output:** `weights.parquet` (date, ticker, weight) and `weights_diag.parquet` (gross, long, short, ex-ante vol, leverage, number of names, per date).
 
@@ -479,6 +533,37 @@ These modules are tested, but 04 to 09 do not call them.
 | `scripts/pipeline/04_build_portfolio.py` | legacy script | to be archived |
 
 **PBO (probability of backtest overfitting).** Split the data into blocks. For each combination, pick the best strategy on half the blocks and check its rank on the other half. PBO is the share of cases where the in-sample winner ranks below the median out-of-sample. A value near 0.5 means that selection is not better than chance.
+
+---
+
+## 13b. What to monitor besides the IC
+
+The IC measures only the ranking quality of a signal. A portfolio can have a good IC and still be a poor investment.
+
+```mermaid
+flowchart TD
+    IC["signal quality<br/>IC, IC by year, decile spread, IC decay"] --> EXP
+    EXP["exposures<br/>beta, size, value, momentum<br/>alpha left after them, with its t-stat"] --> RISK
+    RISK["risk<br/>volatility, drawdown, time under water,<br/>CVaR, rolling Sharpe"] --> DIV
+    DIV["diversification<br/>effective number of bets,<br/>concentration, risk per cluster"] --> TRD
+    TRD["trading<br/>turnover, cost per year,<br/>participation in volume, long vs short leg"] --> OVF
+    OVF["overfitting<br/>deflated Sharpe, probability of backtest overfitting"]
+```
+
+| Group | Metric | In the pipeline today? |
+|---|---|---|
+| Signal | IC, IC t-stat, IC decay, holdout IC | yes (05, 06) |
+| Signal | IC by year, decile spread | no (planned: per-year IC table tests survivorship) |
+| Exposures | market beta | measured in 09, not neutralised |
+| Exposures | alpha and its t-stat after beta, size, value | no (planned) |
+| Risk | volatility (ex-ante, realised), max drawdown, Sharpe with interval | yes (07, 09) |
+| Risk | time under water, CVaR, rolling Sharpe | no |
+| Diversification | cluster caps | yes (08) |
+| Diversification | effective number of bets, risk per cluster | no |
+| Trading | turnover, costs | yes (09); per-year cost table planned |
+| Trading | participation in volume, long vs short attribution | no |
+| Overfitting | deflated Sharpe of each signal | yes (05) |
+| Overfitting | deflated Sharpe of the final strategy, PBO | no |
 
 ---
 

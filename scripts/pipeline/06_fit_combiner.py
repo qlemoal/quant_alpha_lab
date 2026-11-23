@@ -36,7 +36,16 @@ THE STAGE IN ONE PICTURE
             v
      [6] en_scores.parquet, model.json, stability.parquet, config.json
 
+TWO MODES (--combine, default auto)
+    family   (auto when 05 ran in strict mode)  LOW-DIMENSIONAL, SIGN-FIXED
+             admitted signals -> multiply by the prior sign -> average inside each family -> ONE score per family
+             -> non-negative Elastic Net with the one-standard-error rule on 2 to 5 family scores.
+             Then a drop-one test: refit without each family, compare the out-of-fold IC.
+             No (1 - q) weights: the strict gates of 05 already did that job, with a hard threshold.
+    signal   (auto after 05 --mode legacy)       one coefficient per signal, as before. Exploration only.
+
 WHERE IS THE COMPLICATED PART?
+    src/models/family_combiner.py        families, aligned averages, drop-one test
     src/models/elastic_net_combiner.py   standardising, q-weights, demeaned target, CPCV, out-of-fold scores
     src/validation/cpcv.py               purged and embargoed folds
     This script only calls them, in order.
@@ -89,6 +98,7 @@ from src.models.elastic_net_combiner import (
     raw_unit_coefficients,
     score_contributions,
 )
+from src.models.family_combiner import group_by_family, add_family_scores, family_column, drop_one_oof_ic
 from src.evaluation.signals.report import signal_report
 from src.signals.cheat import signal_group
 
@@ -103,8 +113,9 @@ EN_CONFIG = {
     'n_blocks': 10,                 # CPCV: the search period is cut in 10 blocks ...
     'n_test_blocks': 2,             # ... and each fold tests on 2 of them (45 folds)
     'l1_ratio_grid': [.05, .1, .3, .5, .7, .9, .95, .99, 1],
-    'q_value_weighting': True,      # scale each standardised signal by (1 - q): a soft prior, not a filter
+    'q_value_weighting': False,     # legacy per-signal mode only. Off: the hard gates of 05 replace the (1 - q) weights
     'q_power': 1.0,                 # exponent on (1 - q)
+    'family_l1_grid': [.1, .3, .5, .7, .9, 1],   # family mode: few inputs, so a short grid is enough
     'target': 'csdemean',           # return minus the same-date average: the book is dollar-neutral
 }
 
@@ -148,7 +159,7 @@ def print_report(name: str, rep: dict) -> None:
           f'   L/S Sharpe {_fmt(rep.get("long_short_sharpe"), ".2f")}   days {rep.get("n_days")}')
 
 
-def main(date: str, tag: str = 'default'):
+def main(date: str, tag: str = 'default', combine: str = 'auto'):
     run_id = run_id_from_args(date, tag)
     cfg = get_paths(run_id=run_id)
 
@@ -178,8 +189,17 @@ def main(date: str, tag: str = 'default'):
     print(f'  {len(signal_cols)} signals: {signal_cols}')
     print(f'  label {fwd_ret_col}   horizon {horizon}   holdout {holdout_dates} dates')
 
+    if combine not in ('auto', 'family', 'signal'):
+        raise ValueError(f"combine must be auto, family or signal, got {combine!r}")
+    family_mode = (combine == 'family') or (combine == 'auto' and selected.get('mode') == 'strict')
+    families = group_by_family(selected['signal_meta']) if family_mode else {}
+    print(f'  combination mode: {"FAMILY (sign-aligned, non-negative, one-SE)" if family_mode else "SIGNAL (one coefficient per signal, exploration)"}')
+    if family_mode:
+        for fam, members in families.items():
+            print(f'    family {fam:<16} {[(m, "+" if sg > 0 else "-") for m, sg in members]}')
+
     q_values = {}
-    if EN_CONFIG['q_value_weighting']:
+    if EN_CONFIG['q_value_weighting'] and not family_mode:
         q_values = load_q_values(cfg.stage_dir('signal_eval') / 'fdr_report.parquet', signal_cols)
         print(f'  q-values: { {k: round(v, 4) for k, v in q_values.items()} }')
 
@@ -190,6 +210,12 @@ def main(date: str, tag: str = 'default'):
     if missing:
         raise ValueError(f'Columns missing in {signals_file}: {missing}')
 
+    members = signal_cols                                    # the admitted signals
+    if family_mode:
+        lf = add_family_scores(lf, families)                 # fam_<family> columns
+        signal_cols = [family_column(f) for f in families]   # from here on, the model inputs are the family scores
+        print(f'  model inputs: {signal_cols}')
+
     # ------------------------------------------------------------------
     # [2/6] Fit (CPCV search, out-of-fold scores, holdout report)
     # ------------------------------------------------------------------
@@ -199,8 +225,10 @@ def main(date: str, tag: str = 'default'):
         embargo_window=EMBARGO_WINDOW,
         n_blocks=EN_CONFIG['n_blocks'], n_test_blocks=EN_CONFIG['n_test_blocks'],
         holdout_dates=holdout_dates,
-        q_values=q_values or None, l1_ratio_grid=EN_CONFIG['l1_ratio_grid'],
+        q_values=q_values or None,
+        l1_ratio_grid=EN_CONFIG['family_l1_grid'] if family_mode else EN_CONFIG['l1_ratio_grid'],
         fwdret_col=fwd_ret_col, target=EN_CONFIG['target'], q_power=EN_CONFIG['q_power'],
+        positive=family_mode, one_se=family_mode,
     )
     train_end = _to_date(result['train_end'])
     holdout_start = _to_date(result['holdout_start'])
@@ -230,7 +258,9 @@ def main(date: str, tag: str = 'default'):
     share = score_contributions(result, result['search_panel'])
     group_share = {}
     for k, v in share.items():
-        group_share[signal_group(k)] = group_share.get(signal_group(k), 0.0) + v
+        g = (k[len('fam_'):] if k.startswith('fam_') else None)
+        g = g if g in ('cheat', 'placebo') else ('real' if g else signal_group(k))
+        group_share[g] = group_share.get(g, 0.0) + v
     print('  share of the score variance, by signal:')
     for k in sorted(share, key=lambda k: -abs(share[k])):
         print(f'    {k:<28} {share[k]:+8.2%}')
@@ -245,6 +275,14 @@ def main(date: str, tag: str = 'default'):
     print(f'  folds: {stability_df.height}')
     print(f'  signals whose sign flips between folds: {sign_flips if sign_flips else "none"}')
     print(f'  signals that are zero in some folds:    {zero_some if zero_some else "none"}')
+
+    drop_one = {}
+    if family_mode and len(signal_cols) > 1:
+        print('  drop-one test (out-of-fold IC with and without each family):')
+        drop_one = drop_one_oof_ic(result['search_panel'], result)
+        for k, d in drop_one.items():
+            verdict = 'helps' if d['delta'] > 0 else 'adds nothing'
+            print(f'    {k:<24} IC with {d["ic_full"]:.4f}  without {d["ic_without"]:.4f}  delta {d["delta"]:+.4f}  {verdict}')
 
     oof_share = result['oof'].height / max(result['search_panel'].height, 1)
     print(f'  search rows scored out-of-fold: {oof_share:.1%}')
@@ -316,6 +354,12 @@ def main(date: str, tag: str = 'default'):
             'signal_tag': tag,
             'signal_dir': str(cfg.stage_dir('signals')),
             'signals': signal_cols,
+            'combine_mode': 'family' if family_mode else 'signal',
+            'admitted_signals': members,
+            'families': {f: [{'signal': m, 'sign': sg} for m, sg in ms] for f, ms in families.items()},
+            'drop_one': drop_one,
+            'positive_coefficients': family_mode,
+            'one_se_rule': family_mode,
             'fwd_ret_col': fwd_ret_col,
             'horizon': horizon,
             'target': EN_CONFIG['target'],
@@ -353,5 +397,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Fit the Elastic Net combiner (CPCV search + holdout)')
     parser.add_argument('--date', type=str, required=True, help='Run date, YYYY-MM-DD (used in the run_id)')
     parser.add_argument('--tag', type=str, default='default', help='Run tag (default: default)')
+    parser.add_argument('--combine', choices=['auto', 'family', 'signal'], default='auto',
+                        help='auto: family after a strict 05, signal after a legacy 05')
     args = parser.parse_args()
-    main(args.date, args.tag)
+    main(args.date, args.tag, args.combine)

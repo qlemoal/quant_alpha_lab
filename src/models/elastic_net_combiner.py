@@ -52,7 +52,7 @@ References:
 import numpy as np
 import polars as pl
 from polars import col as c
-from sklearn.linear_model import ElasticNet, ElasticNetCV
+from sklearn.linear_model import ElasticNet, ElasticNetCV, enet_path
 
 from config.constants import EMBARGO_WINDOW
 from src.validation.walk_forward_cv import walk_forward_cv, Fold
@@ -225,6 +225,72 @@ def score_contributions(fit_result: dict, panel: pl.DataFrame) -> "dict[str, flo
     return {c: float(v / var) for c, v in zip(cols, cov)}
 
 
+def _fold_path_correlations(X: np.ndarray, y: np.ndarray, cv_folds: list, l1_ratio: float,
+                            alphas: np.ndarray, positive: bool) -> np.ndarray:
+    '''
+    Correlation between prediction and target on the TEST rows of each fold, for every alpha of the grid.
+    Returns an array (n_folds, n_alphas). One enet_path call per fold (warm starts), no refit per alpha.
+    A constant prediction (all coefficients zero) has correlation 0.
+    '''
+    out = np.zeros((len(cv_folds), len(alphas)))
+    for f, (tr, te) in enumerate(cv_folds):
+        xm = X[tr].mean(axis=0)
+        ym = y[tr].mean()
+        _, coefs, _ = enet_path(X[tr] - xm, y[tr] - ym, l1_ratio=l1_ratio, alphas=alphas, positive=positive)
+        pred = (X[te] - xm) @ coefs                              # (n_test, n_alphas)
+        yt = y[te] - y[te].mean()
+        pc = pred - pred.mean(axis=0)
+        sd = np.sqrt((pc ** 2).mean(axis=0))
+        cov = (pc * yt[:, None]).mean(axis=0)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            r = cov / (sd * yt.std())
+        out[f] = np.where(sd > 1e-15, r, 0.0)
+    return out
+
+
+def apply_one_se_rule(model: ElasticNetCV, X: np.ndarray, y: np.ndarray, l1_ratio_grid: list,
+                      positive: bool = False, cv_folds: "list | None" = None) -> float:
+    '''
+    One-standard-error rule (Hastie, Tibshirani, Friedman, "Elements of Statistical Learning", 7.10),
+    with the CORRELATION between prediction and target as the CV score, not the MSE.
+
+    WHY NOT THE MSE?
+        A return has a huge noise part. A real signal lowers the MSE by a tiny amount, smaller than the
+        spread of the MSE across folds. The one-SE rule on the MSE then always picks the largest alpha: all
+        coefficients zero, even for a real signal (seen on a synthetic test with IC = 0.03).
+        The strategy only uses the RANKING of the score inside each date. Correlation measures that and
+        ignores the scale of the prediction.
+
+    THE RULE
+        1. keep the l1_ratio that ElasticNetCV chose, and its alpha grid;
+        2. for each alpha: mean and standard error over the folds of the test correlation;
+        3. best = alpha with the highest mean;   threshold = mean(best) - se(best);
+        4. take the LARGEST alpha whose mean correlation >= threshold.
+    Then refit a plain ElasticNet at that alpha on all rows and overwrite model.alpha_, coef_, intercept_
+    (the rest of the code reads these attributes and needs no change).
+
+    NOISE CASE: if no alpha beats zero by more than one standard error, the largest alpha wins and all
+    coefficients are zero. 06 then stops with "no usable information". This is the wanted behaviour.
+    The folds of CPCV share data, so their scores are correlated and se is a little too small.
+    Returns the chosen alpha.
+    '''
+    if cv_folds is None:
+        raise ValueError('apply_one_se_rule needs the cv_folds')
+    l1 = np.atleast_1d(np.asarray(l1_ratio_grid, dtype=float))
+    i = int(np.argmin(np.abs(l1 - model.l1_ratio_)))
+    alphas = np.atleast_2d(model.alphas_)[i]
+    corr = _fold_path_correlations(X, y, cv_folds, float(model.l1_ratio_), alphas, positive)
+    m = corr.mean(axis=0)
+    se = corr.std(axis=0, ddof=1) / np.sqrt(corr.shape[0])
+    best = int(np.argmax(m))
+    chosen = float(alphas[m >= m[best] - se[best]].max())
+    refit = ElasticNet(alpha=chosen, l1_ratio=float(model.l1_ratio_), positive=positive, max_iter=5000).fit(X, y)
+    model.alpha_ = chosen
+    model.coef_ = refit.coef_
+    model.intercept_ = refit.intercept_
+    return chosen
+
+
 # =============================================================================
 # STEP 4: fit (hyper-parameters chosen with the project's own CV folds)
 # =============================================================================
@@ -234,7 +300,8 @@ def fit_elastic_net_combiner(panel: pl.DataFrame, signal_cols: list[str], fwdret
                              q_values: "dict[str, float] | None" = None,
                              l1_ratio_grid: "list[float] | None" = None,
                              target: str = 'csdemean', q_power: float = 1.0,
-                             compute_oof: bool = True) -> dict:
+                             compute_oof: bool = True, positive: bool = False,
+                             one_se: bool = False) -> dict:
     '''
     Fit ElasticNetCV on the (standardised, q-weighted) panel with the given CV folds.
 
@@ -243,6 +310,10 @@ def fit_elastic_net_combiner(panel: pl.DataFrame, signal_cols: list[str], fwdret
     target:       'csdemean' (default), 'rank' or 'raw'. See _make_target.
     q_power:      exponent on (1 - q). 1 = linear. Larger = stronger prior.
     compute_oof:  also compute out-of-fold scores for every row of `panel` (needed for honest scoring).
+    positive:     force every coefficient >= 0. Use it when the columns are SIGN-ALIGNED with an ex-ante prior
+                  (family scores of 06): a negative weight would then go against the economic story.
+    one_se:       one-standard-error rule: among the alphas whose CV correlation is within one standard error
+                  of the best, take the LARGEST (the strongest shrinkage). See apply_one_se_rule.
 
     Returns a dict with the fitted ElasticNetCV ('model'), the folds, the standardiser (x_mean, x_std),
     the column weights, and 'oof' (DataFrame[date, ticker, oof_score]) if requested.
@@ -258,8 +329,10 @@ def fit_elastic_net_combiner(panel: pl.DataFrame, signal_cols: list[str], fwdret
     y = _make_target(panel, fwdret_col, target)
 
     # cv= accepts a list of (train_idx, test_idx); n_jobs=-1 uses all CPUs
-    model = ElasticNetCV(l1_ratio=l1_ratio_grid, cv=cv_folds, n_jobs=-1)
+    model = ElasticNetCV(l1_ratio=l1_ratio_grid, cv=cv_folds, n_jobs=-1, positive=positive)
     model.fit(X, y)
+    if one_se:
+        apply_one_se_rule(model, X, y, l1_ratio_grid, positive, cv_folds)
 
     result = {
         'model': model,
@@ -272,6 +345,8 @@ def fit_elastic_net_combiner(panel: pl.DataFrame, signal_cols: list[str], fwdret
         'x_mean': x_mean,
         'x_std': x_std,
         'col_weights': col_weights,
+        'positive': positive,
+        'one_se': one_se,
     }
     if compute_oof:
         result['oof'] = out_of_fold_scores(panel, result)
@@ -292,7 +367,8 @@ def _refit_folds(panel: pl.DataFrame, fit_result: dict):
     X = _prepare_X(panel, fit_result)
     y = _make_target(panel, fit_result['fwdret_col'], fit_result['target'])
     for i, (train_idx, test_idx) in enumerate(fit_result['cv_folds']):
-        fold_model = ElasticNet(alpha=model.alpha_, l1_ratio=model.l1_ratio_, max_iter=5000)
+        fold_model = ElasticNet(alpha=model.alpha_, l1_ratio=model.l1_ratio_, max_iter=5000,
+                                positive=fit_result.get('positive', False))
         fold_model.fit(X[train_idx], y[train_idx])
         yield i, fold_model, X, test_idx
 
@@ -411,6 +487,8 @@ def run_en_combiner(
     fwdret_col: "str | None" = None,
     target: str = 'csdemean',
     q_power: float = 1.0,
+    positive: bool = False,
+    one_se: bool = False,
 ) -> dict:
     '''
     CPCV search + untouched holdout.
@@ -452,6 +530,7 @@ def run_en_combiner(
     fit_result = fit_elastic_net_combiner(
         search_panel, signal_cols, fwdret_col, cv_folds,
         q_values=q_values, l1_ratio_grid=l1_ratio_grid, target=target, q_power=q_power,
+        positive=positive, one_se=one_se,
     )
 
     from src.evaluation.signals.report import signal_report
