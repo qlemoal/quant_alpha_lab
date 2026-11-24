@@ -135,10 +135,18 @@ def test_placebo_has_zero_ic_and_unit_noise(panel):
 
 
 def test_placebos_are_independent_and_repeatable(panel):
+    # One-day noise: 100,000 rows, so the sampling error of a correlation is about 0.003. A tight bound is fine.
+    lf, names = add_placebo_signals(panel.lazy(), 6, noise_days=(1,))
+    out = lf.collect()
+    c = np.corrcoef(out.select(names).to_numpy().T)
+    assert np.abs(c - np.eye(6)).max() < 0.02
+    # Slow noise (5, 20, 60 days) is autocorrelated, so a correlation between two independent slow series has a
+    # much larger sampling error (up to about 0.04 depending on the hash of the Polars version). The bound is loose
+    # on purpose. The real protection is that each placebo has its own seed; a SHARED noise gives a correlation near 1.
     lf, names = add_placebo_signals(panel.lazy(), 6)
     out = lf.collect()
     c = np.corrcoef(out.drop_nulls().select(names).to_numpy().T)   # slow placebos have no value at the start of a ticker
-    assert np.abs(c - np.eye(6)).max() < 0.02
+    assert np.abs(c - np.eye(6)).max() < 0.12
     again = add_placebo_signals(panel.lazy(), 6)[0].collect()
     other_seed = add_placebo_signals(panel.lazy(), 6, seed=1)[0].collect()
     assert out.equals(again) and not out.equals(other_seed)
