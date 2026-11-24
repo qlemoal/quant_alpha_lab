@@ -211,7 +211,7 @@ def process_one_date(date_str: str, tickers: list, matrix: np.ndarray, config: d
     save_eigenvalues(result['eigenvalues'], date_str, out / 'eigenvalues.parquet')
 
     # --- summary ---
-    sizes = sorted(result['cluster_sizes'].values())
+    sizes = sorted(result['cluster_sizes'].values()) or [0]     # [0]: no cluster survived the size filter
     return {
         'date': date_str,
         'n_tickers': result['n_tickers'],
@@ -219,12 +219,16 @@ def process_one_date(date_str: str, tickers: list, matrix: np.ndarray, config: d
         'q_ratio': round(float(result['q_ratio']), 4),
         'lambda_max': round(float(result['lambda_max']), 4),
         'n_clusters': result['n_clusters'],
+        'n_unclustered': result['n_unclustered'],
         'cluster_size_stats': {
             'min': sizes[0],
             'max': sizes[-1],
             'median': sizes[len(sizes) // 2],
             'mean': round(sum(sizes) / len(sizes), 2),
         },
+        # Market-mode report of the clustering step (empty dict if the removal is switched off)
+        'market_mode_removed': bool(result['market_mode'].get('removed', False)),
+        'market_variance_share': result['market_mode'].get('variance_share'),
         'shrinkage': result['shrinkage'],
         'cov_method': result['cov_method'],
         # Sanity number: typical annualised volatility implied by the covariance (equities: about 0.2 to 0.5)
@@ -277,7 +281,11 @@ def build_summary(summaries: list, skipped: list) -> dict:
     return {
         'n_rebalances': len(summaries),
         'date_range': {'start': summaries[0]['date'], 'end': summaries[-1]['date']},
+        'avg_n_unclustered': round(sum(s['n_unclustered'] for s in summaries) / len(summaries), 1),
         'avg_n_clusters': round(sum(s['n_clusters'] for s in summaries) / len(summaries), 1),
+        # Share of dates where the market mode passed its checks and was removed before clustering
+        'market_mode_removed_share': round(sum(s['market_mode_removed'] for s in summaries) / len(summaries), 3),
+        'avg_market_variance_share': round(sum(v) / len(v), 4) if (v := [s['market_variance_share'] for s in summaries if s['market_variance_share'] is not None]) else None,
         'avg_lambda_max': round(sum(s['lambda_max'] for s in summaries) / len(summaries), 4),
         'avg_shrinkage': round(sum(shrink) / len(shrink), 4) if shrink else None,
         'avg_median_vol': round(sum(s['median_vol'] for s in summaries) / len(summaries), 4),

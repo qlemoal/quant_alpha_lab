@@ -13,7 +13,7 @@ Pipeline
 --------
   returns -> pairwise correlation -> Marchenko-Pastur cleaning -> shrinkage
           -> cov = D * C_shrunk * D        (D = diag(vols))
-  cleaned correlation -> Louvain clusters
+  cleaned correlation -> remove market mode -> Louvain clusters
 '''
 import warnings
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='Mean of empty slice')
@@ -24,7 +24,7 @@ import polars as pl
 from typing import Optional, Tuple, Dict, Any, List
 
 from src.risk.correlation_cleaning import clean_correlation_matrix, marchenko_pastur_bounds
-from src.risk.clustering import louvain_clustering
+from src.risk.clustering import louvain_clustering, remove_market_mode, drop_small_clusters
 from src.risk.covariance import (
     build_covariance_matrix,
     oracle_approximating_shrinkage,
@@ -206,9 +206,21 @@ def build_covariance(
 # 5. Clustering
 # =============================================================================
 
-def cluster_correlation(corr_clean: np.ndarray, resolution: float) -> Dict[int, int]:
-    '''Louvain clustering on the cleaned correlation. Returns {ticker_idx: cluster_id}.'''
-    return louvain_clustering(corr_clean, resolution=resolution)
+def cluster_correlation(corr_clean: np.ndarray, resolution: float, remove_market: bool = True,
+                        min_size: int = 1) -> tuple:
+    '''
+    Louvain clustering on the cleaned correlation, after removing the market mode (see src/risk/clustering.py).
+    Clusters with fewer than min_size stocks get id -1 (no cluster, never capped in 08).
+    Returns ({ticker_idx: cluster_id}, info). info is the market-mode report (empty if remove_market is False).
+    '''
+    info: Dict[str, Any] = {}
+    matrix = corr_clean
+    if remove_market:
+        matrix, info = remove_market_mode(corr_clean)
+    cmap = louvain_clustering(matrix, resolution=resolution)
+    if min_size > 1:
+        cmap = drop_small_clusters(cmap, min_size)
+    return cmap, info
 
 
 # =============================================================================
@@ -246,11 +258,15 @@ def estimate_risk_model_for_date(
 
     # 5. Clustering
     cluster_resolution = config.get('cluster_resolution', 1.0)
-    cluster_map = cluster_correlation(corr_clean, cluster_resolution)
+    cluster_map, market_info = cluster_correlation(
+        corr_clean, cluster_resolution, config.get('cluster_remove_market_mode', True),
+        config.get('cluster_min_size', 5))
 
     clusters: Dict[int, list] = {}
     for t, c in cluster_map.items():
-        clusters.setdefault(c, []).append(t)
+        if c >= 0:                                  # -1 = no cluster: not counted in K
+            clusters.setdefault(c, []).append(t)
+    n_unclustered = sum(1 for c in cluster_map.values() if c < 0)
 
     return {
         'date': date_str,
@@ -263,6 +279,8 @@ def estimate_risk_model_for_date(
         'cluster_map': cluster_map,
         'cluster_sizes': {str(k): len(v) for k, v in clusters.items()},
         'n_clusters': len(clusters),
+        'n_unclustered': n_unclustered,
+        'market_mode': market_info,
         'shrinkage': float(shrinkage) if shrinkage is not None else None,
         'cov_method': method,
         'n_tickers': n_tickers,

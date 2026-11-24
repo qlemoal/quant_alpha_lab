@@ -381,7 +381,7 @@ flowchart LR
 
 **Known weakness: the market mode.** All stocks share a market-wide factor, so almost every pair is positively correlated. The graph is then one dense blob and Louvain finds only about 3 large groups. Caps on 3 groups protect little. The fix is to remove the market mode before clustering (section 9.5b).
 
-### 9.5b Removing the market mode before clustering (design, not yet in the code)
+### 9.5b Removing the market mode before clustering (in the code since 2026-11-24)
 
 ```mermaid
 flowchart TD
@@ -390,10 +390,18 @@ flowchart TD
     C1 --> D["C_res = C - lambda_1 v1 v1'"]
     D --> E["rescale to unit diagonal<br/>C_res_ij / sqrt(C_res_ii C_res_jj)"]
     E --> F["Louvain on positive entries"]
-    F --> G["more and smaller clusters<br/>(industry-like groups)"]
+    F --> H["clusters smaller than 5 stocks<br/>get id -1: no cap, not counted in K"]
+    H --> G["industry-like groups"]
 ```
 
-The top eigenvector of a stock correlation matrix is the market: all entries have the same sign and its eigenvalue is much larger than the others. Subtracting its part leaves the correlation between stocks that is not explained by the market. Industry groups then stand out. Checks to run: the sign check of v1, the number of clusters (expect roughly 8 to 15), and the stability of the groups across dates. A second option is to regress each stock on the equal-weighted market return and correlate the residuals. It is easier to explain but needs the return history, not only the matrix.
+The top eigenvector of a stock correlation matrix is the market: all entries have the same sign and its eigenvalue is much larger than the others. Subtracting its part leaves the correlation between stocks that is not explained by the market. Industry groups then stand out. Implementation: `remove_market_mode` and `drop_small_clusters` in `src/risk/clustering.py`, called by `cluster_correlation` in `src/risk/risk_model.py`. Switches in `RISK_CONFIG` (07): `cluster_remove_market_mode` (True) and `cluster_min_size` (5). If the top eigenvector is not a market mode (fewer than 90% of its entries share a sign, or lambda_1 is less than 2 x lambda_2), nothing is removed and the date is counted in `summary.json`.
+
+**What the synthetic tests show (`tests/test_clustering.py`).** The result is less strong than I expected:
+- Strong industries: the cleaned matrix already gives the right clusters with or without the removal. The removal does not hurt.
+- Moderate industries of unequal strength: the removal raises the adjusted Rand index by about 0.1 on average (for example 0.75 to 0.86).
+- Weak industries: the residual is mostly noise and Louvain returns dozens of clusters of 1 to 3 stocks. A cap per cluster would then be meaningless, hence the minimum size. If no cluster survives, 08 applies no cluster cap.
+
+So the removal is a modest improvement, not a cure. Read `summary.json` after 07: `avg_n_clusters`, `avg_n_unclustered` and `market_mode_removed_share`. A second option is to regress each stock on the equal-weighted market return and correlate the residuals. It is easier to explain but needs the return history, not only the matrix.
 
 ---
 

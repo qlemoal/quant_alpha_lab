@@ -96,6 +96,8 @@ RISK_CONFIG = {
     'min_assets': 50,                 # a date needs this many eligible tickers, else it is skipped
     'cov_method': 'ledoit_wolf',      # 'ledoit_wolf', 'oas', 'factor', 'sample'
     'cluster_resolution': 1.0,        # Louvain resolution (higher = more, smaller clusters)
+    'cluster_min_size': 5,            # clusters with fewer stocks get id -1: no cap, not counted
+    'cluster_remove_market_mode': True,   # subtract the market eigenvector before clustering (src/risk/clustering.py)
     'n_factors': 5,                   # only for cov_method='factor'
     'save_corr_raw': False,           # the raw correlation is big and not used downstream
 }
@@ -195,7 +197,10 @@ def main(run_date: str, tag: str):
     print(f'\nRisk model estimated for {summary["n_rebalances"]} rebalances')
     print(f'  average shrinkage:  {summary["avg_shrinkage"]}   (should vary by date, not sit at 1.0)')
     print(f'  average median vol: {summary["avg_median_vol"]}   (annualised, equities: about 0.2 to 0.5)')
-    print(f'  average clusters:   {summary["avg_n_clusters"]}')
+    print(f'  average clusters:   {summary["avg_n_clusters"]}   (about 3 without the market-mode removal; expect more with it)')
+    print(f'  stocks in no cluster (size < {RISK_CONFIG["cluster_min_size"]}): {summary["avg_n_unclustered"]} per date on average')
+    print(f'  market mode removed on {summary["market_mode_removed_share"]:.0%} of the dates '
+          f'(it explains {summary["avg_market_variance_share"]} of the correlation variance on average)')
     print(f'  output: {out_dir}/')
     print(f'\nNext: python scripts/pipeline/08_construct_weights.py --date {run_date} --tag {tag}')
 
