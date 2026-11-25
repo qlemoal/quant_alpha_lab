@@ -13,9 +13,26 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 import json
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG_FILE = ROOT / 'config' / 'dataset_config.json'
+
+
+def _config_file() -> Path:
+    '''
+    The dataset config. Default: config/dataset_config.json.
+    The environment variable QAL_DATASET_CONFIG selects another file (path relative to the repo root, or absolute).
+    Example, the synthetic market:  QAL_DATASET_CONFIG=config/dataset_synthetic.json python scripts/pipeline/02_etl_prices.py
+    Every stage reads its paths through this file, so one variable switches the whole pipeline to another dataset.
+    '''
+    env = os.environ.get('QAL_DATASET_CONFIG')
+    if not env:
+        return ROOT / 'config' / 'dataset_config.json'
+    p = Path(env)
+    return p if p.is_absolute() else ROOT / p
+
+
+CONFIG_FILE = _config_file()
 
 _DEFAULTS = {
     'source': 'yfinance',

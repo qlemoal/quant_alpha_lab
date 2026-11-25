@@ -4,8 +4,6 @@
 Phase 08: Construct Portfolio Weights
 ===============================================
 
-TODO: Parallelise the construction of weights, as in 07, even if not that long to finish.
-
 QUESTION ANSWERED
     "At each rebalance date, how much capital goes long or short in each stock?"
 
@@ -43,10 +41,11 @@ UNITS
 INPUTS
     {clean_base}/en_scores/{run_id}/en_scores.parquet      (date, ticker, combined_score)
     {clean_base}/risk_model/{run_id}/                      (07 outputs)
+    {clean_base}/features/features.parquet                 (beta252, for the beta neutralisation)
 
 OUTPUTS   {clean_base}/weights/{run_id}/
     weights.parquet        [date, ticker, score, cluster_id, raw_weight, capped_weight, weight]
-    weights_diag.parquet   one row per date: gross, long/short/net exposure, ex-ante vol, turnover, ...
+    weights_diag.parquet   one row per date: gross, long/short/net exposure, beta exposure, ex-ante vol, turnover, ...
     config.json
 
 HONEST USE OF THE RESULT
@@ -71,6 +70,7 @@ from config.paths import get_paths, run_id_from_args
 from src.risk.weights_pipeline import (
     risk_model_dates,
     load_scores_by_date,
+    load_betas_by_date,
     RiskModelReader,
     construct_all,
 )
@@ -86,6 +86,10 @@ PORTFOLIO_CONFIG = {
     'target_vol': 0.10,              # annualised ex-ante volatility to reach (before the leverage cap)
     'base_gross': 1.0,               # gross of the raw book (sum|w|), before the volatility scaling
     'max_gross_leverage': 4.0,       # hard cap on final gross. ASSUMPTION: review with your financing limits.
+    'beta_neutral': True,            # project the book to zero exposure to the equal-weight market (beta' w = 0)
+    'beta_source': 'features',       # 'features': feature beta (below). 'covariance': betas implied by the risk model
+    'beta_feature': 'beta252',       # rolling beta of the features table (03)
+    'beta_shrink': 1.0 / 3.0,        # Blume: beta_adj = (1 - k) beta + k. Missing beta -> 1
     'max_cluster_multiple': 2.0,     # a cluster may hold at most 2x its fair share of gross
     'signal_method': 'proportional', # 'proportional', 'inv_vol' or 'rank'
     'cap_method': 'cap',             # 'cap' or 'rescale'
@@ -102,7 +106,8 @@ def main(run_date: str, tag: str):
     risk_dir = paths.stage_dir('risk_model')
     out_dir = paths.stage_dir('weights')
 
-    for f in (en_scores_file, risk_dir / 'cov.parquet', risk_dir / 'clusters.parquet', risk_dir / 'summary.json'):
+    for f in (en_scores_file, risk_dir / 'cov.parquet', risk_dir / 'clusters.parquet', risk_dir / 'summary.json',
+              paths.features_file):
         if not f.exists():
             raise FileNotFoundError(f'Missing input: {f}')
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -128,8 +133,12 @@ def main(run_date: str, tag: str):
     # ------------------------------------------------------------------
     print('\n[2/4] Constructing weights...')
     reader = RiskModelReader(risk_dir)
+    betas_by_date = None
+    if PORTFOLIO_CONFIG['beta_neutral'] and PORTFOLIO_CONFIG['beta_source'] == 'features':
+        betas_by_date = load_betas_by_date(paths.features_file, PORTFOLIO_CONFIG['beta_feature'], dates)
+        print(f'  betas from {PORTFOLIO_CONFIG["beta_feature"]} (features), shrink {PORTFOLIO_CONFIG["beta_shrink"]:.2f}')
     weights_df, diag_df, skipped = construct_all(
-        dates, scores_by_date, reader, PORTFOLIO_CONFIG,
+        dates, scores_by_date, reader, PORTFOLIO_CONFIG, betas_by_date=betas_by_date,
         progress=lambda it: tqdm(it, desc='  Weights', unit='date'),
     )
     for s in skipped:
@@ -163,6 +172,9 @@ def main(run_date: str, tag: str):
     print(f'  dates where the leverage cap binds (vol below target): '
           f'{diag_df["leverage_capped"].sum()} / {diag_df.height}')
     print(f'  max |net exposure|  {diag_df["net_exposure"].abs().max():.2e}   (must be about 0)')
+    print(f'  beta exposure (NAV units)  before 3b: mean {diag_df["beta_before_neutralising"].mean():+.3f}, '
+          f'mean |.| {diag_df["beta_before_neutralising"].abs().mean():.3f}   after: mean |.| {diag_df["beta_exposure"].abs().mean():.1e}'
+          f'   (beta_neutral = {PORTFOLIO_CONFIG["beta_neutral"]})')
     print(f'  one-way turnover per rebalance  mean {diag_df["turnover"].mean():.3f}')
     print(f'  output: {out_dir}/')
     print(f'\nNext: python scripts/pipeline/09_run_backtest.py --date {run_date} --tag {tag}')

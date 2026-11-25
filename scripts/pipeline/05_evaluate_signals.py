@@ -39,6 +39,7 @@ Inputs:
 Outputs:
   data/clean/{asset}/{region}/{universe}/{freq}/signal_eval/{run_id}/
     ├── ic_summary.parquet      # Per-signal IC stats (training dates only)
+    ├── ic_by_year.parquet      # Mean IC of each signal per calendar year (stability, survivorship check)
     ├── ic_decay.parquet        # IC vs horizon (training dates only)
     ├── fdr_report.parquet      # BH, BY, q-value per signal
     ├── selection_gates.parquet # one row per signal: statistics, one pass/fail per gate, first failed gate
@@ -74,6 +75,7 @@ from src.evaluation.signals.ic.metrics import (
 from src.evaluation.signals.fdr import fdr_report
 from src.evaluation.signals.benchmarks import benchmark_report, format_benchmark_report
 from src.evaluation.signals.dsr import deflated_sharpe_table
+from src.evaluation.signals.yearly import yearly_ic_table
 from src.evaluation.signals.selection import SelectionConfig, apply_gates, gate_summary, config_dict
 from src.signals.cheat import signal_group
 from src.signals.priors import priors_table
@@ -168,11 +170,13 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
     print('\n[2/5] Computing Rank IC...')
     ic_results = []
     ic_series = {}                                        # daily IC of each signal, for the deflated Sharpe
+    ic_dated = {}                                         # (dates, IC) of each signal, for the year-by-year table
     for col in signal_cols:
         ic_df_col = compute_ic(df.lazy(), col, FWD_RET_COL).collect()   # one IC per date
         summary = summarize_ic(ic_df_col)
         ic_values = ic_df_col['ic'].to_numpy()
         ic_series[col] = ic_values
+        ic_dated[col] = (ic_df_col['date'].to_list(), ic_values)
 
         # Main test: Newey-West with lag >= 2(h-1), covers the label overlap
         nw_result = newey_west_ic_tstat(ic_values, horizon=horizon)
@@ -293,6 +297,18 @@ def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
             before = len(selected)
             selected = [s for s in selected if abs(ic_df.filter(pl.col('signal') == s)['ir'][0]) >= min_ir]
             print(f'  After min_ic_ir filter: {len(selected)} (removed {before - len(selected)})')
+
+    # Year-by-year IC of the admitted signals (stability and a first survivorship check). Saved for all signals.
+    yearly = yearly_ic_table(ic_dated, {k: (meta.get(k) or {}).get('sign') for k in ic_dated})
+    yearly.write_parquet(OUTPUT_DIR / 'ic_by_year.parquet')
+    if selected:
+        ycols = [c for c in yearly.columns if c.startswith('ic_')]
+        print('\n  IC by year (admitted signals; raw IC, + or - as the prior says):')
+        print('    ' + f'{"signal":28s}' + ''.join(f'{c[3:]:>7s}' for c in ycols) + '   ok/yrs  1st half  2nd half')
+        for row in yearly.filter(pl.col('signal').is_in(selected)).iter_rows(named=True):
+            print('    ' + f'{row["signal"]:28s}' + ''.join(f'{_fmt(row[c], "7.3f")}' for c in ycols)
+                  + f'   {row["years_ok"]}/{row["n_years"]}   {_fmt(row["first_half"], "7.3f")}   {_fmt(row["second_half"], "7.3f")}')
+        print('    A big drop from 1st to 2nd half, or a signal that works only in old years, can mean survivorship bias.')
 
     print('\n  Gate table (aligned t = t x prior sign):')
     for row in gates.sort('aligned_nw_t', descending=True, nulls_last=True).head(15).iter_rows(named=True):

@@ -32,8 +32,8 @@ WHERE IS THE COMPLICATED PART?
 
 THE COLUMNS OF ohlcv.parquet
     ticker, date
-    open, high, low   as traded
-    close_raw         close as traded
+    open, high, low   split-adjusted (Yahoo), not dividend-adjusted
+    close_raw         close adjusted for splits only (Yahoo "Close")
     close             ADJUSTED close (splits and dividends). Used for returns.
     volume            shares traded
     open_adj          open on the adjusted scale. Used for the labels and the backtest (we trade at the open).
@@ -64,7 +64,7 @@ sys.path.insert(0, str(ROOT))
 import duckdb
 
 from config.paths import get_paths
-from src.data.etl_prices import read_raw_prices, build_clean_table, quality_report, write_parquet
+from src.data.prices_etl import read_raw_prices, build_clean_table, quality_report, write_parquet
 from src.utils.helpers import get_git_commit, file_hash
 
 MIN_HISTORY = 252          # a ticker with fewer rows than this is reported as "short history"

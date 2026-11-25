@@ -1,5 +1,5 @@
 '''
-Plumbing for stage 04e (portfolio weights). The script 04e_construct_weights.py only calls these functions.
+Plumbing for stage 08 (portfolio weights). The script 08_construct_weights.py only calls these functions.
 The portfolio maths (sizing, caps, vol target) is in src/risk/portfolio_construction.py.
 This file adds: reading the risk model, the order of the steps, the checks, and the diagnostics.
 
@@ -24,6 +24,11 @@ THE CHAIN FOR ONE REBALANCE DATE
        Scale the long leg and the short leg so that long = short. Gross is kept.
             |
             v                              |
+   [3b] beta-neutralise  <---------------- betas of the stocks (feature beta252, shrunk toward 1)
+       smallest change of the weights that gives sum(w) = 0 AND beta' w = 0.
+       A book with equal long and short money can still be long the market (long high-beta, short low-beta).
+            |
+            v                              |
    [4] volatility target  <---------------- Σ
        multiply ALL weights by  target_vol / sqrt(w' Σ w)   (library cap: x10)
             |
@@ -34,7 +39,7 @@ THE CHAIN FOR ONE REBALANCE DATE
             v
         final weights
 
-Steps 4 and 5 multiply every weight by the same number. They keep the legs balanced and keep
+Steps 4 and 5 multiply every weight by the same number. Step 3b changes each weight a little, so the cluster caps hold only approximately after it. They keep the legs balanced and keep
 each cluster's share of the book.
 
 UNITS
@@ -80,7 +85,58 @@ def neutralise_legs(weights: np.ndarray) -> np.ndarray:
     return w
 
 
-def build_weights(scores: np.ndarray, cov: np.ndarray, clusters: np.ndarray, cfg: dict) -> "dict | None":
+def market_betas(cov: np.ndarray) -> np.ndarray:
+    '''
+    Beta of each stock to the equal-weight market, computed from the covariance matrix Σ of the risk model.
+
+        market weights  m = 1/n (equal weight, the same market as in the feature "beta" and in the 09 check)
+        beta_i = (Σ m)_i / (m' Σ m)
+
+    Using Σ gives betas that are consistent with the risk model of the same date (same stocks, same window).
+    The average beta is 1 by construction.
+    '''
+    n = cov.shape[0]
+    m = np.full(n, 1.0 / n)
+    var_m = float(m @ cov @ m)
+    if var_m <= 0:
+        return np.ones(n)
+    return (cov @ m) / var_m
+
+
+def project_out(weights: np.ndarray, constraints: np.ndarray) -> np.ndarray:
+    '''
+    Smallest change (in the sum of squares) of `weights` such that every constraint row has zero exposure.
+
+        w_new = w - A' (A A')^+ A w          A = constraints, shape (k, n)
+
+    With A = [1, beta] the result has sum(w_new) = 0 and beta' w_new = 0.
+    The pseudo-inverse (^+) keeps it defined when the rows are nearly collinear (all betas about equal).
+    '''
+    A = np.atleast_2d(np.asarray(constraints, dtype=float))
+    w = np.asarray(weights, dtype=float)
+    return w - A.T @ (np.linalg.pinv(A @ A.T) @ (A @ w))
+
+
+def beta_neutralise(weights: np.ndarray, betas: np.ndarray) -> "tuple[np.ndarray, float, float]":
+    '''
+    Make a book dollar-neutral AND beta-neutral. Returns (new_weights, beta_before, beta_after),
+    where beta = sum_i beta_i w_i is the exposure to the equal-weight market per unit of capital.
+    '''
+    new = project_out(weights, np.vstack([np.ones(len(weights)), betas]))
+    return new, float(betas @ weights), float(betas @ new)
+
+
+def shrink_betas(raw: np.ndarray, weight_on_one: float = 1.0 / 3.0) -> np.ndarray:
+    '''
+    Blume adjustment: beta_adj = (1 - k) beta_raw + k * 1. A rolling beta is noisy; the true betas of a universe
+    sit closer to 1 than the raw estimates. Missing betas (NaN) become 1. k = 1/3 is the classic value.
+    '''
+    b = np.where(np.isfinite(raw), raw, 1.0)
+    return (1.0 - weight_on_one) * b + weight_on_one
+
+
+def build_weights(scores: np.ndarray, cov: np.ndarray, clusters: np.ndarray, cfg: dict,
+                  betas: "np.ndarray | None" = None) -> "dict | None":
     '''
     Scores -> final weights for ONE date, following the chain in the file header.
 
@@ -88,6 +144,9 @@ def build_weights(scores: np.ndarray, cov: np.ndarray, clusters: np.ndarray, cfg
     cov:       (n, n) annualised covariance, same ticker order as scores.
     clusters:  (n,) integer cluster id per ticker (-1 = no cluster, never capped).
     cfg:       PORTFOLIO_CONFIG of the script.
+    betas:     (n,) beta of each ticker to the equal-weight market, for step 3b. None: the betas are computed
+               from cov (market_betas). That fallback is contaminated by the volatility of the stocks
+               (a cleaned covariance mixes total volatility into the beta), so the script passes feature betas.
 
     Returns a dict (raw, capped, neutral, final, ex_ante_vol, leverage_capped), or None if the
     scores cannot form a long-short book (for example all scores equal).
@@ -114,6 +173,16 @@ def build_weights(scores: np.ndarray, cov: np.ndarray, clusters: np.ndarray, cfg
     if not np.any(neutral):
         return None
 
+    # [3b] beta-neutral (optional). Without it, beta_before == beta_after.
+    b = betas if betas is not None else market_betas(cov)
+    beta_before = float(b @ neutral)
+    if cfg.get('beta_neutral', False):
+        neutral, _, beta_after = beta_neutralise(neutral, b)
+        if not np.any(neutral):
+            return None
+    else:
+        beta_after = beta_before
+
     # [4] volatility target (uniform scaling)
     targeted = apply_vol_target(
         pl.Series('w', neutral), sigma=cov, target_vol=cfg['target_vol'], method=cfg['vol_method'],
@@ -123,17 +192,22 @@ def build_weights(scores: np.ndarray, cov: np.ndarray, clusters: np.ndarray, cfg
     gross = np.abs(targeted).sum()
     leverage_capped = bool(gross > cfg['max_gross_leverage'])
     final = targeted * (cfg['max_gross_leverage'] / gross) if leverage_capped else targeted
+    scale = float(np.abs(final).sum() / max(np.abs(neutral).sum(), 1e-12))     # steps 4 and 5 are uniform scalings
 
     return {
         'raw': raw,
         'capped': capped,
         'final': final,
+        # Exposure to the equal-weight market, in units of NAV, before and after step 3b, at the FINAL scale
+        # (0.1 means: a 1% market move changes NAV by 0.1%).
+        'beta_before': beta_before * scale,
+        'beta_after': beta_after * scale,
         'ex_ante_vol': float(np.sqrt(max(final @ cov @ final, 0.0))),
         'leverage_capped': leverage_capped,
     }
 
 
-def check_weights(date_str: str, final: np.ndarray, cfg: dict) -> None:
+def check_weights(date_str: str, final: np.ndarray, cfg: dict, beta_exposure: float = 0.0) -> None:
     '''Fail loudly on a broken book. Never save garbage.'''
     if not np.isfinite(final).all():
         raise ValueError(f'{date_str}: weights contain NaN or inf')
@@ -143,6 +217,8 @@ def check_weights(date_str: str, final: np.ndarray, cfg: dict) -> None:
     gross = np.abs(final).sum()
     if gross > cfg['max_gross_leverage'] * (1 + 1e-9):
         raise ValueError(f'{date_str}: gross {gross:.4f} above max_gross_leverage {cfg["max_gross_leverage"]}')
+    if cfg.get('beta_neutral', False) and abs(beta_exposure) > 1e-6 * max(gross, 1.0):
+        raise ValueError(f'{date_str}: beta_neutral is on but the beta exposure is {beta_exposure:.3e}')
 
 
 def diagnostics(date_str: str, final: np.ndarray, clusters: np.ndarray, result: dict, cfg: dict) -> dict:
@@ -162,6 +238,8 @@ def diagnostics(date_str: str, final: np.ndarray, clusters: np.ndarray, result: 
         'min_weight': float(final.min()),
         'max_cluster_share': float(max(cluster_gross) / gross) if cluster_gross and gross > 0 else None,
         'ex_ante_vol': result['ex_ante_vol'],
+        'beta_before_neutralising': result['beta_before'],
+        'beta_exposure': result['beta_after'],
         'vol_target': cfg['target_vol'],
         'leverage_capped': result['leverage_capped'],
     }
@@ -174,7 +252,7 @@ def diagnostics(date_str: str, final: np.ndarray, clusters: np.ndarray, result: 
 def risk_model_dates(summary_file: Path) -> list:
     '''
     Rebalance dates (ISO strings) of the risk model, from summary.json.
-    04d writes a dict with the dates under 'per_date'. A plain list (old format) is accepted too.
+    07 writes a dict with the dates under 'per_date'. A plain list (old format) is accepted too.
     '''
     with open(summary_file) as f:
         summary = json.load(f)
@@ -203,9 +281,29 @@ def load_scores_by_date(en_scores_file: Path, score_col: str, date_strs: list) -
     return out
 
 
+def load_betas_by_date(features_file: Path, beta_col: str, date_strs: list, shrink: float = 1.0 / 3.0) -> dict:
+    '''
+    {date_str: {ticker: shrunk beta}} from the features table (column beta_col, for example beta252).
+    A feature at date t uses only data up to t, so there is no look-ahead (tests/test_features.py).
+    Missing betas are not in the dict; the caller fills them with 1 (shrink_betas does it).
+    '''
+    wanted = set(date_strs)
+    df = (
+        pl.scan_parquet(features_file).select(['date', 'ticker', beta_col])
+        .filter(pl.col(beta_col).is_not_null() & pl.col(beta_col).is_not_nan())
+        .collect()
+        .filter(pl.col('date').dt.to_string('%Y-%m-%d').is_in(list(wanted)))
+    )
+    out = {}
+    for key, group in df.partition_by(['date'], as_dict=True).items():
+        d = key[0] if isinstance(key, tuple) else key
+        out[d.isoformat()] = dict(zip(group['ticker'].to_list(), group[beta_col].to_list()))
+    return out
+
+
 class RiskModelReader:
     '''
-    Reads one date of the 04d outputs at a time: the covariance (full symmetric matrix) and the clusters.
+    Reads one date of the 07 outputs at a time: the covariance (full symmetric matrix) and the clusters.
     Clusters are small, so they are loaded once.
     '''
 
@@ -238,13 +336,16 @@ def one_way_turnover(prev: "dict | None", current: dict) -> "float | None":
     return float(0.5 * sum(abs(current.get(t, 0.0) - prev.get(t, 0.0)) for t in names))
 
 
-def construct_all(dates: list, scores_by_date: dict, reader: RiskModelReader, cfg: dict, progress=None):
+def construct_all(dates: list, scores_by_date: dict, reader: RiskModelReader, cfg: dict, progress=None,
+                  betas_by_date: "dict | None" = None):
     '''
     Run build_weights on every date. Returns (weights_df, diag_df, skipped).
 
     For each date the tickers are those that have BOTH a score and a risk-model entry.
     A date is skipped (with a reason) if fewer than cfg['min_names'] tickers remain or no book can be built.
     `progress`: optional iterator wrapper (e.g. tqdm) around the dates.
+    `betas_by_date`: output of load_betas_by_date. With it, step 3b uses these betas (shrunk toward 1, missing = 1).
+                     Without it, 3b falls back to the betas implied by the covariance.
     '''
     weight_frames, diag_rows, skipped = [], [], []
     prev_book = None
@@ -268,12 +369,16 @@ def construct_all(dates: list, scores_by_date: dict, reader: RiskModelReader, cf
         sc = np.array([score_of[t] for t in tickers])
         clusters = np.array([cluster_of.get(t, -1) for t in tickers], dtype=int)
 
-        result = build_weights(sc, cov, clusters, cfg)
+        betas = None
+        if betas_by_date is not None:
+            raw_b = np.array([betas_by_date.get(date_str, {}).get(t, np.nan) for t in tickers])
+            betas = shrink_betas(raw_b, cfg.get('beta_shrink', 1.0 / 3.0))
+        result = build_weights(sc, cov, clusters, cfg, betas)
         if result is None:
             skipped.append({'date': date_str, 'reason': 'scores cannot form a long-short book'})
             continue
         final = result['final']
-        check_weights(date_str, final, cfg)
+        check_weights(date_str, final, cfg, result['beta_after'])
 
         book = dict(zip(tickers, final))
         row = diagnostics(date_str, final, clusters, result, cfg)

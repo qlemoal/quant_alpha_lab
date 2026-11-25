@@ -418,7 +418,8 @@ flowchart LR
     S["score<br/>(06)"] --> W["1. raw weights<br/>proportional to the<br/>demeaned score"]
     W --> CAP["2. cluster caps<br/>limit gross exposure<br/>of each cluster"]
     CAP --> NEU["3. re-neutralise<br/>long = short"]
-    NEU --> VT["4. volatility target<br/>scale so w'Σw = 10%²"]
+    NEU --> BN["3b. beta-neutral<br/>beta' w = 0"]
+    BN --> VT["4. volatility target<br/>scale so w'Σw = 10%²"]
     VT --> LEV["5. leverage cap<br/>gross ≤ 4"]
     LEV --> CHK["6. checks<br/>neutral, finite,<br/>capped"]
 ```
@@ -428,11 +429,16 @@ flowchart LR
 | 1 | `w_i ∝ score_i − mean(score)` on the stocks that have a score and a risk estimate, then Σ|w| = 1 | simple and transparent. Score size = conviction. |
 | 2 | Cap the gross exposure of each Louvain cluster at 2 × (gross / number of clusters). Overweight clusters are scaled down. The freed capacity is not redistributed. | a book concentrated in one correlated group is a sector bet, not a stock-picking bet |
 | 3 | Subtract the mean again so Σ long = Σ short | capping breaks neutrality |
+| 3b | Project the weights: the smallest change that gives Σw = 0 and Σ beta_i w_i = 0. Betas: feature `beta252` (rolling regression on the equal-weight market), shrunk one third toward 1 (Blume), missing = 1. | equal long and short money is not enough. A book long high-beta and short low-beta is long the market. |
 | 4 | `scale = target_vol / sqrt(w' Σ w)` | the book takes the same risk in calm and in stormy markets |
 | 5 | If gross > 4, scale down | an assumption (limits borrowing). It rarely binds with a 10% target. |
 | 6 | Checks at each date | the stage stops on a book that is not neutral or not finite |
 
 **Weights are fractions of NAV.** Gross 1 = 50% long, 50% short. After step 4, the gross can be above or below 1.
+
+**Why the betas come from the features and not from Σ.** The first version took the betas from the covariance matrix of the risk model. On the synthetic market (where the true betas are known) these betas correlated 0.86 with the truth but carried a volatility component: a high-volatility stock got a higher beta than its true one. The projection then left a real market exposure of +0.12 (confirmed by the backtest: realised beta +0.11, t = 8.9). With the feature betas the realised beta is 0.01 (t = 0.7). The covariance route stays available as `beta_source = 'covariance'`.
+
+**Side effect.** Step 3b changes each weight a little, so the cluster caps of step 2 hold only approximately afterwards. Steps 4 and 5 scale all weights by one number and change no ratio.
 
 ### 10.1 Leverage explained from scratch
 
@@ -503,7 +509,9 @@ The backtest prints three blocks: whole period, before the holdout, **holdout**.
 |---|---|
 | Sharpe (net) and 95% interval | the interval is wide. A few years cannot pin a Sharpe down. |
 | Sharpe gross | the same, without costs. The gap shows the cost drag. |
-| Market beta | should be near 0 (dollar-neutral book) |
+| Market beta | should be near 0 (beta-neutral book) |
+| Alpha (annual) and its t-stat | the return left after the market exposure, from `net = alpha + beta × market + error`, with Newey-West standard errors. A good Sharpe with a small alpha t-stat is market exposure, not skill. |
+| Year-by-year table | return, volatility, Sharpe, beta, cost and turnover per calendar year. Read it for stability: one good year can carry a whole sample. |
 | Realised vol / ex-ante vol | near 1 means the risk model is right. Far from 1 means it is not. |
 | Annual turnover, annual cost (bps) | a signal that trades too much dies by costs |
 | Sharpe at 1×, 1.5×, 2×, 3× costs | if the Sharpe falls to 0 at 2×, the strategy is fragile |
@@ -562,8 +570,9 @@ flowchart TD
 |---|---|---|
 | Signal | IC, IC t-stat, IC decay, holdout IC | yes (05, 06) |
 | Signal | IC by year, decile spread | no (planned: per-year IC table tests survivorship) |
-| Exposures | market beta | measured in 09, not neutralised |
-| Exposures | alpha and its t-stat after beta, size, value | no (planned) |
+| Performance | year-by-year return, Sharpe, cost, turnover | yes (09) |
+| Exposures | market beta | neutralised in 08, measured in 09 |
+| Exposures | alpha and its t-stat after the market | yes (09). After size and value: no (needs factor data) |
 | Risk | volatility (ex-ante, realised), max drawdown, Sharpe with interval | yes (07, 09) |
 | Risk | time under water, CVaR, rolling Sharpe | no |
 | Diversification | cluster caps | yes (08) |
@@ -595,6 +604,7 @@ flowchart TD
 - Random seeds are fixed where randomness exists (cross-validation, Louvain).
 - `run_experiment.py` runs the chain and stops at the first failure.
 - Tests: `pytest -q`.
+- A synthetic market with planted effects (`src/data/synthetic.py`) gives every machine the same data. `python scripts/demos/run_synthetic_reference.py` runs the whole pipeline on it and compares a dozen numbers with `tests/golden/synthetic_reference.json`. See [synthetic_market.md](synthetic_market.md).
 
 ---
 

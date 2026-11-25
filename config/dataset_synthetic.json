@@ -1,0 +1,8 @@
+{
+  "source": "synthetic",
+  "asset": "equities",
+  "region": "US",
+  "universe": "SYNTH",
+  "freq": "daily",
+  "description": "Synthetic market with planted effects (src/data/synthetic.py). Select with QAL_DATASET_CONFIG=config/dataset_synthetic.json"
+}

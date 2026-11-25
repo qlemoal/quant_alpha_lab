@@ -143,6 +143,14 @@ python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default --only
 pytest -q                                        # unit and regression tests, a few seconds
 ```
 
+### Synthetic market (same data on every machine)
+
+```bash
+python scripts/demos/run_synthetic_reference.py     # fake market with known effects, stages 02 to 09, PASS/FAIL table
+```
+
+See [docs/synthetic_market.md](docs/synthetic_market.md). The real data are never touched.
+
 ### Benchmarks: cheating signals and placebo signals
 
 Two options test the pipeline itself, with signals whose true strength is **known**:
@@ -203,7 +211,7 @@ flowchart LR
     B --> E["beta 60, 252"]
     A --> F["close_raw × volume<br/>= dollar volume"] --> G["log_adv 5…252"]
 ```
-- **Why `close_raw`:** dollars traded = price as traded × shares traded. The adjusted close understates old dollar volume.
+- **Why `close_raw`:** dollars traded = split-adjusted close × split-adjusted volume. The dividend-adjusted close understates old dollar volume.
 - **Guard:** no-look-ahead test. The script stops on duplicate rows, bad prices, NaN or inf.
 
 ### 04 · Signals
@@ -251,10 +259,11 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A["score"] --> B["raw weights"] --> C["cluster caps<br/>2×"] --> D["neutralise<br/>long = short"] --> E["vol target<br/>10%"] --> F["leverage<br/>cap 4"]
+    A["score"] --> B["raw weights"] --> C["cluster caps<br/>2×"] --> D["neutralise<br/>long = short"] --> G["beta-neutral<br/>beta' w = 0"] --> E["vol target<br/>10%"] --> F["leverage<br/>cap 4"]
 ```
 - **Units:** weights are fractions of capital. gross = Σ|w|. gross 1 = 50% long + 50% short.
-- **Guard:** the stage stops if the book is not dollar-neutral, not finite, or above the leverage cap.
+- **Beta-neutral:** the book has zero exposure to the equal-weight market (feature `beta252`, shrunk toward 1).
+- **Guard:** the stage stops if the book is not dollar-neutral, not beta-neutral, not finite, or above the leverage cap.
 
 ### 09 · Backtest
 
@@ -263,6 +272,7 @@ flowchart LR
     A["weights<br/>(signal date)"] --> B["trade at<br/>open t+1"] --> C["weights drift<br/>until next rebalance"] --> D["costs on<br/>the change"] --> E["net returns<br/>and metrics"]
 ```
 - **Costs:** half-spread + square-root market impact + commission.
+- **Alpha:** the return after the market exposure, with a Newey-West t-stat, and a year-by-year table.
 - **Guard:** the Sharpe uses √(252/h) for h-day returns. The drawdown uses a compounded curve. Both were wrong in an earlier version.
 
 ---
@@ -423,6 +433,7 @@ These are written down on purpose.
 - [ ] Run 02 → 09 on the real data and fill in a results section
 - [ ] Point-in-time constituents (a free approximation, then CRSP if available)
 - [ ] Index as market proxy for beta
+- [ ] Cost-aware construction (trade buffer or turnover penalty): the synthetic reference shows costs eating most of the gross Sharpe
 - [ ] Borrow and financing costs in the backtest
 - [ ] Factor attribution (style, sector)
 - [ ] Wire PBO and walk-forward into the pipeline

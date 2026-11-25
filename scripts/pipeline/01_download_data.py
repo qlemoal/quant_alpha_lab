@@ -16,7 +16,7 @@ THE STAGE IN ONE PICTURE
             |
             v           one ticker at a time, 3 tries each
      [2] Yahoo Finance via yfinance
-            auto_adjust=False  ->  we keep "Close" (as traded) AND "Adj Close" (splits, dividends)
+            auto_adjust=False  ->  we keep "Close" (split-adjusted) AND "Adj Close" (splits and dividends)
             |
             v
      [3] data/raw/yfinance/.../ohlcv/AAPL.csv, MSFT.csv, ...      one CSV per ticker

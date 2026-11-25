@@ -10,7 +10,7 @@ Plumbing for stage 01 (download). The script 01_download_data.py only calls thes
           v
     a report: which tickers worked, which failed and why
 
-The prices are NOT adjusted by us: auto_adjust=False keeps both "Close" (as traded) and "Adj Close"
+The prices are NOT adjusted by us: auto_adjust=False keeps both "Close" (split-adjusted, not dividend-adjusted) and "Adj Close"
 (splits and dividends). Stage 02 needs both.
 '''
 

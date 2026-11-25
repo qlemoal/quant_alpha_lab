@@ -34,7 +34,9 @@ WHERE IS THE COMPLICATED PART?
 HOW TO READ THE RESULT
     1. Look at the HOLDOUT block, not at the whole period.
     2. The Sharpe interval (sharpe_ci95) is wide: a few years of data cannot pin a Sharpe down.
-    3. market_beta should be close to 0 (the book is dollar-neutral).
+    3. market_beta should be close to 0. The ALPHA line gives the return left after the market exposure, with a
+       Newey-West t-stat. A good Sharpe with a small alpha t-stat is market exposure, not skill.
+       The YEARLY table shows whether the result holds in every year or one year carries the sample.
     4. realised_over_ex_ante_vol far from 1 means the risk model is wrong.
     5. sharpe_vs_cost_multiplier: if the Sharpe collapses at 2x costs, the strategy is fragile.
     6. Missing from the simulation: borrow cost, financing cost, delisting returns, survivorship bias.
@@ -48,7 +50,8 @@ INPUTS
 OUTPUTS   {clean_base}/backtest/{run_id}/
     returns.parquet     [date, gross_ret, long_ret, short_ret, cost, market_ret, net_ret]  daily
     trades.parquet      one row per rebalance: turnover, cost by component, exposures
-    metrics.json        full | pre_holdout | holdout
+    metrics.json        full | pre_holdout | holdout   (each with an 'alpha_regression' block)
+    yearly.json         one row per calendar year: return, vol, Sharpe, beta, cost, turnover
     equity_curve.png
     config.json
 
@@ -72,6 +75,7 @@ import polars as pl
 
 from config.paths import get_paths, run_id_from_args
 from src.portfolio.weights_backtest import make_price_panel, simulate, summarise, net_returns, plot_equity
+from src.evaluation.portfolio.attribution import alpha_regression, yearly_table
 
 
 # =============================================================================
@@ -177,6 +181,34 @@ def main(run_date: str, tag: str):
         if m.get('realised_over_ex_ante_vol') is not None:
             print(f'  Realised / ex-ante vol  {m["realised_over_ex_ante_vol"]:.2f}   (about 1 expected)')
 
+    # alpha after the market exposure, per period
+    net_all = returns_df['net_ret'].to_numpy()
+    mkt_all = returns_df['market_ret'].to_numpy()
+    dates_all = returns_df['date'].to_numpy()
+    for name, m in metrics.items():
+        if holdout_start is not None and name == 'holdout':
+            sel = dates_all >= np.datetime64(holdout_start)
+        elif holdout_start is not None and name == 'pre_holdout':
+            sel = dates_all < np.datetime64(holdout_start)
+        else:
+            sel = np.ones(len(dates_all), dtype=bool)
+        m['alpha_regression'] = alpha_regression(net_all[sel], mkt_all[sel])
+        a = m['alpha_regression']
+        if a.get('alpha_t') is not None:
+            print(f'  {name:<12} alpha {a["alpha_ann"]:+.2%} per year   t = {a["alpha_t"]:.2f}   '
+                  f'beta {a["beta"]:+.3f} (t {a["beta_t"]:.1f})   R2 {a["r2"]:.3f}   NW lag {a["max_lag"]}')
+
+    yearly = yearly_table(dates_all, returns_df['gross_ret'].to_numpy(), returns_df['cost'].to_numpy(), mkt_all,
+                          trades_df['entry_date'].to_numpy(), trades_df['turnover'].to_numpy())
+    print('\n  Year-by-year (net of costs):')
+    print('    year  days  return    vol  Sharpe  gross Sh   beta  cost bps  turnover')
+    for r in yearly:
+        f = lambda v, fmt: ('   n/a' if v is None else format(v, fmt))
+        print(f'    {r["year"]}  {r["n_days"]:>4}  {r["net_return"]:+7.1%} {f(r["ann_vol"], "6.1%")} {f(r["sharpe_net"], "7.2f")} '
+              f'{f(r["sharpe_gross"], "8.2f")} {f(r["beta"], "6.2f")} {r["cost_bps"]:8.0f} {f(r["turnover"], "9.1f")}')
+    n_pos = sum(1 for r in yearly if r['net_return'] > 0)
+    print(f'  {n_pos} of {len(yearly)} years positive after costs')
+
     # ------------------------------------------------------------------
     # [4/4] Save
     # ------------------------------------------------------------------
@@ -185,6 +217,8 @@ def main(run_date: str, tag: str):
     trades_df.write_parquet(out_dir / 'trades.parquet')
     with open(out_dir / 'metrics.json', 'w') as f:
         json.dump(metrics, f, indent=2, default=str)
+    with open(out_dir / 'yearly.json', 'w') as f:
+        json.dump(yearly, f, indent=2, default=str)
     plot_equity(returns_df, out_dir / 'equity_curve.png', f'Equity curve - {run_id}', holdout_start)
     with open(out_dir / 'config.json', 'w') as f:
         json.dump({
