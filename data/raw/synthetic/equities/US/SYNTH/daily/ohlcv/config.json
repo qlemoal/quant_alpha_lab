@@ -1,0 +1,22 @@
+{
+  "generator": "src/data/synthetic.py",
+  "config": {
+    "n_tickers": 300,
+    "n_days": 2520,
+    "start": "2016-01-04",
+    "n_industries": 8,
+    "seed": 12345,
+    "market_mu": 0.0003,
+    "market_vol": 0.0095,
+    "industry_vol": 0.006,
+    "base_idio_vol": 0.012,
+    "c_vol": 0.00012,
+    "c_liq": 8e-05,
+    "c_rev": 0.0008,
+    "c_mom": 9e-05,
+    "max_dividend_yield": 0.02
+  },
+  "digest": "ef32f5e927ee55c9c38a262795cc9696cf53bea6dd7f4725fd054aa87c5a0f12",
+  "n_tickers": 300,
+  "n_days": 2520
+}

@@ -119,6 +119,8 @@ def quality_report(con: "duckdb.DuckDBPyConnection", min_history: int = 252) -> 
       open_outside_range    open above high or below low, tolerance 0.1%
       adj_factor_above_one  close / close_raw > 1.001. Adjustments for splits and dividends make this
                             ratio <= 1 in the past. A larger value points to bad adjustment data.
+                            The LAST row of each ticker is not counted: a dead stock can end with a positive
+                            delisting return (a take-over premium) that lifts the adjusted close above the close.
       short_history         tickers with fewer than `min_history` rows
     '''
     row = con.execute(f'''
@@ -130,8 +132,8 @@ def quality_report(con: "duckdb.DuckDBPyConnection", min_history: int = 252) -> 
             max(date)                                                  AS last_date,
             sum(CASE WHEN high < low THEN 1 ELSE 0 END)                AS high_below_low,
             sum(CASE WHEN open > high * 1.001 OR open < low * 0.999 THEN 1 ELSE 0 END) AS open_outside_range,
-            sum(CASE WHEN close / close_raw > 1.001 THEN 1 ELSE 0 END) AS adj_factor_above_one
-        FROM clean
+            sum(CASE WHEN close / close_raw > 1.001 AND date < tmax THEN 1 ELSE 0 END) AS adj_factor_above_one
+        FROM (SELECT *, max(date) OVER (PARTITION BY ticker) AS tmax FROM clean)
     ''').fetchone()
     names = ['n_rows', 'n_tickers', 'n_dates', 'first_date', 'last_date',
              'high_below_low', 'open_outside_range', 'adj_factor_above_one']

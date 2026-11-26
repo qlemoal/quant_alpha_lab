@@ -53,6 +53,14 @@ def _load_config() -> dict:
 _cfg = _load_config()
 DEFAULTS = {k: _cfg.get(k, v) for k, v in _DEFAULTS.items()}
 
+# Point-in-time universe (stage 02b). In the dataset config file:
+#   "universe_mode": "all"         every ticker is in the universe on every date it trades (the old behaviour)
+#                    "rule"        top N by dollar volume, re-ranked every k days (src/universe/point_in_time.py)
+#                    "membership"  the vendor list data/raw/.../membership.csv
+#   "universe_rule": {"top_n": 1000, ...}   overrides of DEFAULT_RULE
+UNIVERSE_MODE = _cfg.get('universe_mode', 'all')
+UNIVERSE_RULE = _cfg.get('universe_rule', {})
+
 
 @dataclass
 class DataPaths:
@@ -81,6 +89,16 @@ class DataPaths:
     @property
     def ohlcv_file(self) -> Path:
         return self.clean_base / 'ohlcv' / 'ohlcv.parquet'
+
+    @property
+    def universe_file(self) -> Path:
+        '''[date, ticker, in_universe]: who was investable on each date (written by 02b_build_universe.py).'''
+        return self.clean_base / 'universe' / 'universe.parquet'
+
+    @property
+    def raw_membership_file(self) -> Path:
+        '''Optional vendor index list [ticker, start, end] (see docs/survivorship.md).'''
+        return self.raw_base / 'membership.csv'
 
     @property
     def features_file(self) -> Path:

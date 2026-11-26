@@ -1,0 +1,122 @@
+{
+  "run_timestamp": "2026-11-25T17:18:25.074323",
+  "source_ohlcv": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/clean/equities/US/SYNTH/daily/ohlcv/ohlcv.parquet",
+  "ohlcv_hash": "sha256:4987a3a605e8d066",
+  "git_commit": "7826c4eb7eacf97fca8e3e1e9cd55a15b387d530",
+  "windows": {
+    "beta": [
+      60,
+      252
+    ],
+    "momentum": [
+      5,
+      10,
+      20,
+      60,
+      120,
+      252
+    ],
+    "volatility": [
+      5,
+      10,
+      20,
+      60,
+      120,
+      252
+    ],
+    "adv": [
+      5,
+      10,
+      20,
+      60,
+      120,
+      252
+    ]
+  },
+  "min_tickers_for_market": 100,
+  "label_columns": [
+    "fwdret"
+  ],
+  "n_rows": 756000,
+  "columns": [
+    "ticker",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close_raw",
+    "close",
+    "volume",
+    "open_adj",
+    "logret",
+    "mkt_logret",
+    "beta60",
+    "beta252",
+    "mom5",
+    "mom10",
+    "mom20",
+    "mom60",
+    "mom120",
+    "mom252",
+    "vol5",
+    "vol10",
+    "vol20",
+    "vol60",
+    "vol120",
+    "vol252",
+    "dollar_volume",
+    "log_adv5",
+    "log_adv10",
+    "log_adv20",
+    "log_adv60",
+    "log_adv120",
+    "log_adv252",
+    "fwdret"
+  ],
+  "ohlcv_report": {
+    "n_rows": 756000,
+    "n_unique": 756000,
+    "n_tickers": 300,
+    "n_dates": 2520,
+    "first_date": "2016-01-04",
+    "last_date": "2025-08-29",
+    "bad_price": 0,
+    "bad_volume": 0,
+    "n_extreme_moves": 1,
+    "largest_moves": [
+      {
+        "ticker": "S036",
+        "date": "2019-02-12",
+        "logret": 0.546
+      }
+    ]
+  },
+  "feature_report": {
+    "null_pct": {
+      "high": 0.0,
+      "low": 0.0,
+      "logret": 0.04,
+      "beta60": 2.38,
+      "beta252": 10.0,
+      "mom5": 0.2,
+      "mom10": 0.4,
+      "mom20": 0.79,
+      "mom60": 2.38,
+      "mom120": 4.76,
+      "mom252": 10.0,
+      "vol5": 0.2,
+      "vol10": 0.4,
+      "vol20": 0.79,
+      "vol60": 2.38,
+      "vol120": 4.76,
+      "vol252": 10.0,
+      "dollar_volume": 0.0,
+      "log_adv5": 0.16,
+      "log_adv10": 0.36,
+      "log_adv20": 0.75,
+      "log_adv60": 2.34,
+      "log_adv120": 4.72,
+      "log_adv252": 9.96
+    }
+  }
+}

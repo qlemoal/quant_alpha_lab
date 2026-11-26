@@ -1,0 +1,9 @@
+{
+  "source": "synthetic",
+  "asset": "equities",
+  "region": "US",
+  "universe": "SYNTH_SURV",
+  "freq": "daily",
+  "description": "Synthetic market, SURVIVORS ONLY (dead stocks removed): what a free source gives you. Used by scripts/demos/survivorship_lab.py",
+  "universe_mode": "all"
+}

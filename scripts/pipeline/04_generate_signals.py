@@ -80,7 +80,7 @@ import polars as pl
 
 from config.paths import get_paths, run_id_from_args
 from src.signals.signal_pipeline import (
-    validate_specs, clean_features, build_signals, add_labels, restrict_dates,
+    validate_specs, clean_features, build_signals, add_labels, restrict_dates, add_dead_flag, apply_universe,
     check_labels, calendar_gaps, signal_descriptives, signal_warnings,
 )
 from src.signals.cheat import add_cheat_signals, add_placebo_signals, validate_cheat_specs, check_benchmark_tag
@@ -206,8 +206,24 @@ def main(run_date: str, tag: str, cheat: bool = False, placebo: bool = False):
     # ------------------------------------------------------------------
     print('\n[2/4] Building signals and labels...')
     lf = clean_features(lf, sorted({feat for feat, _, _ in specs}))
+
+    # Labels FIRST, on every row of every ticker (a label needs the future rows of the same ticker).
+    # A dead ticker keeps its last adjusted close as the exit price, so its final crash is in the labels.
+    lf = add_dead_flag(lf)
+    lf, label_cols = add_labels(lf, HORIZONS, terminal=True)
+    lf_all_rows = lf                                  # kept for the checks: they need the rows BEFORE the universe filter
+
+    # Then the point-in-time universe: a signal is ranked only among the stocks investable on that date.
+    universe_info = {'applied': False}
+    if cfg.universe_file.exists():
+        lf, universe_info = apply_universe(lf, cfg.universe_file)
+        universe_info['applied'] = True
+        print(f'  universe: {cfg.universe_file.name} applied (signals are ranked among its members only)')
+    else:
+        print('  WARNING: no universe file. Every ticker is used on every date it trades.')
+        print('           With a list of today\'s survivors this is SURVIVORSHIP BIAS. Run 02b_build_universe.py (docs/survivorship.md).')
+
     lf, signal_cols = build_signals(lf, specs)
-    lf, label_cols = add_labels(lf, HORIZONS)
     cheat_cols = []
     if cheat:
         lf, cheat_cols = add_cheat_signals(lf, cheat_specs, seed=CHEAT_SEED, noise_days=CHEAT_NOISE_DAYS)      # needs the labels, so after them
@@ -233,14 +249,20 @@ def main(run_date: str, tag: str, cheat: bool = False, placebo: bool = False):
     # [3/4] Checks
     # ------------------------------------------------------------------
     print('\n[3/4] Checks...')
-    label_report = check_labels(df, HORIZONS)                       # raises if labels cross tickers
+    dead_set = set(lf_all_rows.filter(pl.col('is_dead')).select('ticker').unique().collect()['ticker'].to_list())
+    slim = lf_all_rows.select(['ticker', 'date'] + label_cols).collect()
+    label_report = check_labels(slim, HORIZONS, dead_tickers=dead_set)    # raises if labels cross tickers
+    del slim
+    print(f'  dead tickers (stop trading before the end of the data): {len(dead_set)}. Their labels end at the last price.')
     for col, r in label_report.items():
         print(f'  {col:<10} null {r["null_pct"]:5.2f}%   std {r["std"]:.4f}   max |value| {r["max_abs"]:.2f}'
               f'   rows with |value| > 2: {r["n_abs_above_2"]}')
-        if r['n_abs_above_2']:
-            print(f'    WARNING: {r["n_abs_above_2"]} extreme labels. Look for an unadjusted split in the prices.')
+        if r['n_abs_above_2_alive']:
+            print(f'    WARNING: {r["n_abs_above_2_alive"]} extreme labels on stocks that did not die. Look for an unadjusted split in the prices.')
+        elif r['n_abs_above_2']:
+            print(f'    note: all {r["n_abs_above_2"]} extreme labels are on dead stocks (delisting crashes): expected.')
 
-    gaps = calendar_gaps(lf)
+    gaps = calendar_gaps(lf_all_rows)
     print(f'  missing (ticker, date) rows inside the life of the tickers: {gaps["missing_rows"]:,} '
           f'({gaps["missing_share"]:.2%}); worst ticker {gaps["worst_ticker"]} ({gaps["worst_ticker_missing"]} rows)')
     if gaps['missing_share'] > MAX_MISSING_SHARE:
@@ -299,6 +321,8 @@ def main(run_date: str, tag: str, cheat: bool = False, placebo: bool = False):
         'warnings': warnings,
         'label_checks': label_report,
         'calendar_gaps': gaps,
+        'universe': universe_info,
+        'n_dead_tickers': len(dead_set),
     }
     with open(out_dir / 'config.json', 'w') as f:
         json.dump(config, f, indent=2, default=str)

@@ -143,6 +143,16 @@ python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default --only
 pytest -q                                        # unit and regression tests, a few seconds
 ```
 
+### Survivorship-free data (dead companies, point-in-time universe)
+
+Yahoo gives only today's survivors. The fix needs data of the dead companies (CRSP through WRDS is free with an EPFL account).
+The code side is ready: `01_import_crsp.py`, `02b_build_universe.py` (universe rule + audit verdict), and the labels of stage 04
+keep the crash of a dying stock. See [docs/survivorship.md](docs/survivorship.md).
+
+```bash
+python scripts/demos/survivorship_lab.py            # about 5 min: the same market with and without its dead stocks
+```
+
 ### Synthetic market (same data on every machine)
 
 ```bash

@@ -86,11 +86,38 @@ def build_signals(lf: pl.LazyFrame, specs: list) -> "tuple[pl.LazyFrame, list]":
     return lf, names
 
 
-def add_labels(lf: pl.LazyFrame, horizons: list) -> "tuple[pl.LazyFrame, list]":
-    '''Add fwdret{h} for every horizon. Open-to-open, per ticker (see src/features/returns.py).'''
+def add_dead_flag(lf: pl.LazyFrame, tolerance_days: int = 10) -> pl.LazyFrame:
+    '''
+    Add the boolean column `is_dead`: the last date of the ticker is more than `tolerance_days` calendar days
+    before the last date of the whole table (the ticker stopped trading). Same rule as
+    src/universe/point_in_time.dead_tickers.
+    '''
+    last_all = pl.col('date').max()
+    return lf.with_columns(
+        ((last_all - pl.col('date').max().over('ticker')).dt.total_days() > tolerance_days).alias('is_dead')
+    )
+
+
+def add_labels(lf: pl.LazyFrame, horizons: list, terminal: bool = False) -> "tuple[pl.LazyFrame, list]":
+    '''
+    Add fwdret{h} for every horizon. Open-to-open, per ticker (see src/features/returns.py).
+    terminal=True: dead tickers keep their last adjusted close as the exit price (needs the column is_dead).
+    '''
     for h in horizons:
-        lf = add_fwdret_horizon(lf, horizon=h)
+        lf = add_fwdret_horizon(lf, horizon=h, terminal=terminal)
     return lf, [f'fwdret{h}' for h in horizons]
+
+
+def apply_universe(lf: pl.LazyFrame, universe_file) -> "tuple[pl.LazyFrame, dict]":
+    '''
+    Keep only the rows (date, ticker) that were IN the universe on that date (file written by 02b).
+    Call it AFTER the labels (they need every row of a ticker) and BEFORE the signals are normalised
+    (a signal is ranked among the stocks that were investable that day, and nothing else).
+    Returns (lf, info). A row with no entry in the universe file is NOT kept.
+    '''
+    uni = pl.scan_parquet(universe_file).select(['date', 'ticker', 'in_universe'])
+    lf = lf.join(uni, on=['date', 'ticker'], how='left').filter(pl.col('in_universe').fill_null(False)).drop('in_universe')
+    return lf, {'universe_file': str(universe_file)}
 
 
 def restrict_dates(lf: pl.LazyFrame, start=None, end=None) -> pl.LazyFrame:
@@ -110,14 +137,19 @@ def restrict_dates(lf: pl.LazyFrame, start=None, end=None) -> pl.LazyFrame:
 # 2. CHECKS (they raise on a broken file, and warn on a suspicious one)
 # =============================================================================
 
-def check_labels(df: pl.DataFrame, horizons: list) -> dict:
+def check_labels(df: pl.DataFrame, horizons: list, dead_tickers: "set | None" = None) -> dict:
     '''
     Check the forward returns. Raises ValueError if they are misaligned. Returns a dict of numbers.
 
     1. TAIL RULE: for each ticker, the last h+1 rows must have fwdret{h} = null (the prices do not exist yet).
        A non-null value there means the label was built across the boundary of two tickers.
+       Exception: `dead_tickers` (delisted names). Their labels use the last price as the exit (terminal value),
+       so only the very last row must be null. Pass the frame BEFORE the universe filter: after it,
+       "the last rows" of a ticker that left the universe are not its real last rows.
     2. SIZE: a 20-day log-return beyond +-2 (a x7 move) is not a normal stock. It points to a split that
        is not adjusted, or to a mix of two stocks. (Counted and reported, not an error.)
+       n_abs_above_2_alive counts them for stocks that did NOT die. A delisting crash (-87% or worse) is a
+       legitimate label below -2 for a dead stock, so only the alive count is a sign of bad data.
     '''
     report = {}
     ordered = df.sort(['ticker', 'date'])
@@ -129,6 +161,8 @@ def check_labels(df: pl.DataFrame, horizons: list) -> dict:
             .with_columns(pl.col('date').rank('ordinal', descending=True).over('ticker').alias('_from_end'))
             .filter(pl.col('_from_end') <= h + 1)
         )
+        if dead_tickers:
+            tail = tail.filter(~pl.col('ticker').is_in(list(dead_tickers)) | (pl.col('_from_end') == 1))
         n_bad_tail = int(tail[col].is_not_null().sum())
         if n_bad_tail > 0:
             raise ValueError(
@@ -136,7 +170,9 @@ def check_labels(df: pl.DataFrame, horizons: list) -> dict:
                 f'The label crosses a ticker boundary. Check src/features/returns.py.'
             )
         vals = df[col].drop_nulls().to_numpy()
+        alive_vals = (df.filter(~pl.col('ticker').is_in(list(dead_tickers)))[col] if dead_tickers else df[col]).drop_nulls().to_numpy()
         report[col] = {
+            'n_abs_above_2_alive': int((np.abs(alive_vals) > 2).sum()),
             'null_pct': float(df[col].null_count() / df.height * 100),
             'std': float(np.std(vals)),
             'max_abs': float(np.max(np.abs(vals))) if len(vals) else None,

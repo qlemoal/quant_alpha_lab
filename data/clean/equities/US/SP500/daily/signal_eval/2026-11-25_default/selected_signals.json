@@ -1,0 +1,43 @@
+{
+  "signals": [
+    "log_adv10_zscore_tanh",
+    "log_adv20_zscore_tanh",
+    "log_adv60_zscore_tanh"
+  ],
+  "mode": "strict",
+  "signal_meta": {
+    "log_adv10_zscore_tanh": {
+      "family": "illiquidity",
+      "sign": -1,
+      "rationale": "Investors ask a premium for holding stocks that are hard to trade, so low dollar volume earns more.",
+      "reference": "Amihud (2002)"
+    },
+    "log_adv20_zscore_tanh": {
+      "family": "illiquidity",
+      "sign": -1,
+      "rationale": "Investors ask a premium for holding stocks that are hard to trade, so low dollar volume earns more.",
+      "reference": "Amihud (2002)"
+    },
+    "log_adv60_zscore_tanh": {
+      "family": "illiquidity",
+      "sign": -1,
+      "rationale": "Investors ask a premium for holding stocks that are hard to trade, so low dollar volume earns more.",
+      "reference": "Amihud (2002)"
+    }
+  },
+  "selection_config": {
+    "min_t": 3.0,
+    "min_nonoverlap_t": 2.0,
+    "fdr_alpha": 0.05,
+    "min_dsr": 0.95,
+    "require_prior": true,
+    "n_trials_extra": 0,
+    "dsr_variance": "null"
+  },
+  "fwd_ret_col": "fwdret20",
+  "horizon": 20,
+  "train_end": "2025-11-06",
+  "holdout_start": "2025-12-31",
+  "holdout_dates": 200,
+  "embargo_w": 37
+}

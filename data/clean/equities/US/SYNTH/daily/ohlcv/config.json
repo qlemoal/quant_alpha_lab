@@ -1,0 +1,25 @@
+{
+  "run_timestamp": "2026-11-25T17:18:23.889894",
+  "source": "synthetic",
+  "raw_dir": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/raw/synthetic/equities/US/SYNTH/daily/ohlcv",
+  "output_file": "ohlcv.parquet",
+  "output_hash": "sha256:4987a3a605e8d066",
+  "git_commit": "7826c4eb7eacf97fca8e3e1e9cd55a15b387d530",
+  "n_raw_rows": 756000,
+  "removed": {
+    "unreadable": 0,
+    "not_positive": 0,
+    "duplicate": 0
+  },
+  "quality": {
+    "n_rows": 756000,
+    "n_tickers": 300,
+    "n_dates": 2520,
+    "first_date": "2016-01-04",
+    "last_date": "2025-08-29",
+    "high_below_low": 0,
+    "open_outside_range": 0,
+    "adj_factor_above_one": 0,
+    "short_history": 0
+  }
+}

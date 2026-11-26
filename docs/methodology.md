@@ -569,7 +569,7 @@ flowchart TD
 | Group | Metric | In the pipeline today? |
 |---|---|---|
 | Signal | IC, IC t-stat, IC decay, holdout IC | yes (05, 06) |
-| Signal | IC by year, decile spread | no (planned: per-year IC table tests survivorship) |
+| Signal | IC by year, decile spread | yes (05, per-year table). Survivorship itself: see [survivorship.md](survivorship.md) |
 | Performance | year-by-year return, Sharpe, cost, turnover | yes (09) |
 | Exposures | market beta | neutralised in 08, measured in 09 |
 | Exposures | alpha and its t-stat after the market | yes (09). After size and value: no (needs factor data) |
@@ -624,3 +624,8 @@ flowchart TD
 | Trading costs | Almgren & Chriss (2000), *J. Risk* 3(2) · Gârleanu & Pedersen (2013), *J. Finance* 68(6) |
 | Sharpe uncertainty | Lo (2002), *Financial Analysts Journal* 58(4) |
 | Multiple testing in finance | Harvey, Liu & Zhu (2016), *Review of Financial Studies* 29(1) |
+
+
+## Survivorship bias
+
+A file of today's index members has no dead companies. Backtests on it look better than reality. The problem, the data sources, the point-in-time universe rule, the audit verdict and the lab are in [survivorship.md](survivorship.md).

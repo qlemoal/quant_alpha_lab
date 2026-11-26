@@ -1,0 +1,9 @@
+{
+  "source": "synthetic",
+  "asset": "equities",
+  "region": "US",
+  "universe": "SYNTH_FULL",
+  "freq": "daily",
+  "description": "Synthetic market with its dead stocks, every ticker in the universe on every date it trades. Used by scripts/demos/survivorship_lab.py",
+  "universe_mode": "all"
+}

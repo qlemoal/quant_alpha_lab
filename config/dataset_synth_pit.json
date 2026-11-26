@@ -1,0 +1,16 @@
+{
+  "source": "synthetic",
+  "asset": "equities",
+  "region": "US",
+  "universe": "SYNTH_PIT",
+  "freq": "daily",
+  "description": "Synthetic market with its dead stocks, point-in-time rule universe (top 200 by dollar volume). Used by scripts/demos/survivorship_lab.py",
+  "universe_mode": "rule",
+  "universe_rule": {
+    "top_n": 200,
+    "adv_window": 60,
+    "min_adv": 1000000,
+    "min_history": 126,
+    "reconstitute_every": 21
+  }
+}

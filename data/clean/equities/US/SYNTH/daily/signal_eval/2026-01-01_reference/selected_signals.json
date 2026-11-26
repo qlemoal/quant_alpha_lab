@@ -1,0 +1,71 @@
+{
+  "signals": [
+    "mom120_zscore_tanh",
+    "mom252_zscore_tanh",
+    "vol120_zscore_clip",
+    "vol252_zscore_clip",
+    "log_adv10_zscore_tanh",
+    "log_adv20_zscore_tanh",
+    "log_adv60_zscore_tanh"
+  ],
+  "mode": "strict",
+  "signal_meta": {
+    "mom120_zscore_tanh": {
+      "family": "momentum",
+      "sign": 1,
+      "rationale": "Investors under-react to news, so 3 to 12 month winners keep winning for some months.",
+      "reference": "Jegadeesh and Titman (1993)"
+    },
+    "mom252_zscore_tanh": {
+      "family": "momentum",
+      "sign": 1,
+      "rationale": "Investors under-react to news, so 3 to 12 month winners keep winning for some months.",
+      "reference": "Jegadeesh and Titman (1993)"
+    },
+    "vol120_zscore_clip": {
+      "family": "low_volatility",
+      "sign": -1,
+      "rationale": "Leverage-constrained investors overpay for high-volatility stocks, so these earn less.",
+      "reference": "Ang, Hodrick, Xing, Zhang (2006)"
+    },
+    "vol252_zscore_clip": {
+      "family": "low_volatility",
+      "sign": -1,
+      "rationale": "Leverage-constrained investors overpay for high-volatility stocks, so these earn less.",
+      "reference": "Ang, Hodrick, Xing, Zhang (2006)"
+    },
+    "log_adv10_zscore_tanh": {
+      "family": "illiquidity",
+      "sign": -1,
+      "rationale": "Investors ask a premium for holding stocks that are hard to trade, so low dollar volume earns more.",
+      "reference": "Amihud (2002)"
+    },
+    "log_adv20_zscore_tanh": {
+      "family": "illiquidity",
+      "sign": -1,
+      "rationale": "Investors ask a premium for holding stocks that are hard to trade, so low dollar volume earns more.",
+      "reference": "Amihud (2002)"
+    },
+    "log_adv60_zscore_tanh": {
+      "family": "illiquidity",
+      "sign": -1,
+      "rationale": "Investors ask a premium for holding stocks that are hard to trade, so low dollar volume earns more.",
+      "reference": "Amihud (2002)"
+    }
+  },
+  "selection_config": {
+    "min_t": 3.0,
+    "min_nonoverlap_t": 2.0,
+    "fdr_alpha": 0.05,
+    "min_dsr": 0.95,
+    "require_prior": true,
+    "n_trials_extra": 0,
+    "dsr_variance": "null"
+  },
+  "fwd_ret_col": "fwdret20",
+  "horizon": 20,
+  "train_end": "2024-09-04",
+  "holdout_start": "2024-10-25",
+  "holdout_dates": 200,
+  "embargo_w": 37
+}

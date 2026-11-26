@@ -1,0 +1,26 @@
+{
+  "admitted_signals": [
+    "log_adv10_zscore_tanh",
+    "log_adv20_zscore_tanh",
+    "log_adv60_zscore_tanh",
+    "mom120_zscore_tanh",
+    "mom252_zscore_tanh",
+    "vol120_zscore_clip",
+    "vol252_zscore_clip"
+  ],
+  "families": [
+    "illiquidity",
+    "low_volatility",
+    "momentum"
+  ],
+  "holdout_ic": 0.04967688307647862,
+  "avg_n_clusters": 7.8,
+  "cluster_ari": 1.0,
+  "market_mode_removed_share": 1.0,
+  "beta_exposure_max_abs": 2.165938533000594e-14,
+  "realised_beta_full": 0.008554249092514957,
+  "sharpe_gross_full": 1.4902652834222514,
+  "sharpe_net_full": 0.5022707803219454,
+  "annual_cost_bps_full": 683.5186003860887,
+  "alpha_t_full": 1.3138525400757248
+}

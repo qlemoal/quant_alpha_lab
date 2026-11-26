@@ -1,0 +1,22 @@
+{
+  "run_id": "2026-01-01_reference",
+  "tag": "reference",
+  "portfolio_config": {
+    "target_vol": 0.1,
+    "base_gross": 1.0,
+    "max_gross_leverage": 4.0,
+    "beta_neutral": true,
+    "beta_source": "features",
+    "beta_feature": "beta252",
+    "beta_shrink": 0.3333333333333333,
+    "max_cluster_multiple": 2.0,
+    "signal_method": "proportional",
+    "cap_method": "cap",
+    "vol_method": "scale",
+    "min_names": 50
+  },
+  "score_col": "combined_score",
+  "n_dates": 480,
+  "n_skipped": 0,
+  "skipped": []
+}
