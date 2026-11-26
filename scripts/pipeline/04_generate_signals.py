@@ -85,6 +85,7 @@ from src.signals.signal_pipeline import (
 )
 from src.signals.cheat import add_cheat_signals, add_placebo_signals, validate_cheat_specs, check_benchmark_tag
 from src.utils.helpers import get_git_commit, get_git_diff, file_hash, params_hash
+from src.utils import console as out
 
 
 # =============================================================================
@@ -170,24 +171,21 @@ def main(run_date: str, tag: str, cheat: bool = False, placebo: bool = False):
     if not cfg.features_file.exists():
         raise FileNotFoundError(f'Missing input: {cfg.features_file}. Run 03_build_features.py first.')
 
-    print('=' * 70)
-    print('PHASE 04: GENERATE SIGNALS')
-    print('=' * 70)
-    print(f'Run ID:    {run_id}')
-    print(f'Dataset:   {cfg.asset}/{cfg.region}/{cfg.universe}/{cfg.freq}')
-    print(f'Features:  {cfg.features_file}')
-    print(f'Output:    {out_dir}')
-    print(f'Horizons:  {HORIZONS}')
+    out.stage('04', 'Generate signals', 'Which candidate signals do we test, and against which future returns?')
+    out.info('run', run_id)
+    out.info('dataset', f'{cfg.asset}/{cfg.region}/{cfg.universe}/{cfg.freq}')
+    out.info('dates', f'{DATE_START or "first"} to {DATE_END or "last"}')
+    out.info('label horizons (days)', HORIZONS)
     if cheat:
-        print('\n  *** CHEAT RUN: the cheat signals use FUTURE returns. Benchmark only, not a strategy. ***\n')
+        out.warn('CHEAT run: the cheat signals use FUTURE returns. A test of the pipeline, never a strategy.')
     if placebo:
-        print(f'  *** PLACEBO RUN: {PLACEBO_COUNT} signals of pure noise are added (true IC = 0). ***\n')
-    print(f'Dates:     {DATE_START or "first"} to {DATE_END or "last"}')
+        out.note(f'PLACEBO run: {PLACEBO_COUNT} signals of pure noise are added (true IC = 0). A sound pipeline admits none.')
 
     # ------------------------------------------------------------------
     # [1/4] Load (lazy: nothing is read yet) and validate the specs
     # ------------------------------------------------------------------
-    print('\n[1/4] Loading the features...')
+    out.step(1, 4, 'Read the features and check the signal list',
+             'a signal is a transform of one feature; a spec whose feature is missing is skipped, not guessed')
     lf = restrict_dates(pl.scan_parquet(cfg.features_file), DATE_START, DATE_END)
     available = set(lf.collect_schema().names())
     missing_cols = {'date', 'ticker', 'open_adj'} - available
@@ -196,15 +194,17 @@ def main(run_date: str, tag: str, cheat: bool = False, placebo: bool = False):
 
     specs, skipped = validate_specs(SIGNAL_SPECS, available)
     for sk in skipped:
-        print(f'  WARNING: skipped {sk["spec"][0]} ({sk["reason"]})')
+        out.warn(f'skipped {sk["spec"][0]}: {sk["reason"]}')
     if not specs:
         raise ValueError('No signal can be built: none of the SIGNAL_SPECS features is in features.parquet.')
-    print(f'  {len(specs)} signals to build, {len(skipped)} skipped')
+    out.info('signals to build', f'{len(specs)} ({len(skipped)} skipped)')
 
     # ------------------------------------------------------------------
     # [2/4] Build the signals and the labels (lazy), then compute once
     # ------------------------------------------------------------------
-    print('\n[2/4] Building signals and labels...')
+    out.step(2, 4, 'Build the labels, apply the universe, build the signals',
+             'labels first, on every row of a ticker (they need its future rows); then keep only the stocks that '
+             'were investable on each date; then rank each signal across those stocks only')
     lf = clean_features(lf, sorted({feat for feat, _, _ in specs}))
 
     # Labels FIRST, on every row of every ticker (a label needs the future rows of the same ticker).
@@ -218,10 +218,10 @@ def main(run_date: str, tag: str, cheat: bool = False, placebo: bool = False):
     if cfg.universe_file.exists():
         lf, universe_info = apply_universe(lf, cfg.universe_file)
         universe_info['applied'] = True
-        print(f'  universe: {cfg.universe_file.name} applied (signals are ranked among its members only)')
+        out.ok(f'point-in-time universe applied ({cfg.universe_file.name}): each date uses only its own members')
     else:
-        print('  WARNING: no universe file. Every ticker is used on every date it trades.')
-        print('           With a list of today\'s survivors this is SURVIVORSHIP BIAS. Run 02b_build_universe.py (docs/survivorship.md).')
+        out.warn('no universe file: every ticker is used on every date it trades. With a list of today\'s '
+                 'survivors this is SURVIVORSHIP BIAS. Run 02b_build_universe.py (docs/survivorship.md).')
 
     lf, signal_cols = build_signals(lf, specs)
     cheat_cols = []
@@ -232,53 +232,56 @@ def main(run_date: str, tag: str, cheat: bool = False, placebo: bool = False):
     if placebo:
         lf, placebo_cols = add_placebo_signals(lf, PLACEBO_COUNT, seed=PLACEBO_SEED, noise_days=PLACEBO_NOISE_DAYS)
         signal_cols = signal_cols + placebo_cols
-    for s in signal_cols:
-        print(f'  {s}')
-    print(f'  labels: {label_cols}')
+    real_cols = [c for c in signal_cols if c not in cheat_cols and c not in placebo_cols]
+    out.info('real signals', f'{len(real_cols)}: {", ".join(real_cols)}')
     if cheat:
-        print(f'  cheat signals: {cheat_cols}')
+        out.info('cheat signals', ', '.join(cheat_cols))
     if placebo:
-        print(f'  placebo signals: {placebo_cols[0]} ... {placebo_cols[-1]} ({len(placebo_cols)})')
+        out.info('placebo signals', f'{placebo_cols[0]} ... {placebo_cols[-1]} ({len(placebo_cols)})')
+    out.info('labels', ', '.join(label_cols) + '   (open of t+1 to open of t+1+h)')
 
     output_cols = ['date', 'ticker'] + signal_cols + label_cols
     df = lf.select(output_cols).collect()
-    print(f'  {df.height:,} rows x {len(output_cols)} columns, {df["ticker"].n_unique()} tickers, '
-          f'{df["date"].n_unique()} dates ({df["date"].min()} to {df["date"].max()})')
+    out.info('table', f'{df.height:,} rows, {df["ticker"].n_unique()} tickers, {df["date"].n_unique()} dates '
+                      f'({df["date"].min()} to {df["date"].max()})')
 
     # ------------------------------------------------------------------
     # [3/4] Checks
     # ------------------------------------------------------------------
-    print('\n[3/4] Checks...')
+    out.step(3, 4, 'Check the labels and the signals (no return-based statistic here)',
+             'a label that crosses from one ticker to the next, or a missing day, silently corrupts every later '
+             'number; IC is NOT computed here, so the holdout cannot influence which signals you build')
     dead_set = set(lf_all_rows.filter(pl.col('is_dead')).select('ticker').unique().collect()['ticker'].to_list())
     slim = lf_all_rows.select(['ticker', 'date'] + label_cols).collect()
     label_report = check_labels(slim, HORIZONS, dead_tickers=dead_set)    # raises if labels cross tickers
     del slim
-    print(f'  dead tickers (stop trading before the end of the data): {len(dead_set)}. Their labels end at the last price.')
+    out.ok('labels stay inside their ticker (the last h+1 rows of each ticker have no label)')
+    out.info('dead tickers', f'{len(dead_set)} (their labels end at the last price, so the delisting crash is in them)')
+    out.table(['label', 'null %', 'std', 'max |x|', '|x| > 2'],
+              [[col, f'{r["null_pct"]:.2f}', f'{r["std"]:.4f}', f'{r["max_abs"]:.2f}', r['n_abs_above_2']]
+               for col, r in label_report.items()], [-10, 7, 7, 8, 8])
     for col, r in label_report.items():
-        print(f'  {col:<10} null {r["null_pct"]:5.2f}%   std {r["std"]:.4f}   max |value| {r["max_abs"]:.2f}'
-              f'   rows with |value| > 2: {r["n_abs_above_2"]}')
         if r['n_abs_above_2_alive']:
-            print(f'    WARNING: {r["n_abs_above_2_alive"]} extreme labels on stocks that did not die. Look for an unadjusted split in the prices.')
-        elif r['n_abs_above_2']:
-            print(f'    note: all {r["n_abs_above_2"]} extreme labels are on dead stocks (delisting crashes): expected.')
+            out.warn(f'{col}: {r["n_abs_above_2_alive"]} extreme labels on stocks that did not die. '
+                     'Look for an unadjusted split in the prices.')
 
     gaps = calendar_gaps(lf_all_rows)
-    print(f'  missing (ticker, date) rows inside the life of the tickers: {gaps["missing_rows"]:,} '
-          f'({gaps["missing_share"]:.2%}); worst ticker {gaps["worst_ticker"]} ({gaps["worst_ticker_missing"]} rows)')
+    out.info('missing days inside a life', f'{gaps["missing_rows"]:,} ({gaps["missing_share"]:.2%}); '
+             f'worst {gaps["worst_ticker"]} ({gaps["worst_ticker_missing"]})')
     if gaps['missing_share'] > MAX_MISSING_SHARE:
-        print('  WARNING: labels shift by rows, so missing dates make the real horizon longer than h days.')
+        out.warn('labels shift by rows, so missing dates make the real horizon longer than h days')
 
     stats = signal_descriptives(df, signal_cols)
     warnings = signal_warnings(stats)
     for w in warnings:
-        print(f'  WARNING: {w}')
+        out.warn(w)
     if not warnings:
-        print('  signals: none empty, constant or mostly null')
+        out.ok('no signal is empty, constant or mostly null')
 
     # ------------------------------------------------------------------
     # [4/4] Save
     # ------------------------------------------------------------------
-    print('\n[4/4] Saving...')
+    out.step(4, 4, 'Save the signals and the provenance (git commit, input hash, parameters)')
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / 'signals.parquet'
     df.write_parquet(out_file)
@@ -327,10 +330,9 @@ def main(run_date: str, tag: str, cheat: bool = False, placebo: bool = False):
     with open(out_dir / 'config.json', 'w') as f:
         json.dump(config, f, indent=2, default=str)
 
-    print(f'  signals: {out_file}')
-    print(f'  config:  {out_dir / "config.json"}')
-    print(f'\nDone in {time.time() - start:.1f} s.')
-    print(f'Next: python scripts/pipeline/05_evaluate_signals.py --date {run_date} --tag {tag}')
+    out.info('time', f'{time.time() - start:.1f} s')
+    out.done({'signals': out_file, 'config': out_dir / 'config.json'},
+             f'python scripts/pipeline/05_evaluate_signals.py --date {run_date} --tag {tag}')
 
 
 if __name__ == '__main__':

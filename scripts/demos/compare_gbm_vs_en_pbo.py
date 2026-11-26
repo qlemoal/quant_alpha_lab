@@ -45,7 +45,7 @@ PURGE_W = HORIZON + 1
 AUTOCORR_EMBARGO = EMBARGO_WINDOW  # placeholder, would come from scripts/embargo_selection.py on real data
 EMBARGO_W = total_embargo_window(PURGE_W, AUTOCORR_EMBARGO, combine='sum')
 
-HOLDOUT_DATES = 200
+from config.constants import HOLDOUT_DATES
 N_HOLDOUT_BLOCKS = 8  # T in the PBO matrix, must divide evenly per probability_of_backtest_overfitting()'s own requirement
 
 

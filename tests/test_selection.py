@@ -5,7 +5,8 @@ What is checked:
   1. priors: names map to the right family and sign; unknown names have no prior
   2. DSR: N = 1 equals PSR; more trials raise SR0; a Monte Carlo of skill-less trials shows that the
      best raw Sharpe is often "significant" while the DSR of the best is rarely above 0.95
-  3. gates: each gate stops a signal built to fail only that gate; a missing statistic fails
+  3. gates (prior, sign, Romano-Wolf with earlier trials): each gate stops a signal built to fail only that gate;
+     a missing statistic fails; the cross-checks (Newey-West, q-value, DSR) decide nothing
 '''
 
 import numpy as np
@@ -119,9 +120,9 @@ def test_wrong_sign_gives_low_dsr():
 
 # ----------------------------------------------------------------------------- gates
 
-def stat(signal='good', sign=-1, family='reversal', mean_ic=-0.03, nw=-5.0, no=-3.0, q=0.001, dsr=0.99):
-    return dict(signal=signal, sign=sign, family=family, mean_ic=mean_ic, nw_tstat=nw,
-                nonoverlap_tstat=no, qvalue=q, dsr=dsr)
+def stat(signal='good', sign=-1, family='reversal', mean_ic=-0.03, p_rw=0.001, dsr=0.99, nw=-5.0):
+    return dict(signal=signal, sign=sign, family=family, mean_ic=mean_ic, p_single=None if p_rw is None else p_rw / 2, p_rw=p_rw, dsr=dsr,
+                nw_tstat=nw, nonoverlap_tstat=-3.0, qvalue=0.001)
 
 
 def run(stats, **kw):
@@ -131,16 +132,12 @@ def run(stats, **kw):
 def test_good_signal_is_admitted_with_negative_prior():
     row = run([stat()])[0]
     assert row['selected'] and row['failed_gate'] is None
-    assert row['aligned_nw_t'] == 5.0                         # t x sign: a negative t with a negative prior is good
 
 
 @pytest.mark.parametrize('change, gate', [
     (dict(sign=None, family=None), 'prior'),
-    (dict(mean_ic=0.03, nw=5.0, no=3.0), 'sign'),             # right size, wrong direction
-    (dict(nw=-2.9), 't_nw'),
-    (dict(no=-1.9), 't_nonov'),
-    (dict(q=0.06), 'fdr'),
-    (dict(dsr=0.94), 'dsr'),
+    (dict(mean_ic=0.03), 'sign'),                              # right size, wrong direction
+    (dict(p_rw=0.06), 'fwer'),
 ])
 def test_each_gate_stops_its_signal(change, gate):
     row = run([stat(**change)])[0]
@@ -148,24 +145,35 @@ def test_each_gate_stops_its_signal(change, gate):
 
 
 def test_missing_statistic_fails():
-    assert run([stat(nw=None)])[0]['failed_gate'] == 't_nw'
-    assert run([stat(q=None)])[0]['failed_gate'] == 'fdr'
-    assert run([stat(dsr=float('nan'))])[0]['failed_gate'] == 'dsr'
+    assert run([stat(p_rw=None)])[0]['failed_gate'] == 'fwer'
+
+
+def test_cross_checks_decide_nothing():
+    """A tiny Newey-West t or a low DSR does not stop a signal: they are printed cross-checks, not gates."""
+    assert run([stat(nw=-0.1, dsr=0.1)])[0]['selected']
+
+
+def test_earlier_trials_scale_the_p_value():
+    """4 signals now, 12 tried before: 4 families of 4, so p_all = 4 x p_RW."""
+    rows = run([stat(f's{i}', p_rw=0.02) for i in range(4)], n_trials_extra=12)
+    assert rows[0]['p_all'] == pytest.approx(0.08) and not rows[0]['selected']
+    assert run([stat(f's{i}', p_rw=0.02) for i in range(4)])[0]['selected']
+    assert run([stat(p_rw=0.5)], n_trials_extra=100)[0]['p_all'] == 1.0
 
 
 def test_exploration_mode_skips_prior_and_sign():
-    s = stat(sign=None, family=None, mean_ic=0.03, nw=5.0, no=3.0)
+    s = stat(sign=None, family=None, mean_ic=0.03)
     assert not run([s])[0]['selected']
     assert run([s], require_prior=False)[0]['selected']
 
 
 def test_thresholds_are_configurable():
-    assert run([stat(nw=-2.5)], min_t=2.0)[0]['selected']
-    assert not run([stat(no=-2.5)], min_nonoverlap_t=3.0)[0]['selected']
+    assert run([stat(p_rw=0.08)], fwer_alpha=0.10)[0]['selected']
+    assert not run([stat(p_rw=0.04)], fwer_alpha=0.01)[0]['selected']
 
 
 def test_gate_summary_counts_first_failure_only():
-    tab = apply_gates([stat('a'), stat('b', nw=-1.0, q=0.5), stat('c', dsr=0.1)], SelectionConfig())
+    tab = apply_gates([stat('a'), stat('b', p_rw=0.5), stat('c', mean_ic=0.03, p_rw=0.5)], SelectionConfig())
     s = gate_summary(tab)
-    assert s['admitted'] == 1 and s['t_nw'] == 1 and s['dsr'] == 1 and s['fdr'] == 0 and s['tested'] == 3
+    assert s['admitted'] == 1 and s['fwer'] == 1 and s['sign'] == 1 and s['tested'] == 3
     assert set(GATES) <= set(s)

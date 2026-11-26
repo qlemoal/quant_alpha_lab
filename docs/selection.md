@@ -10,7 +10,7 @@ Many signals are tried. The best of many tries looks good even when all are usel
 1. A hard admission test. Few signals pass. Passing nothing is a valid result.
 2. A small, fixed-structure combination. Few free numbers, so little to overfit.
 
-## 2. The six gates (stage 05, default `--mode strict`)
+## 2. The three gates (stage 05, default `--mode strict`)
 
 ```mermaid
 flowchart LR
@@ -18,35 +18,40 @@ flowchart LR
     G1 -- no --> X[rejected]
     G1 -- yes --> G2{sign = prior?}
     G2 -- no --> X
-    G2 -- yes --> G3{NW t >= 3?}
+    G2 -- yes --> G3{p_all < 0.05?}
     G3 -- no --> X
-    G3 -- yes --> G4{non-overlap t >= 2?}
-    G4 -- no --> X
-    G4 -- yes --> G5{q < 0.05?}
-    G5 -- no --> X
-    G5 -- yes --> G6{DSR >= 0.95?}
-    G6 -- no --> X
-    G6 -- yes --> A[admitted]
+    G3 -- yes --> A[admitted]
 ```
 
 | Gate | Test | Failure it catches |
 |---|---|---|
-| prior | family, sign and rationale written in `src/signals/priors.py` before the data | a pattern with no story (data mining) |
+| prior | family, sign and rationale written in `src/signals/priors.py` | a pattern with no story (data mining) |
 | sign | sign of the mean IC equals the prior sign | a pattern in the wrong direction |
-| t_nw | sign-aligned Newey-West t >= 3 | multiple testing (Harvey, Liu, Zhu 2016) |
-| t_nonov | sign-aligned t on one IC every h days >= 2 | an overlap correction that is too weak |
-| fdr | q-value < 0.05 | share of false discoveries |
-| dsr | deflated Sharpe >= 0.95 | the best of N tries is biased upwards |
+| fwer | p_all = min(1, p_RW x (K + n_trials_extra) / K) < 0.05 | luck among all the signals tried |
 
-Each gate has a command-line option in stage 05. The file `selection_gates.parquet` shows, for every signal,
-which gate stopped it first. `--mode legacy` keeps the old rule (q < alpha) for exploration only.
+**p_RW, step by step** (`src/evaluation/signals/bootstrap.py`):
 
-### Deflated Sharpe ratio (short)
+1. Daily rank IC of each signal on the search period. The series has memory: labels of neighbour days share h - 1 days, and a slow signal adds more.
+2. Stationary block bootstrap (Politis-Romano). The mean block length comes from the data (Politis-White) and is at least h. The SAME resampled days are used for all signals, so the bootstrap keeps their correlation.
+3. Studentized ("percentile-t"): t = mean IC / se, and t* = (mean* - mean) / se* in every resample. The se is a batch-means standard error, recomputed in each resample.
+4. One-sided in the prior direction. A signal without a prior is tested two-sided.
+5. Romano-Wolf step-down on the maximum of t* across the signals. Admitting with p_RW < 5% means: the chance that ANY admitted signal is luck is below 5% (family-wise error rate).
 
-The series is the daily IC of the signal, sign-aligned, one value every h days. SR0 is the best Sharpe that
-N skill-less trials are expected to reach. DSR is the probability that the true Sharpe exceeds SR0.
-N counts all signals of the run plus `--n_trials_extra` (signals tried and removed earlier).
-Details and limits: `src/evaluation/signals/dsr.py`.
+**Earlier runs.** Romano-Wolf sees only the K signals of this run. `--n_trials_extra` counts the signals tried before on the same data. If each earlier run was tested the same way, the trials form (K + n_trials_extra) / K families, and the Bonferroni bound over families gives the factor in p_all.
+
+**Why these tests and not the old ones.** `scripts/research/calibrate_tests.py` simulates IC series with a known truth (10 years, h = 20, IC std 0.15, 300 series per cell):
+
+| Signal memory | Newey-West | Non-overlapping t | Bootstrap (gate) |
+|---|---|---|---|
+| 1 day | 8.7% | 6.3% | 3.7% |
+| 20 days | 9.7% | 11.7% | 4.3% |
+| 60 days | 22.0% | 31.0% | 4.3% |
+
+The nominal level is 5% everywhere. Newey-West and the non-overlapping t say "significant" up to 4 to 6 times too often on slow signals. The bootstrap keeps 5%, with about the same power on real signals (IC 0.02: 24% against 26% for Newey-West). With 10 correlated signals, a fixed-se bootstrap gave a family-wise error of 17%; the studentized one gives 4 to 5% (`tests/test_bootstrap.py`).
+
+The deflated Sharpe ratio was a gate before. It keeps one IC every h days (95% of the data dropped at h = 20), and on the synthetic market it rejected planted effects that Romano-Wolf found. It is still printed.
+
+**Cross-checks (printed, they decide nothing):** Newey-West t, non-overlapping t, BH / BY / Storey q-value, deflated Sharpe ratio, IC decay, IC by year. A big disagreement with the gates is a warning sign. The file `selection_gates.parquet` has every number. `--mode legacy` keeps the old rule (q < alpha) for exploration only.
 
 ## 3. Combination (stage 06, family mode)
 
@@ -84,10 +89,10 @@ flowchart LR
 - A signal correlated 0.9 with an existing one adds almost nothing, even if it is strong alone.
 - So a weak but uncorrelated signal can deserve weight. A strong but redundant one may not.
 
-Honest status: the strict gates (section 2) test each signal ALONE. A weak diversifier fails them and is rejected before the combiner sees it. The drop-one test (section 3) measures marginal value, but only for admitted signals. To admit a weak diversifier you need a separate rule with its own written prior (for example: IC t of at least 2, correlation with admitted signals below 0.3). That rule is not built. I wrote earlier that such a signal is "kept automatically"; that was wrong for strict mode.
+Honest status: the gates (section 2) test each signal ALONE. A weak diversifier fails them and is rejected before the combiner sees it. The drop-one test (section 3) measures marginal value, but only for admitted signals. To admit a weak diversifier you need a separate rule with its own written prior (for example: IC t of at least 2, correlation with admitted signals below 0.3). That rule is not built. I wrote earlier that such a signal is "kept automatically"; that was wrong for strict mode.
 
 ## 5. What passing the gates does not prove
 
 - The data are survivors (current S&P 500 members). Survivorship favours low-volatility and size-related signals.
 - The gates control luck among the signals tried. They do not control a wrong data set.
-- The holdout (last 200 dates) is the only clean test. Judge the strategy there.
+- The holdout (last `HOLDOUT_DATES` = 756 dates, 3 years) is the only clean test. Judge the strategy there.

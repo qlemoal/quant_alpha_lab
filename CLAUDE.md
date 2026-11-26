@@ -44,7 +44,10 @@ src/                  # Library code:
 - **Config is code** — `SIGNAL_SPECS` in 04 defines what signals to build; config.json saved per run for reproducibility
 - **Forward returns use open-to-open** (`fwdret{h}` = logret from open(t+1) to open(t+h+1), realistic execution)
 - **Evaluation horizon** = 20 days default (fwdret20)
-- **Elastic Net combiner** — CPCV/Walk-forward CV, q-value weighting, FDR-filtered signals only
+- **Selection (05)** — gates: prior, sign, Romano-Wolf p (studentized block bootstrap) scaled for earlier trials < 0.05. Newey-West, FDR and DSR are printed cross-checks only (`docs/selection.md`)
+- **Holdout** — last `HOLDOUT_DATES` (756) labelled dates, set in `config/constants.py`
+- **Elastic Net combiner** — CPCV, family scores, non-negative weights, one-SE rule
+- **Console output** — stages print through `src/utils/console.py` (stage / step with "why" / [PASS] [FAIL] [WARN] [NOTE])
 - **Risk model** — RMT eigenvalue cleaning + Louvain clustering on correlation matrix
 - **Provenance** — Every run saves git_commit, features_hash, params_hash, signal_stats, ic_stats, performance_stats
 

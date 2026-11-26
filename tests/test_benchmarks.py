@@ -1,6 +1,7 @@
 '''Tests of the benchmark report (src/evaluation/signals/benchmarks.py): how the selection treats cheat and placebo signals.'''
 
 import numpy as np
+import pytest
 import polars as pl
 
 from src.evaluation.signals.benchmarks import benchmark_report, format_benchmark_report
@@ -62,3 +63,15 @@ def test_more_tests_can_cost_a_real_signal():
     rep = benchmark_report(full, alone, 0.1)
     assert rep['real']['selected_alone'] == ['r1']
     assert rep['real']['lost_because_of_benchmarks'] == ['r1']
+
+def test_gate_report_counts_benchmarks():
+    from src.evaluation.signals.benchmarks import benchmark_gate_report
+    gates = pl.DataFrame({
+        'signal': ['mom20_zscore_tanh', 'cheat_h20_ic050', 'cheat_h20_ic010', 'placebo_000', 'placebo_001'],
+        'p_single': [0.2, 0.001, 0.3, 0.01, 0.8],
+        'selected': [False, True, False, False, False],
+    })
+    rep = benchmark_gate_report(gates)
+    assert rep['cheat']['admitted'] == ['cheat_h20_ic050'] and rep['placebo']['admitted'] == []
+    assert rep['placebo']['n_p_below'] == 1 and rep['placebo']['expected_p_below'] == pytest.approx(0.1)
+    assert benchmark_gate_report(gates.filter(pl.col('signal') == 'mom20_zscore_tanh')) is None

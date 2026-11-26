@@ -54,7 +54,7 @@ import polars as pl
 from polars import col as c
 from sklearn.linear_model import ElasticNet, ElasticNetCV, enet_path
 
-from config.constants import EMBARGO_WINDOW
+from config.constants import EMBARGO_WINDOW, HOLDOUT_DATES
 from src.validation.walk_forward_cv import walk_forward_cv, Fold
 from src.validation.cpcv import cpcv
 from src.features.returns import add_fwd_returns, add_fwdret_horizon
@@ -481,7 +481,7 @@ def run_en_combiner(
     embargo_window: int = EMBARGO_WINDOW,
     n_blocks: int = 10,
     n_test_blocks: int = 2,
-    holdout_dates: int = 200,
+    holdout_dates: int = HOLDOUT_DATES,
     q_values: "dict[str, float] | None" = None,
     l1_ratio_grid: "list[float] | None" = None,
     fwdret_col: "str | None" = None,
@@ -511,11 +511,9 @@ def run_en_combiner(
     purge_w = horizon + 1
     embargo_w = purge_w + embargo_window
 
-    print('    Building the design matrix')
     panel = build_design_matrix(lf, signal_cols, fwdret_col=fwdret_col)
     unique_dates = panel['date'].unique().sort().to_numpy()
 
-    print('    Separating the train/holdout sets')
     holdout_start = unique_dates[-holdout_dates]
     gap_cutoff = unique_dates[-holdout_dates - embargo_w]
     search_panel = panel.filter(pl.col('date') <= gap_cutoff)
@@ -523,10 +521,8 @@ def run_en_combiner(
     search_unique_dates = search_panel['date'].unique().sort().to_numpy()
     search_panel_dates = search_panel['date'].to_numpy()
 
-    print('    Building the CPCV folds')
     cv_folds = build_cpcv_idx(search_panel_dates, search_unique_dates, n_blocks, n_test_blocks, purge_w, embargo_w)
 
-    print('    Fitting the EN (CPCV search) and computing out-of-fold scores')
     fit_result = fit_elastic_net_combiner(
         search_panel, signal_cols, fwdret_col, cv_folds,
         q_values=q_values, l1_ratio_grid=l1_ratio_grid, target=target, q_power=q_power,
@@ -534,10 +530,8 @@ def run_en_combiner(
     )
 
     from src.evaluation.signals.report import signal_report
-    print('    Combining the EN into one signal')
     # Holdout rows are not in the OOF table, so they get the final model's score: a true out-of-sample test.
     combined_lf = combined_score_column(holdout_panel.lazy(), fit_result)
-    print('    Computing the signal report for this combined signal (holdout)')
     holdout_report = signal_report(combined_lf, 'combined_score', fwdret_col, horizon=horizon)
 
     return {
@@ -564,7 +558,7 @@ if __name__ == '__main__':
     q_values = {'mom20_zscore_tanh': 0.02, 'mom252_zscore_tanh': 0.01, 'vol60_rank': 0.15}
 
     result = run_en_combiner(lf, survivor_signals, horizon=20, embargo_window=EMBARGO_WINDOW, q_values=q_values,
-                             n_blocks=10, n_test_blocks=2, holdout_dates=200)
+                             n_blocks=10, n_test_blocks=2)
 
     print(f"alpha={result['model'].alpha_:.6f}, l1_ratio={result['model'].l1_ratio_}")
     print(dict(zip(survivor_signals, result['model'].coef_)), 'intercept=', result['model'].intercept_)

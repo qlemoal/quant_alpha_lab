@@ -1,0 +1,19 @@
+{
+  "run_id": "2026-11-26_dev3_cheat_placebo",
+  "tag": "dev3_cheat_placebo",
+  "risk_config": {
+    "rebalance_freq": "weekly",
+    "lookback_window": 252,
+    "min_obs": 60,
+    "min_assets": 50,
+    "cov_method": "ledoit_wolf",
+    "cluster_resolution": 1.0,
+    "cluster_min_size": 5,
+    "cluster_remove_market_mode": true,
+    "n_factors": 5,
+    "save_corr_raw": false
+  },
+  "score_col": "combined_score",
+  "start_date": "2016-12-23",
+  "end_date": "2025-07-31"
+}

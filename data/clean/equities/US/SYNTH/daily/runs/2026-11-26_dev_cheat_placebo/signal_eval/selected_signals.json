@@ -1,0 +1,43 @@
+{
+  "signals": [
+    "cheat_h20_ic020",
+    "cheat_h20_ic030",
+    "cheat_h20_ic050"
+  ],
+  "mode": "strict",
+  "signal_meta": {
+    "cheat_h20_ic020": {
+      "family": "cheat",
+      "sign": 1,
+      "rationale": "Benchmark: built from the future return with a known IC > 0. Never a strategy.",
+      "reference": "src/signals/cheat.py"
+    },
+    "cheat_h20_ic030": {
+      "family": "cheat",
+      "sign": 1,
+      "rationale": "Benchmark: built from the future return with a known IC > 0. Never a strategy.",
+      "reference": "src/signals/cheat.py"
+    },
+    "cheat_h20_ic050": {
+      "family": "cheat",
+      "sign": 1,
+      "rationale": "Benchmark: built from the future return with a known IC > 0. Never a strategy.",
+      "reference": "src/signals/cheat.py"
+    }
+  },
+  "selection_config": {
+    "fwer_alpha": 0.05,
+    "min_dsr": 0.95,
+    "require_prior": true,
+    "n_trials_extra": 0,
+    "dsr_variance": "null",
+    "n_boot": 1000,
+    "boot_seed": 0
+  },
+  "fwd_ret_col": "fwdret20",
+  "horizon": 20,
+  "train_end": "2022-07-19",
+  "holdout_start": "2022-09-08",
+  "holdout_dates": 756,
+  "embargo_w": 37
+}

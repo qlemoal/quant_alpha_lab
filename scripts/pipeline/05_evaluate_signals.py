@@ -1,408 +1,398 @@
 #!/usr/bin/env python
 '''
 ===============================================
-Phase 05: Evaluate Signals and Select (strict gates)
+Stage 05: Evaluate Signals and Select
 ===============================================
+QUESTION ANSWERED
+    "Which candidate signals carry real information about future returns, and are not luck?"
 
-Evaluates generated signals: Rank IC, Newey-West, IC decay, FDR (BH/BY/q-value), deflated Sharpe.
-Then it ADMITS a signal to the combiner only if it passes every gate (src/evaluation/signals/selection.py):
+THE STAGE IN ONE PICTURE
+    signals.parquet (04)
+        |
+        |  [1] keep the SEARCH period only        the holdout (last HOLDOUT_DATES dates) and the gap before it are cut
+        |  [2] daily rank IC of each signal       Spearman(signal, fwdret{h}) across the stocks of each date
+        |  [3] bootstrap test, signal by signal   is the mean IC above 0, in the direction of the prior?
+        |  [4] Romano-Wolf                        correct the p-values for the number of signals of this run
+        |  [5] earlier trials                     p_all = p_RW x (K + n_trials_extra) / K
+        |  [6] cross-checks (decide nothing)      Newey-West t, non-overlapping t, BH / BY / q, deflated Sharpe, IC by year
+        |  [7] decision                           gates: prior -> sign -> p_all < 5%
+        v
+    selected_signals.json (06 reads it)
 
-    prior -> sign -> Newey-West t >= 3 -> non-overlapping t >= 2 -> q < 0.05 -> deflated Sharpe >= 0.95
+WHY THESE TESTS (short; the long version is in docs/selection.md)
+    - The daily IC series has memory: labels of neighbour days share h - 1 days, and slow signals add more.
+      A plain t-test, and even Newey-West, says "significant" too often. A studentized block bootstrap keeps the
+      memory inside blocks of days; its false-positive rate is about 5% at 5% (scripts/research/calibrate_tests.py).
+    - Many signals are tested at once. Romano-Wolf controls the chance of admitting ANY false signal, and it uses the
+      real correlation between the signals (it resamples the same days for all of them).
+    - Signals tried in earlier runs are invisible to Romano-Wolf. --n_trials_extra counts them: the p-value is
+      scaled by the number of families (Bonferroni over runs).
 
-The priors (family, sign, rationale) are written in src/signals/priors.py BEFORE the data are seen.
-The default mode is 'strict'. The old rule (q < --alpha only) is kept as --mode legacy, for exploration:
-a legacy selection is NOT evidence of a strategy.
+NO HOLDOUT LEAKAGE
+    Only dates <= train_end are used. train_end is computed with the SAME rule as 06:
+        train_end = labelled_dates[-holdout_dates - embargo_w]       embargo_w = (horizon + 1) + EMBARGO_WINDOW
+
 Admitting no signal is a valid result. It means the data show no robust signal.
 
-WHAT CHANGED vs the previous version (and why)
-----------------------------------------------
-1. NO HOLDOUT LEAKAGE.
-   Before: IC, p-values and the selection used ALL dates, including the 200-date
-   holdout that 06 uses as its final out-of-sample test.
-   Now: only dates <= train_end are used. train_end is computed with the SAME rule as 06:
-       train_end = unique_dates[-holdout_dates - embargo_w]
-       embargo_w = (horizon + 1) + EMBARGO_WINDOW
-   The gap between train_end and the holdout start (embargo_w dates) is larger than
-   the label length, so no training label touches the holdout.
-2. CORRECT AUTOCORRELATION CONTROL.
-   Newey-West now gets horizon=h, so its lag covers the label overlap (see IC/metrics.py).
-   A non-overlapping t-stat (one IC every h days) is added as a cross-check.
-3. FDR gets the right numbers.
-   Before: the Newey-West t-stat was replaced by the IR in the 'tstat' column.
-   Now: 'tstat' = Newey-West t-stat. p-values come from the same t-stat.
-4. No crash if a t-stat is missing (None): the p-value is NaN and the signal is ignored by FDR.
+OUTPUTS  {clean_base}/runs/{run_id}/signal_eval/
+    ic_summary.parquet        per signal: IC statistics, Newey-West and non-overlapping t (search period)
+    bootstrap_tests.parquet   per signal: bootstrap t, single p-value, Romano-Wolf adjusted p-value
+    ic_by_year.parquet        mean IC per calendar year (stability, survivorship check)
+    ic_decay.parquet          IC against the label horizon
+    fdr_report.parquet        BH, BY, Storey q-value (cross-check; 06 reads the q-values in legacy mode)
+    selection_gates.parquet   per signal: one pass/fail per gate, first failed gate
+    signal_report.json        everything above in one file
+    selected_signals.json     admitted signals + family and sign of each (06 reads it)
 
-Inputs:
-  data/clean/{asset}/{region}/{universe}/{freq}/runs/{run_id}/signals/signals.parquet
-  data/clean/{asset}/{region}/{universe}/{freq}/runs/{run_id}/signals/config.json
-
-Outputs:
-  data/clean/{asset}/{region}/{universe}/{freq}/runs/{run_id}/signal_eval/
-    ├── ic_summary.parquet      # Per-signal IC stats (training dates only)
-    ├── ic_by_year.parquet      # Mean IC of each signal per calendar year (stability, survivorship check)
-    ├── ic_decay.parquet        # IC vs horizon (training dates only)
-    ├── fdr_report.parquet      # BH, BY, q-value per signal
-    ├── selection_gates.parquet # one row per signal: statistics, one pass/fail per gate, first failed gate
-    ├── signal_report.json      # Human-readable summary
-    └── selected_signals.json   # Admitted signals + family and sign of each (for the combiner)
-
-Usage:
-    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-06 --tag default --horizon 20
-    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-06 --tag default --mode legacy --alpha 0.2
+USAGE
+    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-07 --tag default
+    python scripts/pipeline/05_evaluate_signals.py --date 2026-11-07 --tag default --mode legacy --alpha 0.2
 '''
 
 import argparse
 import json
-import math
 import sys
 from pathlib import Path
 
-# Make `import src...` and `import config...` work wherever the script is started from.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import polars as pl
 import numpy as np
+import polars as pl
 
 from config.paths import get_paths, run_id_from_args
-from config.constants import EMBARGO_WINDOW
+from config.constants import EMBARGO_WINDOW, HOLDOUT_DATES, TRADING_DAYS
 from src.evaluation.signals.ic.core import compute_ic, summarize_ic
-from src.evaluation.signals.ic.metrics import (
-    ic_decay,
-    newey_west_ic_tstat,
-    ic_pvalue_nw,
-    ic_tstat_non_overlapping,
-)
+from src.evaluation.signals.ic.metrics import ic_decay, newey_west_ic_tstat, ic_pvalue_nw, ic_tstat_non_overlapping
 from src.evaluation.signals.fdr import fdr_report
-from src.evaluation.signals.benchmarks import benchmark_report, format_benchmark_report
+from src.evaluation.signals.benchmarks import benchmark_gate_report
+from src.evaluation.signals.bootstrap import bootstrap_test_table
 from src.evaluation.signals.dsr import deflated_sharpe_table
 from src.evaluation.signals.yearly import yearly_ic_table
-from src.evaluation.signals.selection import SelectionConfig, apply_gates, gate_summary, config_dict
-from src.signals.cheat import signal_group
+from src.evaluation.signals.selection import (
+    SelectionConfig, GATES, GATE_WHY, apply_gates, gate_summary, config_dict, earlier_trials_factor,
+)
 from src.signals.priors import priors_table
+from src.utils import console as out
+from src.utils.console import num
+
+N_STEPS = 7
+DECAY_HORIZONS = [1, 5, 10, 20, 60]
 
 
-def _fmt(x, spec):
-    '''Format a number that may be None/NaN without crashing.'''
-    if x is None or (isinstance(x, float) and math.isnan(x)):
-        return 'nan'.rjust(len(format(0.0, spec)))
-    return format(x, spec)
+# =============================================================================
+# STEPS (one function per step; main() only calls them in order)
+# =============================================================================
 
+def load_search_period(signals_file: Path, fwd_col: str, holdout_dates: int, embargo_w: int):
+    '''[1] Read the signals, cut the gap and the holdout. Returns (df, signal_cols, split dict).'''
+    df = pl.read_parquet(signals_file)
+    signal_cols = [c for c in df.columns if c not in ('date', 'ticker') and not c.startswith('fwdret')]
+    if fwd_col not in df.columns:
+        raise ValueError(f'{fwd_col} not in signals.parquet. Available: {[c for c in df.columns if c.startswith("fwdret")]}')
+    labelled = df.filter(pl.col(fwd_col).is_not_null())['date'].unique().sort().to_list()
+    if len(labelled) <= holdout_dates + embargo_w + 100:
+        raise ValueError(f'Only {len(labelled)} labelled dates: too few for a holdout of {holdout_dates} '
+                         f'and a gap of {embargo_w}. Lower HOLDOUT_DATES in config/constants.py.')
+    split = {
+        'first_date': labelled[0], 'train_end': labelled[-holdout_dates - embargo_w],
+        'holdout_start': labelled[-holdout_dates], 'last_date': labelled[-1],
+        'n_tickers': df['ticker'].n_unique(),
+    }
+    df = df.filter(pl.col('date') <= split['train_end'])
+    split['n_train_dates'] = df['date'].n_unique()
+    return df, signal_cols, split
+
+
+def daily_ic(df: pl.DataFrame, signal_cols: list, fwd_col: str, horizon: int):
+    '''[2] Daily rank IC of every signal + the classic statistics. Returns (ic_df, ic_dated).'''
+    rows, ic_dated = [], {}
+    for col in signal_cols:
+        ic = compute_ic(df.lazy(), col, fwd_col).collect()
+        s = summarize_ic(ic)
+        vals = ic['ic'].to_numpy()
+        ic_dated[col] = (ic['date'].to_list(), vals)
+        nw = newey_west_ic_tstat(vals, horizon=horizon)
+        no = ic_tstat_non_overlapping(vals, horizon=horizon)
+        rows.append({'signal': col, 'mean_ic': s['mean'], 'std_ic': s['std'], 'ir': s['ir'],
+                     'hit_rate': s['hit_rate'], 'n_obs': s['n_days'],
+                     'nw_tstat': nw.get('t_stat'), 'nw_lag': nw.get('max_lag'), 'p_value': ic_pvalue_nw(nw),
+                     'nonoverlap_tstat': no.get('t_stat')})
+    return pl.DataFrame(rows, infer_schema_length=None), ic_dated
+
+
+def cross_checks(df: pl.DataFrame, ic_df: pl.DataFrame, signal_cols: list, alpha: float):
+    '''[6] FDR table (from the Newey-West p-values) and IC decay. They decide nothing in strict mode.'''
+    fdr = fdr_report(
+        signal_names=ic_df['signal'].to_list(),
+        tstats=[float('nan') if t is None else t for t in ic_df['nw_tstat'].to_list()],
+        pvalues=[float('nan') if p is None else p for p in ic_df['p_value'].to_list()],
+        alpha=alpha,
+    )
+    hs = [h for h in DECAY_HORIZONS if f'fwdret{h}' in df.columns]
+    decay = pl.concat([ic_decay(df.lazy(), c, hs).with_columns(pl.lit(c).alias('signal')) for c in signal_cols])
+    return fdr, decay
+
+
+def gate_inputs(ic_df: pl.DataFrame, boot: dict, dsr: dict, fdr: pl.DataFrame, meta: dict) -> list:
+    '''One dict per signal with what apply_gates needs.'''
+    q = dict(zip(fdr['signal'].to_list(), fdr['qvalue'].to_list()))
+    stats = []
+    for row in ic_df.iter_rows(named=True):
+        k, b = row['signal'], boot['signals'][row['signal']]
+        stats.append({'signal': k, 'sign': (meta[k] or {}).get('sign'), 'family': (meta[k] or {}).get('family'),
+                      'mean_ic': row['mean_ic'], 'p_single': b['p_single'], 'p_rw': b['p_rw'], 'dsr': dsr[k]['dsr'],
+                      'nw_tstat': row['nw_tstat'], 'nonoverlap_tstat': row['nonoverlap_tstat'], 'qvalue': q.get(k)})
+    return stats
+
+
+# =============================================================================
+# PRINTING (one function per block, so main() stays readable)
+# =============================================================================
+
+def print_split(split: dict, holdout_dates: int, embargo_w: int, n_signals: int) -> None:
+    years_hold = holdout_dates / TRADING_DAYS
+    out.info('signals to test', n_signals)
+    out.info('stocks', split['n_tickers'])
+    out.info('search period (used here)', f'{split["first_date"]} to {split["train_end"]}  ({split["n_train_dates"]} dates)')
+    out.info('gap (not used)', f'{embargo_w} dates: no search label may reach the holdout')
+    out.info('holdout (not used)', f'{split["holdout_start"]} to {split["last_date"]}  ({holdout_dates} dates, {years_hold:.1f} years)')
+    out.note(f'a Sharpe ratio measured on {years_hold:.1f} years has a 95% interval of about '
+             f'+-{1.96 / np.sqrt(years_hold):.1f} around its value')
+
+
+def print_ic_table(ic_df: pl.DataFrame, meta: dict, top: int = 12) -> None:
+    rows = []
+    for r in ic_df.iter_rows(named=True):
+        sign = (meta[r['signal']] or {}).get('sign')
+        aligned = r['mean_ic'] * sign if (sign and r['mean_ic'] is not None) else r['mean_ic']
+        rows.append((aligned if aligned is not None else -9, r, sign))
+    rows.sort(key=lambda x: -x[0])
+    out.table(['signal', 'prior', 'mean IC', 'IC x prior', 'hit rate', 'dates'],
+              [[r['signal'][:30], {1: '+', -1: '-'}.get(sign, 'none'), num(r['mean_ic'], '+.4f'),
+                num(a if a != -9 else None, '+.4f'), num(r['hit_rate'], '.0%'), r['n_obs']]
+               for a, r, sign in rows[:top]],
+              [-30, 5, 8, 10, 8, 6])
+    if len(rows) > top:
+        out.note(f'{len(rows) - top} more signals in ic_summary.parquet')
+    out.note('"IC x prior" > 0 means the signal works in the direction its economic story predicts')
+
+
+def print_bootstrap(boot: dict, alpha: float) -> "tuple[int, int]":
+    sig = boot['signals']
+    n_single = sum(v['p_single'] < alpha for v in sig.values())
+    n_rw = sum(v['p_rw'] < alpha for v in sig.values())
+    out.info('resamples', boot['n_boot'])
+    out.info('mean block length', f'{boot["block_length"]:.0f} days (Politis-White, at least h)')
+    out.info('standard error', f'batch means, batches of {boot["batch_length"]} days')
+    return n_single, n_rw
+
+
+def print_gate_table(gates: pl.DataFrame, top: int = 20) -> None:
+    order = gates.sort(['selected', 'p_rw'], descending=[True, False], nulls_last=True)
+    rows = []
+    for r in order.head(top).iter_rows(named=True):
+        flags = ''.join('Y' if r[f'pass_{g}'] else '.' for g in GATES)
+        rows.append([r['signal'][:30], flags, num(r['p_single'], '.3f'), num(r['p_rw'], '.3f'), num(r['p_all'], '.3f'),
+                     num(r['nw_tstat'], '+.1f'), num(r['qvalue'], '.3f'), num(r['dsr'], '.2f'),
+                     'ADMITTED' if r['selected'] else f'stopped: {r["failed_gate"]}'])
+    out.table(['signal', 'gates', 'p one', 'p RW', 'p all', 'NW t', 'q', 'DSR', 'decision'], rows,
+              [-30, 5, 6, 6, 6, 5, 6, 5, -15])
+    out.note('gates = ' + ' '.join(GATES) + ' (Y pass, . fail). p one: bootstrap, signal alone. p RW: Romano-Wolf. '
+             'p all: p RW with earlier trials (the gate). NW t, q, DSR: cross-checks only.')
+
+
+def print_benchmarks(bench: "dict | None") -> None:
+    if not bench:
+        return
+    print()
+    out.info('benchmark signals', 'known truth: cheats have a known IC > 0, placebos have IC = 0')
+    if 'placebo' in bench:
+        b = bench['placebo']
+        out.info('placebos with p < 5% alone', f'{b["n_p_below"]} of {b["n"]} (luck gives about {b["expected_p_below"]:.1f})')
+        out.verdict(not b['admitted'], 'no placebo admitted' if not b['admitted'] else f'placebos ADMITTED: {b["admitted"]}')
+    if 'cheat' in bench:
+        b = bench['cheat']
+        out.info('cheats admitted', f'{len(b["admitted"])} of {b["n"]}: {b["admitted"] or "none"}')
+        out.note('the weakest cheat that is admitted shows the smallest IC this pipeline can detect')
+
+
+def print_by_year(yearly: pl.DataFrame, selected: list) -> None:
+    if not selected:
+        return
+    ycols = [c for c in yearly.columns if c.startswith('ic_')]
+    print()
+    out.info('IC by year, admitted signals', '(raw IC; its sign should match the prior every year)')
+    print(out.INDENT + f'{"signal":28s}' + ''.join(f'{c[3:]:>7s}' for c in ycols) + '  ok/yrs')
+    for r in yearly.filter(pl.col('signal').is_in(selected)).iter_rows(named=True):
+        print(out.INDENT + f'{r["signal"][:28]:28s}' + ''.join(f'{num(r[c], "7.3f", "    n/a")}' for c in ycols)
+              + f'  {r["years_ok"]}/{r["n_years"]}')
+    out.note('a signal that works only in old years, or fades in the second half, can be survivorship bias')
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
 
 def main(date: str, tag: str = 'default', horizon: int = 20, alpha: float = 0.2,
-         min_ir: float = 0.0, holdout_dates: int = 200, mode: str = 'strict',
+         min_ir: float = 0.0, holdout_dates: int = HOLDOUT_DATES, mode: str = 'strict',
          selection: "SelectionConfig | None" = None):
     if mode not in ('strict', 'legacy'):
         raise ValueError(f"mode must be 'strict' or 'legacy', got {mode!r}")
     selection = selection or SelectionConfig()
     run_id = run_id_from_args(date, tag)
     cfg = get_paths(run_id=run_id)
-
     signals_file = cfg.stage_dir('signals') / 'signals.parquet'
-    config_file = cfg.stage_dir('signals') / 'config.json'
-
     if not signals_file.exists():
         raise FileNotFoundError(f'Signals file not found: {signals_file}. Run 04_generate_signals.py first.')
+    config = json.loads((cfg.stage_dir('signals') / 'config.json').read_text())
+    OUT = cfg.stage_dir('signal_eval')
+    OUT.mkdir(parents=True, exist_ok=True)
+    fwd_col = f'fwdret{horizon}'
+    embargo_w = (horizon + 1) + EMBARGO_WINDOW
 
-    with open(config_file) as f:
-        config = json.load(f)
+    out.stage('05', 'Evaluate signals', 'Which signals carry real information about future returns, and are not luck?')
+    out.info('run', run_id)
+    out.info('label', f'{fwd_col}: log return from the open of t+1 to the open of t+1+{horizon}')
+    out.info('selection mode', 'strict (gates)' if mode == 'strict' else 'LEGACY: q-value only, exploration, NOT evidence')
 
-    signal_tag = config.get('signal_tag', 'unknown')
-
-    signals_dir = cfg.stage_dir('signals')
-    OUTPUT_DIR = cfg.stage_dir('signal_eval')
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    FWD_RET_COL = f'fwdret{horizon}'
-
-    # Same split rule as 06 (see src/models/elastic_net_combiner.py, run_en_combiner)
-    purge_w = horizon + 1
-    embargo_w = purge_w + EMBARGO_WINDOW
-
-    print('=' * 70)
-    print('PHASE 05: EVALUATE SIGNALS')
-    print('=' * 70)
-    print(f'Run ID:        {run_id}')
-    print(f'Date:          {date}')
-    print(f'Tag:           {tag}')
-    print(f'Signal tag:    {signal_tag}')
-    print(f'Input:         {signals_file}')
-    print(f'Output dir:    {OUTPUT_DIR}')
-    print(f'FWD_RET_COL:   {FWD_RET_COL}')
-    print(f'FDR alpha:     {alpha}')
-    print(f'Min IC IR:     {min_ir}')
-    print(f'Holdout dates: {holdout_dates}   embargo_w: {embargo_w}')
-    print('=' * 70)
-
-    # ------------------------------------------------------------------
-    # [1/5] Load and cut the data: TRAINING DATES ONLY
-    # ------------------------------------------------------------------
-    print('\n[1/5] Loading signals...')
-    df = pl.read_parquet(signals_file)
-    print(f'  Loaded {len(df):,} rows, {df["ticker"].n_unique()} tickers')
-    print(f'  Date range: {df["date"].min()} to {df["date"].max()}')
-
-    # Signal columns = everything except date, ticker and the forward-return labels
-    all_cols = df.columns
-    exclude = {'date', 'ticker'} | {c for c in all_cols if c.startswith('fwdret')}
-    signal_cols = [c for c in all_cols if c not in exclude]
-    print(f'  Found {len(signal_cols)} signals: {signal_cols}')
-
-    if FWD_RET_COL not in df.columns:
-        available = [c for c in df.columns if c.startswith('fwdret')]
-        raise ValueError(f'Forward return column {FWD_RET_COL} not found. Available: {available}')
-
-    # Dates that have a label (the last h+1 dates have none)
-    labelled_dates = df.filter(pl.col(FWD_RET_COL).is_not_null())['date'].unique().sort().to_list()
-    if len(labelled_dates) <= holdout_dates + embargo_w + 100:
-        raise ValueError(
-            f'Not enough labelled dates ({len(labelled_dates)}) for holdout={holdout_dates} + embargo={embargo_w}.'
-        )
-    train_end = labelled_dates[-holdout_dates - embargo_w]
-    holdout_start = labelled_dates[-holdout_dates]
-    df = df.filter(pl.col('date') <= train_end)          # <-- the leakage fix: nothing after train_end is used below
-    n_train_dates = df['date'].n_unique()
-    print(f'  TRAINING dates only: {df["date"].min()} to {train_end}  ({n_train_dates} dates)')
-    print(f'  Excluded: embargo gap + holdout (holdout starts {holdout_start})')
-
-    # ------------------------------------------------------------------
-    # [2/5] IC per signal
-    # ------------------------------------------------------------------
-    print('\n[2/5] Computing Rank IC...')
-    ic_results = []
-    ic_series = {}                                        # daily IC of each signal, for the deflated Sharpe
-    ic_dated = {}                                         # (dates, IC) of each signal, for the year-by-year table
-    for col in signal_cols:
-        ic_df_col = compute_ic(df.lazy(), col, FWD_RET_COL).collect()   # one IC per date
-        summary = summarize_ic(ic_df_col)
-        ic_values = ic_df_col['ic'].to_numpy()
-        ic_series[col] = ic_values
-        ic_dated[col] = (ic_df_col['date'].to_list(), ic_values)
-
-        # Main test: Newey-West with lag >= 2(h-1), covers the label overlap
-        nw_result = newey_west_ic_tstat(ic_values, horizon=horizon)
-        # Cross-check: one IC every h days, plain t-test
-        no_result = ic_tstat_non_overlapping(ic_values, horizon=horizon)
-
-        ic_results.append({
-            'signal': col,
-            'mean_ic': summary['mean'],
-            'std_ic': summary['std'],
-            'ir': summary['ir'],
-            'hit_rate': summary['hit_rate'],
-            'n_obs': summary['n_days'],
-            'nw_tstat': nw_result.get('t_stat'),
-            'nw_lag': nw_result.get('max_lag'),
-            'p_value': ic_pvalue_nw(nw_result),                 # None if the t-stat is missing
-            'nonoverlap_tstat': no_result.get('t_stat'),
-        })
-
-    ic_df = pl.DataFrame(ic_results, infer_schema_length=None)
-    print('  IC Summary (top 10 by |IR|):')
-    top = ic_df.with_columns(pl.col('ir').abs().alias('_abs_ir')).sort('_abs_ir', descending=True, nulls_last=True).head(10)
-    for row in top.iter_rows(named=True):
-        print(f'    {row["signal"]:25s} IC={_fmt(row["mean_ic"], "7.4f")} IR={_fmt(row["ir"], "7.3f")} '
-              f'HR={_fmt(row["hit_rate"], ".2%")} NW_t={_fmt(row["nw_tstat"], "6.2f")} '
-              f'nonoverlap_t={_fmt(row["nonoverlap_tstat"], "6.2f")}')
-
-    ic_df.write_parquet(OUTPUT_DIR / 'ic_summary.parquet')
-
-    # ------------------------------------------------------------------
-    # [3/5] IC decay (diagnostic only, not used for selection)
-    # ------------------------------------------------------------------
-    print('\n[3/5] Computing IC decay...')
-    decay_horizons = [1, 5, 10, 20, 60]
-    available_horizons = [h for h in decay_horizons if f'fwdret{h}' in df.columns]
-    decay_results = []
-    for col in signal_cols:
-        d = ic_decay(df.lazy(), col, available_horizons)
-        decay_results.append(d.with_columns(pl.lit(col).alias('signal')))
-
-    decay_df = pl.concat(decay_results)
-    decay_df.write_parquet(OUTPUT_DIR / 'ic_decay.parquet')
-    print(f'  Decay computed for {len(signal_cols)} signals across {len(available_horizons)} horizons')
-
-    # ------------------------------------------------------------------
-    # [4/5] FDR across all signals tested in this round
-    # ------------------------------------------------------------------
-    print('\n[4/5] Computing FDR...')
-    if len(signal_cols) < 20:
-        print(f'  NOTE: only {len(signal_cols)} signals. Storey pi0 needs >= 20 p-values, '
-              'otherwise pi0 = 1 and the q-values equal the BH adjusted p-values.')
-    p_values = [float('nan') if p is None else p for p in ic_df['p_value'].to_list()]
-    t_stats = [float('nan') if t is None else t for t in ic_df['nw_tstat'].to_list()]
-
-    fdr_pl = fdr_report(
-        signal_names=ic_df['signal'].to_list(),
-        tstats=t_stats,                      # the Newey-West t-stat (NOT the IR)
-        pvalues=p_values,
-        alpha=alpha,
-    )
-    fdr_pl.write_parquet(OUTPUT_DIR / 'fdr_report.parquet')
-
-    # Benchmark signals (cheat, placebo)? Then also test the real signals ALONE, to see what the benchmarks change.
-    fdr_real = None
-    real_names = [s for s in ic_df['signal'].to_list() if signal_group(s) == 'real']
-    if len(real_names) < ic_df.height:
-        keep = ic_df['signal'].is_in(real_names)
-        fdr_real = fdr_report(
-            signal_names=ic_df.filter(keep)['signal'].to_list(),
-            tstats=[float('nan') if x is None else x for x in ic_df.filter(keep)['nw_tstat'].to_list()],
-            pvalues=[float('nan') if x is None else x for x in ic_df.filter(keep)['p_value'].to_list()],
-            alpha=alpha,
-        )
-    bench = benchmark_report(fdr_pl, fdr_real, alpha)
-
-    n_bh = int(fdr_pl['survives_bh'].sum())
-    n_by = int(fdr_pl['survives_by'].sum())
-    n_q = int((fdr_pl['qvalue'] < alpha).sum())
-    print(f'  BH survivors:      {n_bh:3d} / {len(fdr_pl)}')
-    print(f'  BY survivors:      {n_by:3d} / {len(fdr_pl)}')
-    print(f'  q-value survivors: {n_q:3d} / {len(fdr_pl)} (q < {alpha})')
-    if bench:
-        print()
-        for line in format_benchmark_report(bench):
-            print(line)
-
-    # ------------------------------------------------------------------
-    # [5/5] Selection for the combiner
-    # ------------------------------------------------------------------
-    names = ic_df['signal'].to_list()
-    meta = priors_table(names)                                          # family, sign, rationale (ex ante)
+    # [1] ---------------------------------------------------------------------------------------------------------
+    out.step(1, N_STEPS, 'Keep the search period only',
+             'the holdout must never influence which signals we keep')
+    df, signal_cols, split = load_search_period(signals_file, fwd_col, holdout_dates, embargo_w)
+    print_split(split, holdout_dates, embargo_w, len(signal_cols))
+    meta = priors_table(signal_cols)                     # family, sign, rationale, written before the test
     signs = {k: (v['sign'] if v else None) for k, v in meta.items()}
-    dsr_tab = deflated_sharpe_table(ic_series, signs, step=horizon, n_trials_extra=selection.n_trials_extra,
-                                   var_mode=selection.dsr_variance)
-    qmap = dict(zip(fdr_pl['signal'].to_list(), fdr_pl['qvalue'].to_list()))
-    stats = []
-    for row in ic_df.iter_rows(named=True):
-        k = row['signal']
-        stats.append({
-            'signal': k, 'sign': signs[k], 'family': meta[k]['family'] if meta[k] else None,
-            'mean_ic': row['mean_ic'], 'nw_tstat': row['nw_tstat'],
-            'nonoverlap_tstat': row['nonoverlap_tstat'], 'qvalue': qmap.get(k), 'dsr': dsr_tab[k]['dsr'],
-        })
-    gates = apply_gates(stats, selection)
-    gates.write_parquet(OUTPUT_DIR / 'selection_gates.parquet')
+
+    # [2] ---------------------------------------------------------------------------------------------------------
+    out.step(2, N_STEPS, 'Daily rank IC of each signal',
+             'IC = rank correlation of the signal with the next return, across the stocks of one date: '
+             'does the signal order the stocks well?')
+    ic_df, ic_dated = daily_ic(df, signal_cols, fwd_col, horizon)
+    ic_df.write_parquet(OUT / 'ic_summary.parquet')
+    print_ic_table(ic_df, meta)
+
+    # [3] + [4] ---------------------------------------------------------------------------------------------------
+    out.step(3, N_STEPS, 'Bootstrap test, one signal at a time: is the mean IC above 0 in the prior direction?',
+             'neighbour days share most of their label, so the IC series has memory; resampling BLOCKS of days keeps '
+             'it, and the false-positive rate stays at 5%')
+    boot = bootstrap_test_table(ic_dated, signs, horizon, n_boot=selection.n_boot, seed=selection.boot_seed)
+    n_single, n_rw = print_bootstrap(boot, selection.fwer_alpha)
+    out.info('signals with p < 5% alone', f'{n_single} of {len(signal_cols)}')
+    out.note(f'with {len(signal_cols)} pure-noise signals, luck alone gives about {0.05 * len(signal_cols):.1f}')
+
+    out.step(4, N_STEPS, 'Romano-Wolf: correct for the number of signals tested in this run',
+             'the more signals you test, the more look good by luck; Romano-Wolf uses their real correlation')
+    out.info(f'signals with adjusted p < {selection.fwer_alpha:.0%}', f'{n_rw} of {len(signal_cols)}')
+    out.note(f'meaning: the chance that ANY of these {n_rw} is pure luck is below {selection.fwer_alpha:.0%}')
+    pl.DataFrame([{'signal': k, **v} for k, v in boot['signals'].items()]).write_parquet(OUT / 'bootstrap_tests.parquet')
+
+    # [5] ---------------------------------------------------------------------------------------------------------
+    out.step(5, N_STEPS, 'Earlier trials: signals tried in earlier runs on the same data also count',
+             'Romano-Wolf sees only this run; each earlier run is one more family of tests (Bonferroni over runs)')
+    factor = earlier_trials_factor(len(signal_cols), selection.n_trials_extra)
+    out.info('trials', f'{len(signal_cols)} in this run + {selection.n_trials_extra} earlier')
+    out.info('p_all', f'= p_RW x {factor:.2f}')
+    out.info(f'signals with p_all < {selection.fwer_alpha:.0%}',
+             f'{sum(min(1, v["p_rw"] * factor) < selection.fwer_alpha for v in boot["signals"].values())} of {len(signal_cols)}')
+    if selection.n_trials_extra == 0:
+        out.warn('--n_trials_extra is 0: right only if no signal was tried before this run on these data')
+
+    # [6] ---------------------------------------------------------------------------------------------------------
+    out.step(6, N_STEPS, 'Cross-checks (printed, they decide nothing)',
+             'classic tests; Newey-West over-rejects on slow signals and the deflated Sharpe drops 95% of the data. '
+             'A big disagreement with the gates is a warning sign')
+    dsr = deflated_sharpe_table({k: v for k, (_, v) in ic_dated.items()}, signs, step=horizon,
+                                n_trials_extra=selection.n_trials_extra, var_mode=selection.dsr_variance)
+    fdr, decay = cross_checks(df, ic_df, signal_cols, alpha)
+    fdr.write_parquet(OUT / 'fdr_report.parquet')
+    decay.write_parquet(OUT / 'ic_decay.parquet')
+    out.info(f'Newey-West |t| >= 3', f'{int((ic_df["nw_tstat"].abs() >= 3).sum())} of {len(signal_cols)}')
+    out.info(f'BH / BY / q < {alpha}', f'{int(fdr["survives_bh"].sum())} / {int(fdr["survives_by"].sum())} / '
+             f'{int((fdr["qvalue"] < alpha).sum())}')
+    out.info('deflated Sharpe >= 0.95', f'{sum(d["dsr"] >= 0.95 for d in dsr.values())} of {len(dsr)}')
+    if len(signal_cols) < 20:
+        out.note('fewer than 20 signals: Storey pi0 = 1, so the q-values equal the BH adjusted p-values')
+    yearly = yearly_ic_table(ic_dated, signs)
+    yearly.write_parquet(OUT / 'ic_by_year.parquet')
+
+    # [7] ---------------------------------------------------------------------------------------------------------
+    out.step(7, N_STEPS, 'Decision: a signal is admitted only if it passes every gate',
+             'each gate stops a different kind of false discovery')
+    for g in GATES:
+        out.info(f'  {g}', GATE_WHY[g])
+    gates = apply_gates(gate_inputs(ic_df, boot, dsr, fdr, meta), selection)
+    gates.write_parquet(OUT / 'selection_gates.parquet')
     summary = gate_summary(gates)
-
+    print()
+    print_gate_table(gates)
     if mode == 'strict':
-        print(f'  STRICT selection: {config_dict(selection)}')
-        print(f'  Trials in the deflated Sharpe: N = {len(signal_cols) + selection.n_trials_extra}, '
-              f'expected best luck SR0 = {next(iter(dsr_tab.values()))["sr0"]:.3f} per observation')
-        print('  Signals stopped by each gate: ' + ', '.join(f'{g} {n}' for g, n in summary.items() if g not in ('admitted', 'tested')))
         selected = gates.filter(pl.col('selected'))['signal'].to_list()
+        stopped = ', '.join(f'{g} {summary[g]}' for g in GATES if summary[g])
+        out.info('stopped by each gate', stopped or 'none')
     else:
-        print(f'  LEGACY selection: q < {alpha} only. Exploration. This is NOT evidence of a strategy.')
-        selected = fdr_pl.filter(pl.col('qvalue') < alpha)['signal'].to_list()
+        selected = fdr.filter(pl.col('qvalue') < alpha)['signal'].to_list()
         if min_ir > 0:
-            before = len(selected)
             selected = [s for s in selected if abs(ic_df.filter(pl.col('signal') == s)['ir'][0]) >= min_ir]
-            print(f'  After min_ic_ir filter: {len(selected)} (removed {before - len(selected)})')
+        out.warn(f'LEGACY selection (q < {alpha}): exploration only, this is NOT evidence of a strategy')
 
-    # Year-by-year IC of the admitted signals (stability and a first survivorship check). Saved for all signals.
-    yearly = yearly_ic_table(ic_dated, {k: (meta.get(k) or {}).get('sign') for k in ic_dated})
-    yearly.write_parquet(OUTPUT_DIR / 'ic_by_year.parquet')
+    bench = benchmark_gate_report(gates)
+    print_benchmarks(bench)
+    print_by_year(yearly, selected)
+
+    weak = ic_df.filter(pl.col('signal').is_in(selected) & (pl.col('nonoverlap_tstat').abs() < 1.0))['signal'].to_list()
+    if weak:
+        out.warn(f'admitted but the non-overlapping |t| < 1: {weak}. Look at them before you trust them.')
+    print()
     if selected:
-        ycols = [c for c in yearly.columns if c.startswith('ic_')]
-        print('\n  IC by year (admitted signals; raw IC, + or - as the prior says):')
-        print('    ' + f'{"signal":28s}' + ''.join(f'{c[3:]:>7s}' for c in ycols) + '   ok/yrs  1st half  2nd half')
-        for row in yearly.filter(pl.col('signal').is_in(selected)).iter_rows(named=True):
-            print('    ' + f'{row["signal"]:28s}' + ''.join(f'{_fmt(row[c], "7.3f")}' for c in ycols)
-                  + f'   {row["years_ok"]}/{row["n_years"]}   {_fmt(row["first_half"], "7.3f")}   {_fmt(row["second_half"], "7.3f")}')
-        print('    A big drop from 1st to 2nd half, or a signal that works only in old years, can mean survivorship bias.')
+        out.ok(f'{len(selected)} signal(s) ADMITTED: {selected}')
+    else:
+        out.fail('NO SIGNAL ADMITTED. Stage 06 will stop. This is a valid result: no signal passed every gate.')
+        out.note('to explore anyway (not evidence): --mode legacy, or relax a threshold on purpose and write it down')
 
-    print('\n  Gate table (aligned t = t x prior sign):')
-    for row in gates.sort('aligned_nw_t', descending=True, nulls_last=True).head(15).iter_rows(named=True):
-        flags = ''.join('Y' if row[f'pass_{g}'] else '.' for g in ('prior', 'sign', 't_nw', 't_nonov', 'fdr', 'dsr'))
-        print(f'    {row["signal"]:28s} [{flags}] t_nw {_fmt(row["aligned_nw_t"], "6.2f")}  t_no {_fmt(row["aligned_nonoverlap_t"], "6.2f")}'
-              f'  q {_fmt(row["qvalue"], "6.3f")}  DSR {_fmt(row["dsr"], "5.2f")}  {row["failed_gate"] or "ADMITTED"}')
-    print('    flags: prior sign t_nw t_nonov fdr dsr   (Y pass, . fail)')
-
-    # Warn when the two tests disagree: sign of a possible overlap problem
-    disagree = ic_df.filter(
-        pl.col('signal').is_in(selected)
-        & (pl.col('nonoverlap_tstat').abs() < 1.0)
-    )['signal'].to_list()
-    if disagree:
-        print(f'  WARNING: selected but non-overlapping |t| < 1: {disagree}')
-
-    if not selected:
-        print('  NO SIGNAL ADMITTED. 06 will stop. This is a valid result: no signal passed every gate.')
-        print('  To explore anyway (not evidence): --mode legacy, or lower a threshold on purpose and say so.')
-
-    print(f'\n  Selected for combiner: {selected}')
-
-    # --- Save report ---
+    # --- save --------------------------------------------------------------------------------------------------------
+    split_out = {k: str(v) for k, v in split.items()}
     report = {
-        'run_id': run_id,
-        'signal_tag': signal_tag,
-        'input_dir': str(signals_dir),
-        'fwd_ret_col': FWD_RET_COL,
-        'horizon': horizon,
-        'n_signals': len(signal_cols),
-        'fdr_alpha': alpha,
-        'selection_mode': mode,
-        'selection_config': config_dict(selection),
-        'gate_summary': summary,
-        'gates': gates.to_dicts(),
-        'min_ic_ir': min_ir,
-        'train_start': str(df['date'].min()),
-        'train_end': str(train_end),
-        'holdout_start': str(holdout_start),
-        'holdout_dates': holdout_dates,
-        'embargo_w': embargo_w,
-        'n_train_dates': n_train_dates,
-        'selected_signals': selected,
-        'ic_summary': ic_df.to_dicts(),
-        'fdr_summary': {'bh': n_bh, 'by': n_by, 'qvalue': n_q},
-        'benchmark_report': bench,
-        'config': config,
+        'run_id': run_id, 'fwd_ret_col': fwd_col, 'horizon': horizon, 'n_signals': len(signal_cols),
+        'selection_mode': mode, 'selection_config': config_dict(selection), 'fdr_alpha': alpha, 'min_ic_ir': min_ir,
+        'split': split_out, 'holdout_dates': holdout_dates, 'embargo_w': embargo_w,
+        'bootstrap': {k: v for k, v in boot.items() if k != 'signals'},
+        'gate_summary': summary, 'gates': gates.to_dicts(), 'selected_signals': selected,
+        'ic_summary': ic_df.to_dicts(), 'benchmark_report': bench, 'config': config,
     }
-    with open(OUTPUT_DIR / 'signal_report.json', 'w') as f:
-        json.dump(report, f, indent=2, default=str)
-
-    with open(OUTPUT_DIR / 'selected_signals.json', 'w') as f:
-        json.dump({
-            'signals': selected,
-            'mode': mode,                       # 06 uses the family combiner for 'strict', one-per-signal for 'legacy'
-            'signal_meta': {k: meta[k] for k in selected},    # family, sign, rationale of each admitted signal
-            'selection_config': config_dict(selection),
-            'fwd_ret_col': FWD_RET_COL,
-            'horizon': horizon,
-            'train_end': str(train_end),        # 06 checks that it computes the same cut
-            'holdout_start': str(holdout_start),
-            'holdout_dates': holdout_dates,     # 06 reads these: one source of truth for the split
-            'embargo_w': embargo_w,
-        }, f, indent=2)
-
-    print(f'\n✓ Evaluation complete. Results in {OUTPUT_DIR}/')
-    print(f'  Selected signals saved to {OUTPUT_DIR}/selected_signals.json')
-    print(f'\nNext: python scripts/pipeline/06_fit_combiner.py --date {date} --tag {tag}')
+    (OUT / 'signal_report.json').write_text(json.dumps(report, indent=2, default=str))
+    (OUT / 'selected_signals.json').write_text(json.dumps({
+        'signals': selected,
+        'mode': mode,                                     # 06 uses the family combiner for 'strict'
+        'signal_meta': {k: meta[k] for k in selected},
+        'selection_config': config_dict(selection),
+        'fwd_ret_col': fwd_col, 'horizon': horizon,
+        'train_end': split_out['train_end'], 'holdout_start': split_out['holdout_start'],
+        'holdout_dates': holdout_dates, 'embargo_w': embargo_w,     # 06 reads these: one source of truth for the split
+    }, indent=2))
+    out.done({'selected signals': OUT / 'selected_signals.json', 'full report': OUT / 'signal_report.json'},
+             f'python scripts/pipeline/06_fit_combiner.py --date {date} --tag {tag}')
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Evaluate signals for combiner selection')
-    parser.add_argument('--date', required=True, help='Date in YYYY-MM-DD format (e.g., 2026-10-29)')
-    parser.add_argument('--tag', type=str, default='default', help='Signal tag (default: default)')
-    parser.add_argument('--horizon', type=int, default=20, help='Forward return horizon for evaluation')
-    parser.add_argument('--mode', choices=['strict', 'legacy'], default='strict',
-                        help="strict = all gates (default). legacy = q < --alpha only (exploration, not evidence)")
-    parser.add_argument('--alpha', type=float, default=0.2, help='FDR alpha for the report and for --mode legacy')
-    parser.add_argument('--min_t', type=float, default=SelectionConfig.min_t, help='strict: min aligned Newey-West t')
-    parser.add_argument('--min_nonoverlap_t', type=float, default=SelectionConfig.min_nonoverlap_t,
-                        help='strict: min aligned non-overlapping t')
-    parser.add_argument('--fdr_alpha', type=float, default=SelectionConfig.fdr_alpha, help='strict: q-value below this')
-    parser.add_argument('--min_dsr', type=float, default=SelectionConfig.min_dsr, help='strict: min deflated Sharpe')
-    parser.add_argument('--n_trials_extra', type=int, default=0,
-                        help='strict: signals tried and removed earlier (they count as trials in the deflated Sharpe)')
-    parser.add_argument('--dsr_variance', choices=['null', 'trials'], default='null',
-                        help="strict: variance of skill-less Sharpe ratios in the DSR. null = 1/(T-1) (default), trials = across the run's signals (stricter)")
-    parser.add_argument('--no_require_prior', action='store_true',
-                        help='strict: let signals without a prior skip gates 1 and 2 (exploration only)')
-    parser.add_argument('--min_ir', type=float, default=0.0, help='Minimum |IC IR| for signal selection')
-    parser.add_argument('--holdout_dates', type=int, default=200,
-                        help='Number of final dates reserved for the 06 holdout (must match 06)')
-    args = parser.parse_args()
-    sel = SelectionConfig(min_t=args.min_t, min_nonoverlap_t=args.min_nonoverlap_t, fdr_alpha=args.fdr_alpha,
-                          min_dsr=args.min_dsr, require_prior=not args.no_require_prior,
-                          n_trials_extra=args.n_trials_extra, dsr_variance=args.dsr_variance)
-    main(args.date, args.tag, args.horizon, args.alpha, args.min_ir, args.holdout_dates, args.mode, sel)
+    d = SelectionConfig()
+    ap = argparse.ArgumentParser(description='Evaluate signals and select the ones for the combiner')
+    ap.add_argument('--date', required=True, help='run date, YYYY-MM-DD')
+    ap.add_argument('--tag', default='default', help='run tag')
+    ap.add_argument('--horizon', type=int, default=20, help='label horizon in days (fwdret{h})')
+    ap.add_argument('--mode', choices=['strict', 'legacy'], default='strict',
+                    help='strict = gates (default). legacy = q < --alpha only (exploration, not evidence)')
+    ap.add_argument('--alpha', type=float, default=0.2, help='FDR level of the cross-check and of --mode legacy')
+    ap.add_argument('--fwer_alpha', type=float, default=d.fwer_alpha, help='p_all must be below this')
+    ap.add_argument('--n_trials_extra', type=int, default=0, help='signals tried in earlier runs on the same data')
+    ap.add_argument('--dsr_variance', choices=['null', 'trials'], default='null',
+                    help="DSR cross-check: variance of skill-less Sharpe ratios, null = 1/(T-1), trials = across signals")
+    ap.add_argument('--n_boot', type=int, default=d.n_boot, help='bootstrap resamples')
+    ap.add_argument('--boot_seed', type=int, default=d.boot_seed, help='bootstrap seed')
+    ap.add_argument('--no_require_prior', action='store_true', help='signals without a prior skip gates 1 and 2 (exploration)')
+    ap.add_argument('--min_ir', type=float, default=0.0, help='legacy mode: minimum |IC IR|')
+    ap.add_argument('--holdout_dates', type=int, default=HOLDOUT_DATES, help='must match 06 (default from config/constants.py)')
+    a = ap.parse_args()
+    sel = SelectionConfig(fwer_alpha=a.fwer_alpha, require_prior=not a.no_require_prior,
+                          n_trials_extra=a.n_trials_extra, dsr_variance=a.dsr_variance, n_boot=a.n_boot,
+                          boot_seed=a.boot_seed)
+    main(a.date, a.tag, a.horizon, a.alpha, a.min_ir, a.holdout_dates, a.mode, sel)

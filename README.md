@@ -29,7 +29,7 @@ The logic is in tested library modules (`src/`). The scripts only call them, in 
 | Universe | S&P 500 members, daily bars, 2000 to 2026 (Yahoo Finance) |
 | Prediction target | Return over the next h = 20 trading days, open to open, one day after the signal |
 | Signals | Momentum, volatility, liquidity (beta available), each with a cross-sectional transform |
-| Selection | Rank IC, Newey-West t-statistic, false discovery rate control (BH, BY, Storey q-value) |
+| Selection | Rank IC, studentized block bootstrap, Romano-Wolf family-wise error control (Newey-West, FDR, deflated Sharpe as cross-checks) |
 | Combination | Elastic Net, tuned by Combinatorial Purged CV, scored out-of-fold, checked on a holdout |
 | Risk model | Marchenko-Pastur cleaned correlation, Ledoit-Wolf shrinkage, Louvain clusters |
 | Portfolio | Dollar-neutral, cluster caps, 10% volatility target, leverage cap |
@@ -108,16 +108,17 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    S["SEARCH period<br/>stage 05 selects signals<br/>stage 06 tunes the Elastic Net<br/>scores are out-of-fold"] --> G["GAP<br/>37 days<br/>(embargo)"] --> H["HOLDOUT<br/>last 200 dates<br/>never used to select,<br/>tune or fit"]
+    S["SEARCH period<br/>stage 05 selects signals<br/>stage 06 tunes the Elastic Net<br/>scores are out-of-fold"] --> G["GAP<br/>37 days<br/>(embargo)"] --> H["HOLDOUT<br/>last 756 dates (3 years)<br/>never used to select,<br/>tune or fit"]
 ```
 
 | Period | What the score is | Can I quote a result from it? |
 |---|---|---|
-| Search | Out-of-fold. The model that scored a row never trained on it. | Only as a development number. Alpha and l1_ratio were picked on these folds. |
+| Search | Out-of-fold. The model that scored a row never trained on it, but it trained on blocks BEFORE and AFTER the row. Not what you could have traded live. | Only as a development number. Alpha and l1_ratio were picked on these folds. |
 | Gap | Final model. Too close to the search period (labels overlap). | No. |
 | **Holdout** | Final model, on dates it never saw. | **Yes. This is the number.** |
 
 Stage 09 prints the holdout block. No parameter is changed because of what the holdout shows.
+The holdout length is `HOLDOUT_DATES` in `config/constants.py` (756 dates, 3 years): the 95% interval of a Sharpe ratio is about +-1.96 / sqrt(years), so +-1.1 on 3 years (it was +-2.2 with the old 200 dates). Set it once, before the first real run.
 
 ---
 
@@ -239,10 +240,11 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A["signals<br/>(search period)"] --> B["daily<br/>Spearman IC"] --> C["Newey-West t-stat<br/>lag ≥ 2(h−1)"] --> D["p-value"] --> E["BH · BY · Storey q"] --> F["selected<br/>q < 0.2"]
+    A["signals<br/>(search period)"] --> B["daily<br/>Spearman IC"] --> C["studentized block bootstrap<br/>one p per signal"] --> D["Romano-Wolf<br/>+ earlier trials"] --> F["admitted<br/>prior, sign, p_all < 5%"]
 ```
-- **Why a long Newey-West lag:** labels of consecutive days overlap by h − 1 days. The IC series is autocorrelated by construction.
-- **Guard:** a non-overlapping t-statistic (one IC every h days) is the cross-check. Selection uses the search period only.
+- **Why a bootstrap:** labels of consecutive days overlap by h − 1 days, and slow signals add memory. On simulated data Newey-West says "significant" 9% to 22% of the time at a nominal 5%; the block bootstrap keeps 5% (`scripts/research/calibrate_tests.py`).
+- **Why Romano-Wolf:** it controls the chance of admitting ANY false signal and uses the real correlation between signals. `--n_trials_extra` adds the signals of earlier runs.
+- **Guard:** Newey-West, the FDR rules and the deflated Sharpe are printed as cross-checks. Selection uses the search period only. See [docs/selection.md](docs/selection.md).
 
 ### 06 · Combine
 
@@ -282,6 +284,7 @@ flowchart LR
     A["weights<br/>(signal date)"] --> B["trade at<br/>open t+1"] --> C["weights drift<br/>until next rebalance"] --> D["costs on<br/>the change"] --> E["net returns<br/>and metrics"]
 ```
 - **Costs:** half-spread + square-root market impact + commission.
+- **Dead stocks:** the day after its last row, a dead stock is marked at its last adjusted close (which holds the delisting return). Forward-filled prices are never traded.
 - **Alpha:** the return after the market exposure, with a Newey-West t-stat, and a year-by-year table.
 - **Guard:** the Sharpe uses √(252/h) for h-day returns. The drawdown uses a compounded curve. Both were wrong in an earlier version.
 
@@ -373,7 +376,7 @@ These are written down on purpose.
 1. **Survivorship bias.** The universe is today's S&P 500 members, applied to the past. Companies that left the index are missing. Backtests look better than reality, mostly before 2015. A point-in-time list needs CRSP or Compustat.
 2. **Data source.** Yahoo Finance is free and unofficial. `Adj Close` is restated at each corporate action, so a new download can differ slightly.
 3. **Costs are assumptions.** AUM 100 million dollars, half-spread 3 bps, impact coefficient 0.5, commission 1 bp, leverage cap 4. The backtest prints the Sharpe at 1×, 1.5×, 2× and 3× costs. Borrow cost, financing cost and delisting returns are **not** modelled. They make the result optimistic.
-4. **One holdout path.** The holdout is 200 dates of one history. The Sharpe interval is wide, and the output shows it.
+4. **One holdout path.** The holdout is 3 years of one history. The Sharpe interval is about +-1.1, and the output shows it. It is printed at every run: once you change something because of it, it is no longer a clean test.
 5. **Correlated candidates.** Transforms of one feature are not independent tests. BH can be too permissive. BY and the non-overlapping t-statistic are the cross-checks.
 6. **Beta proxy.** The market is the equal-weighted mean of the stocks in the file, not the index.
 7. **Scope.** US equities, daily bars. No intraday data, no other asset class, no fundamentals.
@@ -398,6 +401,8 @@ These are written down on purpose.
 | 12 | `01_download_data.py` | Tickers with a dot were not converted. | BRK.B and BF.B silently missing. | `test_to_yahoo_symbol` |
 | 13 | `run_experiment.py` | It crashed at import and after a good run. | No one-command pipeline. | run from another directory |
 | 14 | stage 06 | NaN labels passed the null filter. | Holdout IC was NaN. | `is_not_nan` filters, test |
+| 15 | `weights_backtest.py` | Prices were forward-filled at the open; the last close of a dead stock (with its delisting return) was never booked. Stale prices were also "tradable". | Longs in dying stocks avoided the crash; the labels saw it, the P&L did not. | `tests/test_weights_backtest.py` |
+| 16 | stage 05 | The gates (Newey-West t, non-overlapping t, q-value, DSR) had an unknown false-positive rate. | Up to 22% false positives at a nominal 5% on slow signals. | `tests/test_bootstrap.py`, `calibrate_tests.py` |
 
 ---
 

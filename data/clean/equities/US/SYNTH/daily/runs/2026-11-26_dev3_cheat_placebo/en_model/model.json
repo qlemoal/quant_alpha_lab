@@ -1,0 +1,155 @@
+{
+  "run_id": "2026-11-26_dev3_cheat_placebo",
+  "signal_tag": "dev3_cheat_placebo",
+  "signal_dir": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/clean/equities/US/SYNTH/daily/runs/2026-11-26_dev3_cheat_placebo/signals",
+  "signals": [
+    "fam_cheat",
+    "fam_illiquidity",
+    "fam_momentum",
+    "fam_reversal"
+  ],
+  "combine_mode": "family",
+  "admitted_signals": [
+    "mom5_zscore_tanh",
+    "mom252_zscore_tanh",
+    "log_adv60_zscore_tanh",
+    "cheat_h20_ic020",
+    "cheat_h20_ic030",
+    "cheat_h20_ic050"
+  ],
+  "families": {
+    "cheat": [
+      {
+        "signal": "cheat_h20_ic020",
+        "sign": 1
+      },
+      {
+        "signal": "cheat_h20_ic030",
+        "sign": 1
+      },
+      {
+        "signal": "cheat_h20_ic050",
+        "sign": 1
+      }
+    ],
+    "illiquidity": [
+      {
+        "signal": "log_adv60_zscore_tanh",
+        "sign": -1
+      }
+    ],
+    "momentum": [
+      {
+        "signal": "mom252_zscore_tanh",
+        "sign": 1
+      }
+    ],
+    "reversal": [
+      {
+        "signal": "mom5_zscore_tanh",
+        "sign": -1
+      }
+    ]
+  },
+  "drop_one": {
+    "fam_cheat": {
+      "ic_full": 0.07007998019374709,
+      "ic_without": 0.037898515939982384,
+      "delta": 0.032181464253764704
+    },
+    "fam_illiquidity": {
+      "ic_full": 0.07007998019374709,
+      "ic_without": 0.06804752721765636,
+      "delta": 0.002032452976090726
+    },
+    "fam_momentum": {
+      "ic_full": 0.07007998019374709,
+      "ic_without": 0.06545410306009891,
+      "delta": 0.004625877133648176
+    },
+    "fam_reversal": {
+      "ic_full": 0.07007998019374709,
+      "ic_without": 0.06637577805847328,
+      "delta": 0.0037042021352738097
+    }
+  },
+  "positive_coefficients": true,
+  "one_se_rule": true,
+  "fwd_ret_col": "fwdret20",
+  "horizon": 20,
+  "target": "csdemean",
+  "alpha": 0.0049251102766692525,
+  "l1_ratio": 0.1,
+  "coefficients_standardised": {
+    "fam_cheat": 0.003214352561003816,
+    "fam_illiquidity": 0.0006370069981429859,
+    "fam_momentum": 0.001546104950820602,
+    "fam_reversal": 0.0010195201624730904
+  },
+  "coefficients_raw_units": {
+    "fam_cheat": 0.005560480396940579,
+    "fam_illiquidity": 0.0010335680098950849,
+    "fam_momentum": 0.0026056078843582193,
+    "fam_reversal": 0.0017026718277273277
+  },
+  "score_variance_share": {
+    "fam_cheat": 0.7430244359390831,
+    "fam_illiquidity": 0.035599990916824316,
+    "fam_momentum": 0.16281814060270622,
+    "fam_reversal": 0.05855743254138082
+  },
+  "score_variance_share_by_group": {
+    "cheat": 0.7430244359390831,
+    "real": 0.2569755640609114
+  },
+  "intercept_raw_units": 5.8543575928317066e-05,
+  "cv_method": "cpcv",
+  "n_blocks": 10,
+  "n_test_blocks": 2,
+  "n_folds": 45,
+  "holdout_dates": 756,
+  "embargo_window": 16,
+  "purge_w": 21,
+  "embargo_w": 37,
+  "train_end": "2022-07-19",
+  "holdout_start": "2022-09-08",
+  "q_weighting": false,
+  "q_power": 1.0,
+  "q_values": {},
+  "oof_share": 1.0,
+  "sign_flips": [],
+  "search_report": {
+    "signal": "combined_score",
+    "ic_mean": 0.07007998019374709,
+    "ic_std": 0.06307501650769856,
+    "ic_ir": 1.111057659179424,
+    "ic_tstat_naive": 42.38069693316681,
+    "ic_tstat_nw": 13.29253017692105,
+    "ic_pval_nw": 0.0,
+    "ic_lag1_autocorr": 0.8881642720578766,
+    "hit_rate": 0.8687285223367698,
+    "n_days": 1455,
+    "recent_coverage": 1.0,
+    "avg_turnover": 0.0009724727786695593,
+    "long_short_sharpe": 3.317336244620293,
+    "long_short_max_dd": -0.029028724072413824,
+    "horizon": 20
+  },
+  "holdout_report": {
+    "signal": "combined_score",
+    "ic_mean": 0.07628453896401319,
+    "ic_std": 0.059557869720861606,
+    "ic_ir": 1.2808473392609048,
+    "ic_tstat_naive": 35.21747931507527,
+    "ic_tstat_nw": 10.84886121381545,
+    "ic_pval_nw": 0.0,
+    "ic_lag1_autocorr": 0.883268885557603,
+    "hit_rate": 0.921957671957672,
+    "n_days": 756,
+    "recent_coverage": 1.0,
+    "avg_turnover": 0.000976572997907332,
+    "long_short_sharpe": 3.412601899743155,
+    "long_short_max_dd": -0.017429356164326847,
+    "horizon": 20
+  }
+}

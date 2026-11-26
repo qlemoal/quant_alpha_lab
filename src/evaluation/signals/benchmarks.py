@@ -100,3 +100,35 @@ def format_benchmark_report(rep: dict) -> list:
         if real['lost_because_of_benchmarks']:
             lines.append(f'    lost because of the benchmarks (more tests): {real["lost_because_of_benchmarks"]}')
     return lines
+
+# =============================================================================
+# STRICT MODE: what the GATES did with the benchmark signals
+# =============================================================================
+
+def benchmark_gate_report(gates: pl.DataFrame, level: float = RAW_P_LEVEL) -> "dict | None":
+    '''
+    gates: the table of src/evaluation/signals/selection.apply_gates (columns signal, p_single, selected).
+    Returns None if the run has no benchmark signal. Otherwise, per group (real, cheat, placebo):
+        n                    signals in the group
+        admitted             names that passed every gate
+        n_p_below            signals with a single-test p-value below `level`
+        expected_p_below     level x n: what pure luck gives for TRUE NULL signals (placebos)
+    What to read:
+        placebo  admitted must be empty. n_p_below should be close to expected_p_below (the size of the test).
+        cheat    the admitted ones are the signals the pipeline can detect (its power at a known IC).
+    '''
+    groups = {s: signal_group(s) for s in gates['signal'].to_list()}
+    if all(g == 'real' for g in groups.values()):
+        return None
+    out = {}
+    for g in ('real', 'cheat', 'placebo'):
+        sub = gates.filter(pl.col('signal').is_in([s for s, gg in groups.items() if gg == g]))
+        if sub.height == 0:
+            continue
+        out[g] = {
+            'n': sub.height,
+            'admitted': sub.filter(pl.col('selected'))['signal'].to_list(),
+            'n_p_below': int((sub['p_single'] < level).sum()),
+            'expected_p_below': level * sub.height,
+        }
+    return out

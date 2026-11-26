@@ -81,6 +81,7 @@ from src.risk.risk_pipeline import (
     write_json,
 )
 from src.utils.risk_io import combine_parquet_files
+from src.utils import console as out
 
 
 # =============================================================================
@@ -116,26 +117,25 @@ def main(run_date: str, tag: str):
             raise FileNotFoundError(f'Missing input: {f}')
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print('=' * 70)
-    print('PHASE 07: ESTIMATE RISK MODEL')
-    print('=' * 70)
-    print(f'Run ID:   {run_id}')
-    print(f'Config:   {RISK_CONFIG}')
-    print(f'Output:   {out_dir}')
+    out.stage('07', 'Estimate the risk model', 'How do the stocks move together, on each rebalance date, '
+              'using only the past?')
+    out.info('run', run_id)
+    out.info('method', f'{RISK_CONFIG["lookback_window"]} past days, Marchenko-Pastur cleaning, '
+             f'{RISK_CONFIG["cov_method"]} shrinkage, Louvain clusters')
 
     # ------------------------------------------------------------------
     # [1/5] Returns panel: rows = dates, columns = tickers
     # ------------------------------------------------------------------
-    print('\n[1/5] Loading returns...')
+    out.step(1, 5, 'Read the daily returns of every stock')
     returns_long = pl.read_parquet(features_file, columns=['date', 'ticker', 'logret'])
     panel = make_returns_panel(returns_long)
-    print(f'  {len(panel.dates)} dates x {len(panel.tickers)} tickers '
-          f'({panel.dates[0]} to {panel.dates[-1]})')
+    out.info('returns', f'{len(panel.dates)} dates x {len(panel.tickers)} stocks ({panel.dates[0]} to {panel.dates[-1]})')
 
     # ------------------------------------------------------------------
     # [2/5] Rebalance dates: last trading day of each week, among the dates that have a score
     # ------------------------------------------------------------------
-    print('\n[2/5] Choosing rebalance dates...')
+    out.step(2, 5, f'Choose the rebalance dates ({RISK_CONFIG["rebalance_freq"]}: last trading day of each period)',
+             'the risk model is needed only where the book is rebuilt')
     score_dates = (
         pl.scan_parquet(en_scores_file)
         .filter(pl.col(SCORE_COL).is_not_null())
@@ -152,13 +152,15 @@ def main(run_date: str, tag: str):
 
     if os.environ.get('QUANTALPHA_TEST_MODE', '').lower() in ('1', 'true', 'yes'):
         rebalance_dates = rebalance_dates[-10:]
-        print(f'  TEST MODE: keeping the last {len(rebalance_dates)} rebalance dates')
-    print(f'  {len(rebalance_dates)} rebalance dates ({rebalance_dates[0]} to {rebalance_dates[-1]})')
+        out.warn(f'TEST MODE: only the last {len(rebalance_dates)} rebalance dates')
+    out.info('rebalance dates', f'{len(rebalance_dates)} ({rebalance_dates[0]} to {rebalance_dates[-1]})')
 
     # ------------------------------------------------------------------
     # [3/5] Plan: window + eligible tickers for each date
     # ------------------------------------------------------------------
-    print('\n[3/5] Planning windows and eligible tickers...')
+    out.step(3, 5, 'For each date: the window of past returns and the eligible stocks',
+             f'a stock needs {RISK_CONFIG["min_obs"]} returns in the window; a date needs {RISK_CONFIG["min_assets"]} '
+             'stocks. Nothing after the date is used.')
     plans, skipped = plan_rebalances(
         panel, rebalance_dates,
         lookback_window=RISK_CONFIG['lookback_window'],
@@ -166,19 +168,21 @@ def main(run_date: str, tag: str):
         min_assets=RISK_CONFIG['min_assets'],
     )
     for s in skipped:
-        print(f'  Skipped {s["date"]}: {s["reason"]}')
-    print(f'  {len(plans)} dates to process, {len(skipped)} skipped')
+        out.note(f'skipped {s["date"]}: {s["reason"]}')
+    out.info('dates to process', f'{len(plans)} ({len(skipped)} skipped)')
 
     # ------------------------------------------------------------------
     # [4/5] Risk model for every date (parallel). Per-date files are written by the workers.
     # ------------------------------------------------------------------
-    print(f'\n[4/5] Estimating the risk model ({os.cpu_count()} cores available)...')
+    out.step(4, 5, 'Estimate correlation, covariance and clusters on every date',
+             'with about 500 stocks and 252 days the raw correlation is mostly noise: eigenvalues inside the '
+             'Marchenko-Pastur band are flattened, then shrunk; clusters are found after removing the market mode')
     summaries = run_risk_model(panel, plans, RISK_CONFIG, out_dir)
 
     # ------------------------------------------------------------------
     # [5/5] Combine per-date files, write summary and config
     # ------------------------------------------------------------------
-    print('\n[5/5] Combining files and writing the summary...')
+    out.step(5, 5, 'Sanity checks and save')
     date_suffixes = [s['date'] for s in summaries]
     for base_name in ('corr_raw', 'corr_clean', 'cov', 'clusters', 'eigenvalues'):
         combine_parquet_files(out_dir, base_name, date_suffixes)
@@ -194,15 +198,19 @@ def main(run_date: str, tag: str):
         'end_date': summary['date_range']['end'],
     })
 
-    print(f'\nRisk model estimated for {summary["n_rebalances"]} rebalances')
-    print(f'  average shrinkage:  {summary["avg_shrinkage"]}   (should vary by date, not sit at 1.0)')
-    print(f'  average median vol: {summary["avg_median_vol"]}   (annualised, equities: about 0.2 to 0.5)')
-    print(f'  average clusters:   {summary["avg_n_clusters"]}   (about 3 without the market-mode removal; expect more with it)')
-    print(f'  stocks in no cluster (size < {RISK_CONFIG["cluster_min_size"]}): {summary["avg_n_unclustered"]} per date on average')
-    print(f'  market mode removed on {summary["market_mode_removed_share"]:.0%} of the dates '
-          f'(it explains {summary["avg_market_variance_share"]} of the correlation variance on average)')
-    print(f'  output: {out_dir}/')
-    print(f'\nNext: python scripts/pipeline/08_construct_weights.py --date {run_date} --tag {tag}')
+    out.info('dates estimated', summary['n_rebalances'])
+    shrink, vol = summary['avg_shrinkage'], summary['avg_median_vol']
+    out.info('average shrinkage', f'{shrink}   (expected: between 0 and 1, not stuck at 1)')
+    if isinstance(shrink, (int, float)) and shrink >= 0.99:
+        out.warn('shrinkage is about 1: the covariance is almost the identity, the risk model carries no structure')
+    out.info('median stock volatility', f'{vol}   (annualised; US equities: about 0.2 to 0.5)')
+    if isinstance(vol, (int, float)) and not (0.05 <= vol <= 1.0):
+        out.warn('median volatility outside 5%-100% a year: check the units of the returns')
+    out.info('clusters per date', f'{summary["avg_n_clusters"]} on average, '
+             f'{summary["avg_n_unclustered"]} stocks in no cluster (size < {RISK_CONFIG["cluster_min_size"]})')
+    out.info('market mode removed', f'on {summary["market_mode_removed_share"]:.0%} of the dates '
+             f'(it explains {summary["avg_market_variance_share"]} of the correlation variance)')
+    out.done({'risk model': out_dir}, f'python scripts/pipeline/08_construct_weights.py --date {run_date} --tag {tag}')
 
 
 if __name__ == '__main__':

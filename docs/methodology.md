@@ -51,10 +51,10 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    S["SEARCH<br/>select, tune,<br/>out-of-fold scores"] --> G["GAP<br/>embargo"] --> H["HOLDOUT<br/>last 200 dates<br/>judge here"]
+    S["SEARCH<br/>select, tune,<br/>out-of-fold scores"] --> G["GAP<br/>embargo"] --> H["HOLDOUT<br/>last 756 dates<br/>judge here"]
 ```
 
-- **Holdout:** the last 200 dates that have a label.
+- **Holdout:** the last `HOLDOUT_DATES` = 756 dates (3 years) that have a label (`config/constants.py`).
 - **Gap:** `embargo` dates between the end of the search period and the start of the holdout, so no search label reaches into the holdout.
 - 05 and 06 use the search period only. 09 reports the holdout separately.
 
@@ -186,14 +186,14 @@ flowchart TB
 
 ## 5. Signal evaluation (stage 05)
 
-> The selection rule (six gates: prior, sign, Newey-West t >= 3, non-overlapping t >= 2, q < 0.05, deflated Sharpe >= 0.95) and the family combination of stage 06 are described in [selection.md](selection.md).
+> The selection rule (three gates: prior, sign, Romano-Wolf p with earlier trials < 0.05, on a studentized block bootstrap) and the family combination of stage 06 are described in [selection.md](selection.md). Sections 5.2 and 6 below describe the classic statistics, which are now printed cross-checks.
 
 ```mermaid
 flowchart LR
     S["signals + labels<br/>search period only"] --> I["daily IC<br/>Spearman(signal, fwdret)"] --> N["IC series"]
     N --> T["Newey-West<br/>t-stat"] --> P["p-value"]
     N --> NO["non-overlapping<br/>t-stat (cross-check)"]
-    P --> F["FDR<br/>BH, BY, Storey q"] --> SEL["selected: q < 0.2"]
+    P --> F["FDR<br/>BH, BY, Storey q"] --> SEL["cross-check only<br/>(legacy mode: q < 0.2)"]
 ```
 
 ### 5.1 Information coefficient
@@ -270,7 +270,7 @@ flowchart TB
 
 - Each date is in the test set of 9 of the 45 folds. Its out-of-fold score is the **average** of its 9 test predictions.
 - Purge = h + 1 = 21 dates. Embargo = purge + 16 = 37 dates (16 = `EMBARGO_WINDOW`, the length of the longest feature memory that matters after a block).
-- **Holdout:** the last 200 labelled dates. Not in the 10 blocks. A gap of `embargo` dates separates the search period from it.
+- **Holdout:** the last 756 labelled dates. Not in the 10 blocks. A gap of `embargo` dates separates the search period from it.
 
 ### 7.3 What the out-of-fold score means
 
@@ -314,7 +314,7 @@ Elastic Net minimises: `mean squared error + alpha × (l1_ratio × Σ|beta| + (1
 |---|---|
 | `search` | out-of-fold score (average of the folds where the date was test) |
 | `gap` | final model on dates between search and holdout |
-| `holdout` | final model on the last 200 labelled dates |
+| `holdout` | final model on the last 756 labelled dates |
 
 ### 8.3 Checks (tests)
 
@@ -499,7 +499,9 @@ For each stock traded on a rebalance, with `trade$ = |Δw| × AUM` and `ADV$` it
 - AUM matters. A bigger book pays more per dollar.
 - The cost is charged on the entry date of the trade.
 
-**Not modelled:** borrow cost of shorts, financing cost, delisting returns, taxes, market-closure effects. These make the result **optimistic**.
+**Dead stocks:** the day after its last row, a dead stock is marked at its last adjusted close, which holds the delisting return (CRSP). Forward-filled prices are for marking only, never traded.
+
+**Not modelled:** borrow cost of shorts, financing cost, taxes, market-closure effects. These make the result **optimistic**.
 
 ### 11.3 Reports
 
@@ -589,7 +591,7 @@ flowchart TD
 1. **Survivorship bias.** Current S&P 500 members only. Stocks that fell out of the index (often after bad returns) are missing. The long side looks better than it was.
 2. **Data quality.** Free data. Splits and dividends are adjusted by the vendor. Errors are possible. The label check counts moves beyond ±2.
 3. **Cost model.** The inputs (AUM, spread, kappa, commission) are assumptions. Borrow cost, financing and delisting are absent.
-4. **A single holdout path.** 200 dates is about 9 months. The Sharpe interval is wide.
+4. **A single holdout path.** 756 dates is 3 years. The 95% Sharpe interval is about +-1.1.
 5. **Dependent tests.** Candidate signals are transforms of few features. FDR assumes less dependence than we have.
 6. **Beta proxy.** The market is the equal-weighted average of the stocks in the file.
 7. **Capacity.** No volume constraint on positions beyond the impact term.

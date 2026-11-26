@@ -1,0 +1,18 @@
+{
+  "run_id": "2026-11-26_dev4",
+  "tag": "dev4",
+  "backtest_config": {
+    "aum": 100000000.0,
+    "spread_model": "fixed",
+    "spread_kwargs": {
+      "spread_bps": 3.0
+    },
+    "impact_kappa": 0.5,
+    "commission_bps": 1.0
+  },
+  "holdout_start": "2022-09-08",
+  "start_date": "2016-12-26",
+  "end_date": "2025-08-29",
+  "n_days": 2265,
+  "n_rebalances": 453
+}

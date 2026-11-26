@@ -1,5 +1,5 @@
 '''
-Backtest of the weights from stage 04e (used by 04f_run_backtest.py).
+Backtest of the weights of stage 08 (used by 09_run_backtest.py).
 
 The script only calls these functions. All the logic and all the conventions are here.
 
@@ -9,7 +9,7 @@ A weekly rebalanced long-short book, executed at the OPEN, marked at the OPEN, w
 
     close of t            open of t+1                 open of t'+1 (next rebalance + 1 day)
     signal + weights  ->  TRADE at open_adj[t+1]  ->  hold ... daily marks ...  ->  TRADE again
-    (from 04e)            pay costs                   weights drift with prices
+    (from 08)             pay costs                   weights drift with prices
 
     The label of the research (fwdret) is open-to-open too, so signal, label and P&L use the same clock.
 
@@ -28,14 +28,27 @@ COSTS (src/portfolio/costs.py), charged on the entry date, as a fraction of AUM:
     half-spread  +  square-root market impact  +  commission
     AUM is held constant (profits are withdrawn). ADV and volatility are those known at the close of the signal date.
 
+DELISTED STOCKS (the exit mark)
+-------------------------------
+    A DEAD stock stops trading before the end of the data (same rule as src/universe/point_in_time.dead_tickers).
+    Its last ADJUSTED CLOSE holds the last day's move and, with CRSP data, the delisting return.
+    The book is marked at opens, so without care that close is never seen: the position keeps its last open and
+    a long position in a dying stock avoids the crash. The research labels (stage 04) DO use that close.
+
+        last row of a dead stock      next trading date             later dates
+        open_adj = real open          open = LAST ADJUSTED CLOSE    open = same (forward-filled, return 0)
+        tradable                      NOT tradable (exit mark)      NOT tradable
+
+    So the P&L books the delisting return on the day after the last row, the same price as the label.
+    The position then earns 0 until the next rebalance, where it is sold (at the usual cost: conservative).
+
 CONVENTIONS AND ASSUMPTIONS (read them)
 ---------------------------------------
 - Prices are dividend- and split-adjusted opens (open_adj), so returns are total returns.
 - Cash earns nothing. No borrow cost on the short leg. No financing cost of leverage. (All of these make
   the result slightly optimistic. They are listed so that nobody forgets them.)
-- A stock with no price on the entry date cannot be traded: its weight is dropped (counted in the trade log).
-- A stock whose prices stop (delisting) keeps its last price: it earns 0 until the next rebalance.
-  The data holds today's S&P 500 members only, so survivorship bias is still there.
+- A stock with no REAL price on the entry date cannot be traded: its weight is dropped (counted in the trade log).
+  Forward-filled prices (missing days, exit marks) are for marking only, never for trading.
 - The last period is marked at the last available open. There is no liquidation cost at the end.
 '''
 
@@ -62,6 +75,8 @@ class PricePanel:
     open: np.ndarray       # (T, N) adjusted open, forward-filled, NaN before the first price of a ticker
     adv: np.ndarray        # (T, N) average dollar volume (60 days), NaN if unknown
     vol: np.ndarray        # (T, N) daily volatility of log returns (60 days), NaN if unknown
+    tradable: np.ndarray   # (T, N) bool: a REAL open exists that day (not forward-filled, not an exit mark)
+    marked: np.ndarray     # (T, N) bool: a real open OR the exit mark of a dead stock (the price is new that day)
 
 
 def _pivot(long: pl.DataFrame, value: str, tickers: list) -> np.ndarray:
@@ -69,36 +84,68 @@ def _pivot(long: pl.DataFrame, value: str, tickers: list) -> np.ndarray:
     return wide.select(tickers).to_numpy().astype(float)
 
 
-def make_price_panel(ohlcv_file, features_file) -> PricePanel:
+def exit_marks(prices: pl.DataFrame, tolerance_days: int = 10) -> pl.DataFrame:
     '''
-    Build the PricePanel from ohlcv.parquet (open_adj) and features.parquet (log_adv60, vol60).
-    Non-positive prices become missing. Opens are forward-filled (see the delisting rule above).
+    One row per DEAD ticker: [date, ticker, open_adj], where date = the first trading date after its last row
+    and open_adj = its last adjusted close (see "DELISTED STOCKS" above).
+    prices: [date, ticker, close] (close = adjusted close). A dead ticker whose last row is the last date of the
+    table gets no mark (there is no next date). A ticker is dead with the rule of point_in_time.dead_tickers.
     '''
-    ohlcv = pl.read_parquet(ohlcv_file, columns=['date', 'ticker', 'open_adj'])
-    feats = pl.read_parquet(features_file, columns=['date', 'ticker', 'log_adv60', 'vol60'])
+    from src.universe.point_in_time import dead_tickers
+    dead = dead_tickers(prices.select(['ticker', 'date']), tolerance_days).filter(pl.col('is_dead'))
+    if dead.height == 0:
+        return pl.DataFrame(schema={'date': prices.schema['date'], 'ticker': pl.Utf8, 'open_adj': pl.Float64})
+    last_close = (prices.filter(pl.col('ticker').is_in(dead['ticker'].to_list())).sort(['ticker', 'date'])
+                  .group_by('ticker').agg(pl.col('close').drop_nulls().last().alias('open_adj')))
+    all_dates = prices.select(pl.col('date').unique().sort())
+    nxt = (dead.select(['ticker', 'last_date']).sort('last_date')
+           .join_asof(all_dates.with_columns(pl.col('date').alias('_d')), left_on='last_date', right_on='_d',
+                      strategy='forward', allow_exact_matches=False))
+    return (nxt.filter(pl.col('date').is_not_null()).join(last_close, on='ticker')
+            .select(['date', 'ticker', pl.col('open_adj').cast(pl.Float64)]))
+
+
+def build_price_panel(prices: pl.DataFrame, feats: pl.DataFrame, tolerance_days: int = 10) -> PricePanel:
+    '''
+    prices: [date, ticker, open_adj, close]    feats: [date, ticker, log_adv60, vol60]
+    Non-positive opens become missing. Exit marks of dead stocks are added, then opens are forward-filled.
+    '''
     long = (
-        ohlcv.join(feats, on=['date', 'ticker'], how='left')
+        prices.join(feats, on=['date', 'ticker'], how='left')
         .with_columns(
             pl.when(pl.col('open_adj') > 0).then(pl.col('open_adj')).otherwise(None).alias('open_adj'),
             pl.col('log_adv60').exp().alias('adv'),
         )
+        .with_columns(pl.col('open_adj').is_not_null().alias('tradable'), pl.lit(False).alias('is_exit'))
     )
+    marks = exit_marks(prices, tolerance_days).with_columns(
+        pl.lit(None, dtype=pl.Float64).alias('adv'), pl.lit(None, dtype=pl.Float64).alias('vol60'),
+        pl.lit(False).alias('tradable'), pl.lit(True).alias('is_exit'))
+    long = pl.concat([long.select(marks.columns), marks.with_columns(pl.col('date').cast(long.schema['date']))])
+
     tickers = sorted(long['ticker'].unique().to_list())
     dates = long.select('date').unique().sort('date')['date'].to_numpy().astype('datetime64[D]')
-
-    # forward-fill the open of each ticker (missing days, delisting)
+    long = long.with_columns((pl.col('tradable') | pl.col('is_exit')).alias('marked'))
     wide_open = (
         long.pivot(on='ticker', index='date', values='open_adj', aggregate_function='first').sort('date')
-        .select(tickers).fill_null(strategy='forward')
+        .select(tickers).fill_null(strategy='forward')           # missing days and the days after an exit mark
     )
-    open_ = wide_open.to_numpy().astype(float)
     return PricePanel(
         dates=dates,
         tickers=np.asarray(tickers),
-        open=open_,
+        open=wide_open.to_numpy().astype(float),
         adv=_pivot(long, 'adv', tickers),
         vol=_pivot(long, 'vol60', tickers),
+        tradable=np.nan_to_num(_pivot(long.with_columns(pl.col('tradable').cast(pl.Float64)), 'tradable', tickers)) > 0,
+        marked=np.nan_to_num(_pivot(long.with_columns(pl.col('marked').cast(pl.Float64)), 'marked', tickers)) > 0,
     )
+
+
+def make_price_panel(ohlcv_file, features_file) -> PricePanel:
+    '''Build the PricePanel from ohlcv.parquet (open_adj, close) and features.parquet (log_adv60, vol60).'''
+    prices = pl.read_parquet(ohlcv_file, columns=['date', 'ticker', 'open_adj', 'close'])
+    feats = pl.read_parquet(features_file, columns=['date', 'ticker', 'log_adv60', 'vol60'])
+    return build_price_panel(prices, feats)
 
 
 # =============================================================================
@@ -196,7 +243,7 @@ def simulate(weights_df: pl.DataFrame, panel: PricePanel, cfg: dict) -> "tuple[p
         w_all = g['weight'].to_numpy()
         known = cols >= 0
         tradable = known.copy()
-        tradable[known] = np.isfinite(panel.open[e, cols[known]])        # needs a price on the entry date
+        tradable[known] = panel.tradable[e, cols[known]]                 # needs a REAL price on the entry date
         n_untradable = int((~tradable).sum())
         idx, w = cols[tradable], w_all[tradable]
 
@@ -246,6 +293,7 @@ def simulate(weights_df: pl.DataFrame, panel: PricePanel, cfg: dict) -> "tuple[p
     first = entry_idx[0]
     with np.errstate(invalid='ignore', divide='ignore'):
         daily = panel.open[1:] / panel.open[:-1] - 1.0
+    daily[~(panel.marked[1:] & panel.marked[:-1])] = np.nan       # stale (forward-filled) prices are not returns
     market = np.full(T, np.nan)
     finite_rows = np.isfinite(daily).any(axis=1)
     market[1:][finite_rows] = np.nanmean(daily[finite_rows], axis=1)

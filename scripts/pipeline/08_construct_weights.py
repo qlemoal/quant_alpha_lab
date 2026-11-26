@@ -74,6 +74,7 @@ from src.risk.weights_pipeline import (
     RiskModelReader,
     construct_all,
 )
+from src.utils import console as out
 
 
 # =============================================================================
@@ -112,42 +113,44 @@ def main(run_date: str, tag: str):
             raise FileNotFoundError(f'Missing input: {f}')
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print('=' * 70)
-    print('PHASE 08: CONSTRUCT PORTFOLIO WEIGHTS')
-    print('=' * 70)
-    print(f'Run ID:  {run_id}')
-    print(f'Config:  {PORTFOLIO_CONFIG}')
-    print(f'Output:  {out_dir}')
+    c = PORTFOLIO_CONFIG
+    out.stage('08', 'Construct portfolio weights', 'How much do we hold long and short of each stock, '
+              'on each rebalance date?')
+    out.info('run', run_id)
+    out.info('rules', f'dollar-neutral{", beta-neutral" if c["beta_neutral"] else ""}, cluster cap '
+             f'{c["max_cluster_multiple"]}x fair share, target vol {c["target_vol"]:.0%}, gross cap {c["max_gross_leverage"]}')
 
     # ------------------------------------------------------------------
     # [1/4] Rebalance dates: the dates of the risk model that also have scores
     # ------------------------------------------------------------------
-    print('\n[1/4] Loading rebalance dates and scores...')
+    out.step(1, 4, 'Read the rebalance dates and the combined scores')
     dates = risk_model_dates(risk_dir / 'summary.json')
     scores_by_date = load_scores_by_date(en_scores_file, SCORE_COL, dates)
     dates = [d for d in dates if d in scores_by_date]
-    print(f'  {len(dates)} dates with both a risk model and scores ({dates[0]} to {dates[-1]})')
+    out.info('dates', f'{len(dates)} with both a risk model and scores ({dates[0]} to {dates[-1]})')
 
     # ------------------------------------------------------------------
     # [2/4] Build one book per date
     # ------------------------------------------------------------------
-    print('\n[2/4] Constructing weights...')
+    out.step(2, 4, 'Build one book per date',
+             'weights follow the score; then caps per cluster (no hidden sector bet), long = short, zero market beta '
+             '(a book long high-beta stocks is long the market), and a scale to the target volatility')
     reader = RiskModelReader(risk_dir)
     betas_by_date = None
     if PORTFOLIO_CONFIG['beta_neutral'] and PORTFOLIO_CONFIG['beta_source'] == 'features':
         betas_by_date = load_betas_by_date(paths.features_file, PORTFOLIO_CONFIG['beta_feature'], dates)
-        print(f'  betas from {PORTFOLIO_CONFIG["beta_feature"]} (features), shrink {PORTFOLIO_CONFIG["beta_shrink"]:.2f}')
+        out.info('betas', f'{c["beta_feature"]} (rolling, past only), shrunk {c["beta_shrink"]:.2f} toward 1')
     weights_df, diag_df, skipped = construct_all(
         dates, scores_by_date, reader, PORTFOLIO_CONFIG, betas_by_date=betas_by_date,
-        progress=lambda it: tqdm(it, desc='  Weights', unit='date'),
+        progress=lambda it: tqdm(it, desc='      books', unit='date', leave=False),
     )
     for s in skipped:
-        print(f'  Skipped {s["date"]}: {s["reason"]}')
+        out.note(f'skipped {s["date"]}: {s["reason"]}')
 
     # ------------------------------------------------------------------
     # [3/4] Save
     # ------------------------------------------------------------------
-    print('\n[3/4] Saving...')
+    out.step(3, 4, 'Save the weights and the per-date diagnostics')
     weights_df.write_parquet(out_dir / 'weights.parquet')
     diag_df.write_parquet(out_dir / 'weights_diag.parquet')
     with open(out_dir / 'config.json', 'w') as f:
@@ -164,20 +167,23 @@ def main(run_date: str, tag: str):
     # ------------------------------------------------------------------
     # [4/4] What to look at
     # ------------------------------------------------------------------
-    print('\n[4/4] Summary')
-    print(f'  {weights_df.height:,} weights over {diag_df.height} dates ({len(skipped)} skipped)')
-    print(f'  gross exposure   mean {diag_df["gross"].mean():.2f}   max {diag_df["gross"].max():.2f}'
-          f'   (cap {PORTFOLIO_CONFIG["max_gross_leverage"]})')
-    print(f'  ex-ante vol      mean {diag_df["ex_ante_vol"].mean():.3f}   (target {PORTFOLIO_CONFIG["target_vol"]})')
-    print(f'  dates where the leverage cap binds (vol below target): '
-          f'{diag_df["leverage_capped"].sum()} / {diag_df.height}')
-    print(f'  max |net exposure|  {diag_df["net_exposure"].abs().max():.2e}   (must be about 0)')
-    print(f'  beta exposure (NAV units)  before 3b: mean {diag_df["beta_before_neutralising"].mean():+.3f}, '
-          f'mean |.| {diag_df["beta_before_neutralising"].abs().mean():.3f}   after: mean |.| {diag_df["beta_exposure"].abs().mean():.1e}'
-          f'   (beta_neutral = {PORTFOLIO_CONFIG["beta_neutral"]})')
-    print(f'  one-way turnover per rebalance  mean {diag_df["turnover"].mean():.3f}')
-    print(f'  output: {out_dir}/')
-    print(f'\nNext: python scripts/pipeline/09_run_backtest.py --date {run_date} --tag {tag}')
+    out.step(4, 4, 'Check the books', 'every book must be neutral, finite and below the leverage cap '
+             '(the stage already stopped if one was not)')
+    net_max = diag_df['net_exposure'].abs().max()
+    out.verdict(net_max < 1e-6, f'dollar-neutral: largest |long - short| = {net_max:.1e} of NAV')
+    if c['beta_neutral']:
+        b_before, b_after = diag_df['beta_before_neutralising'].abs().mean(), diag_df['beta_exposure'].abs().mean()
+        out.verdict(b_after < 1e-6, f'beta-neutral: mean |beta exposure| {b_before:.3f} before, {b_after:.1e} after')
+    out.info('books', f'{diag_df.height} dates, {weights_df.height:,} weights ({len(skipped)} dates skipped)')
+    out.info('gross exposure', f'mean {diag_df["gross"].mean():.2f} x NAV, max {diag_df["gross"].max():.2f} '
+             f'(cap {c["max_gross_leverage"]})')
+    out.info('ex-ante volatility', f'mean {diag_df["ex_ante_vol"].mean():.1%} (target {c["target_vol"]:.0%})')
+    n_cap = int(diag_df['leverage_capped'].sum())
+    if n_cap:
+        out.note(f'the leverage cap binds on {n_cap} of {diag_df.height} dates: there the volatility is below target')
+    out.info('turnover per rebalance', f'{diag_df["turnover"].mean():.1%} of NAV, one way, on average')
+    out.done({'weights': out_dir / 'weights.parquet', 'diagnostics': out_dir / 'weights_diag.parquet'},
+             f'python scripts/pipeline/09_run_backtest.py --date {run_date} --tag {tag}')
 
 
 if __name__ == '__main__':

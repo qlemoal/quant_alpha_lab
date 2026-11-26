@@ -89,7 +89,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import numpy as np
 import polars as pl
 
-from config.constants import EMBARGO_WINDOW
+from config.constants import EMBARGO_WINDOW, HOLDOUT_DATES
 from config.paths import get_paths, run_id_from_args
 from src.models.elastic_net_combiner import (
     run_en_combiner,
@@ -101,6 +101,8 @@ from src.models.elastic_net_combiner import (
 from src.models.family_combiner import group_by_family, add_family_scores, family_column, drop_one_oof_ic
 from src.evaluation.signals.report import signal_report
 from src.signals.cheat import signal_group
+from src.utils import console as out
+from src.utils.console import num
 
 
 # =============================================================================
@@ -109,7 +111,7 @@ from src.signals.cheat import signal_group
 
 EN_CONFIG = {
     'horizon': 20,                  # used only if selected_signals.json has no horizon
-    'holdout_dates': 200,           # used only if selected_signals.json has no holdout_dates
+    'holdout_dates': HOLDOUT_DATES,          # used only if selected_signals.json has no holdout_dates
     'n_blocks': 10,                 # CPCV: the search period is cut in 10 blocks ...
     'n_test_blocks': 2,             # ... and each fold tests on 2 of them (45 folds)
     'l1_ratio_grid': [.05, .1, .3, .5, .7, .9, .95, .99, 1],
@@ -147,32 +149,31 @@ def _fmt(x, spec):
 def load_q_values(fdr_file: Path, signal_cols: list) -> dict:
     '''{signal: q-value} for the selected signals. A missing file gives {} (no weighting).'''
     if not fdr_file.exists():
-        print(f'  No FDR report at {fdr_file}: q-weighting is off.')
+        out.note(f'no FDR report at {fdr_file}: q-weighting is off')
         return {}
     fdr = pl.read_parquet(fdr_file)
     return {r['signal']: r['qvalue'] for r in fdr.iter_rows(named=True) if r['signal'] in signal_cols}
 
 
-def print_report(name: str, rep: dict) -> None:
-    print(f'  {name:<8} IC mean {_fmt(rep.get("ic_mean"), ".4f")}   IC IR {_fmt(rep.get("ic_ir"), ".3f")}'
-          f'   t (Newey-West) {_fmt(rep.get("ic_tstat_nw"), ".2f")}   hit rate {_fmt(rep.get("hit_rate"), ".1%")}'
-          f'   L/S Sharpe {_fmt(rep.get("long_short_sharpe"), ".2f")}   days {rep.get("n_days")}')
+def report_row(name: str, rep: dict) -> list:
+    return [name, num(rep.get('ic_mean'), '+.4f'), num(rep.get('ic_tstat_nw'), '+.2f'), num(rep.get('hit_rate'), '.0%'),
+            num(rep.get('long_short_sharpe'), '+.2f'), rep.get('n_days')]
 
 
 def main(date: str, tag: str = 'default', combine: str = 'auto'):
     run_id = run_id_from_args(date, tag)
     cfg = get_paths(run_id=run_id)
 
-    print('=' * 70)
-    print('PHASE 06: FIT ELASTIC NET COMBINER (CPCV search + holdout)')
-    print('=' * 70)
-    print(f'Run ID:  {run_id}')
-    print(f'Config:  {EN_CONFIG}')
+    out.stage('06', 'Combine the admitted signals', 'What is the best single score from the admitted signals, '
+              'judged on dates the model never saw?')
+    out.info('run', run_id)
 
     # ------------------------------------------------------------------
     # [1/6] Load the selection, the split rule, the q-values
     # ------------------------------------------------------------------
-    print('\n[1/6] Loading the selection from 05...')
+    out.step(1, 6, 'Read the admitted signals of stage 05 and group them by family',
+             'signals of one family (for example mom5 and mom10) are the same bet: they are averaged with the sign of '
+             'their prior, so the model has few inputs and little to overfit')
     selected_file = cfg.stage_dir('signal_eval') / 'selected_signals.json'
     if not selected_file.exists():
         raise FileNotFoundError(f'Not found: {selected_file}. Run 05_evaluate_signals.py first.')
@@ -186,22 +187,23 @@ def main(date: str, tag: str = 'default', combine: str = 'auto'):
     horizon = selected.get('horizon', EN_CONFIG['horizon'])
     # The split must be the one 05 used. 05 writes it; we only fall back to the config for old files.
     holdout_dates = selected.get('holdout_dates', EN_CONFIG['holdout_dates'])
-    print(f'  {len(signal_cols)} signals: {signal_cols}')
-    print(f'  label {fwd_ret_col}   horizon {horizon}   holdout {holdout_dates} dates')
+    out.info('admitted signals', f'{len(signal_cols)}: {", ".join(signal_cols)}')
+    out.info('label', f'{fwd_ret_col}   (holdout: last {holdout_dates} dates, never used to fit)')
 
     if combine not in ('auto', 'family', 'signal'):
         raise ValueError(f"combine must be auto, family or signal, got {combine!r}")
     family_mode = (combine == 'family') or (combine == 'auto' and selected.get('mode') == 'strict')
     families = group_by_family(selected['signal_meta']) if family_mode else {}
-    print(f'  combination mode: {"FAMILY (sign-aligned, non-negative, one-SE)" if family_mode else "SIGNAL (one coefficient per signal, exploration)"}')
+    out.info('mode', 'FAMILY: sign-aligned averages, weights >= 0, one-standard-error rule' if family_mode
+             else 'SIGNAL: one free weight per signal (exploration)')
     if family_mode:
-        for fam, members in families.items():
-            print(f'    family {fam:<16} {[(m, "+" if sg > 0 else "-") for m, sg in members]}')
+        for fam, ms in families.items():
+            out.info(f'  family {fam}', ', '.join(f'{"+" if sg > 0 else "-"}{m}' for m, sg in ms))
 
     q_values = {}
     if EN_CONFIG['q_value_weighting'] and not family_mode:
         q_values = load_q_values(cfg.stage_dir('signal_eval') / 'fdr_report.parquet', signal_cols)
-        print(f'  q-values: { {k: round(v, 4) for k, v in q_values.items()} }')
+        out.info('q-values', { k: round(v, 4) for k, v in q_values.items()})
 
     signals_file = cfg.stage_dir('signals') / 'signals.parquet'
     lf = pl.scan_parquet(signals_file)
@@ -214,12 +216,15 @@ def main(date: str, tag: str = 'default', combine: str = 'auto'):
     if family_mode:
         lf = add_family_scores(lf, families)                 # fam_<family> columns
         signal_cols = [family_column(f) for f in families]   # from here on, the model inputs are the family scores
-        print(f'  model inputs: {signal_cols}')
+        out.info('model inputs', ', '.join(signal_cols))
 
     # ------------------------------------------------------------------
     # [2/6] Fit (CPCV search, out-of-fold scores, holdout report)
     # ------------------------------------------------------------------
-    print('\n[2/6] Fitting the Elastic Net...')
+    out.step(2, 6, 'Fit an Elastic Net with combinatorial purged cross-validation (CPCV)',
+             f'the search period is cut into {EN_CONFIG["n_blocks"]} blocks; each fold tests on '
+             f'{EN_CONFIG["n_test_blocks"]} blocks and trains on the rest, minus a purge and an embargo around the test '
+             'blocks, so no training label overlaps a test label. The penalty is chosen on these folds.')
     result = run_en_combiner(
         lf=lf, signal_cols=signal_cols, horizon=horizon,
         embargo_window=EMBARGO_WINDOW,
@@ -241,58 +246,61 @@ def main(date: str, tag: str = 'default', combine: str = 'auto'):
     # ------------------------------------------------------------------
     # [3/6] Checks
     # ------------------------------------------------------------------
-    print('\n[3/6] Checks...')
     model = result['model']
     coef_std = dict(zip(signal_cols, model.coef_))
     coef_raw, const_raw = raw_unit_coefficients(result)
-    print(f'  alpha {model.alpha_:.6g}   l1_ratio {model.l1_ratio_:.3g}')
+    out.info('folds', f'{len(result["cv_folds"])}   purge {result["purge_w"]} dates, embargo {result["embargo_w"]} dates')
+    out.info('penalty chosen', f'alpha {model.alpha_:.3g}, l1_ratio {model.l1_ratio_:.2g}')
     nonzero = [k for k, v in coef_std.items() if abs(v) > 1e-9]
-    print(f'  non-zero coefficients: {len(nonzero)} / {len(signal_cols)}')
-    for k in sorted(nonzero, key=lambda k: -abs(coef_std[k])):
-        print(f'    {k:<28} {coef_std[k]:+.6f}')
+
+    out.step(3, 6, 'Check the model: which inputs matter, and are they stable across folds?',
+             'a weight that changes sign between folds, or a placebo that carries weight, means the model fits noise')
+    share = score_contributions(result, result['search_panel'])
+    out.table(['input', 'weight (std units)', 'share of score variance'],
+              [[k, f'{coef_std[k]:+.6f}', f'{share[k]:+.1%}'] for k in sorted(signal_cols, key=lambda k: -abs(coef_std[k]))],
+              [-28, 18, 24])
     if not nonzero:
         raise ValueError('All coefficients are zero: the combined score would be constant. '
                          'The signals carry no usable information, or alpha is too large.')
 
-    # Role of each signal in the score: share of the score variance (the coefficient alone depends on units)
-    share = score_contributions(result, result['search_panel'])
     group_share = {}
     for k, v in share.items():
         g = (k[len('fam_'):] if k.startswith('fam_') else None)
         g = g if g in ('cheat', 'placebo') else ('real' if g else signal_group(k))
         group_share[g] = group_share.get(g, 0.0) + v
-    print('  share of the score variance, by signal:')
-    for k in sorted(share, key=lambda k: -abs(share[k])):
-        print(f'    {k:<28} {share[k]:+8.2%}')
-    print('  by group: ' + '   '.join(f'{g} {v:.2%}' for g, v in sorted(group_share.items())))
+    if len(group_share) > 1:
+        out.info('share by group', '   '.join(f'{g} {v:.1%}' for g, v in sorted(group_share.items())))
     if group_share.get('placebo', 0.0) > 0.01:
-        print(f'  WARNING: placebo signals (pure noise) carry {group_share["placebo"]:.1%} of the score variance. '
-              f'The combiner fits noise. Use a stronger penalty or a stricter selection.')
+        out.warn(f'placebo signals (pure noise) carry {group_share["placebo"]:.1%} of the score variance: '
+                 'the combiner fits noise. Use a stronger penalty or a stricter selection.')
 
     stability_df = coefficient_stability_by_fold(result, result['search_panel'])
     sign_flips = [k for k in signal_cols if (stability_df[k] > 1e-9).any() and (stability_df[k] < -1e-9).any()]
     zero_some = [k for k in nonzero if (stability_df[k].abs() <= 1e-9).any()]
-    print(f'  folds: {stability_df.height}')
-    print(f'  signals whose sign flips between folds: {sign_flips if sign_flips else "none"}')
-    print(f'  signals that are zero in some folds:    {zero_some if zero_some else "none"}')
+    out.verdict(not sign_flips, 'no weight changes sign between folds' if not sign_flips
+                else f'weights change sign between folds: {sign_flips}')
+    if zero_some:
+        out.note(f'zero in some folds (a weak input): {zero_some}')
 
     drop_one = {}
     if family_mode and len(signal_cols) > 1:
-        print('  drop-one test (out-of-fold IC with and without each family):')
         drop_one = drop_one_oof_ic(result['search_panel'], result)
-        for k, d in drop_one.items():
-            verdict = 'helps' if d['delta'] > 0 else 'adds nothing'
-            print(f'    {k:<24} IC with {d["ic_full"]:.4f}  without {d["ic_without"]:.4f}  delta {d["delta"]:+.4f}  {verdict}')
+        out.info('drop-one test', 'out-of-fold IC of the score with and without each family')
+        out.table(['family', 'IC with', 'IC without', 'change', ''],
+                  [[k, f'{d["ic_full"]:.4f}', f'{d["ic_without"]:.4f}', f'{d["delta"]:+.4f}',
+                    'helps' if d['delta'] > 0 else 'adds nothing'] for k, d in drop_one.items()],
+                  [-24, 8, 10, 8, -12])
 
     oof_share = result['oof'].height / max(result['search_panel'].height, 1)
-    print(f'  search rows scored out-of-fold: {oof_share:.1%}')
-    if oof_share < MIN_OOF_SHARE:
-        print(f'  WARNING: below {MIN_OOF_SHARE:.0%}. The remaining search rows get the final model score (in-sample).')
+    out.verdict(oof_share >= MIN_OOF_SHARE, f'{oof_share:.1%} of the search rows are scored out-of-fold '
+                '(by models that never trained on them)')
 
     # ------------------------------------------------------------------
     # [4/6] Score every row, tag the period
     # ------------------------------------------------------------------
-    print('\n[4/6] Scoring all rows...')
+    out.step(4, 6, 'Score every row and tag its period',
+             'search = out-of-fold score; gap = final model, too close to the search to judge; holdout = final model '
+             'on dates it never saw')
     scored = (
         combined_score_column(lf, result, out_col='combined_score')
         .with_columns(
@@ -304,15 +312,17 @@ def main(date: str, tag: str = 'default', combine: str = 'auto'):
         .collect()
     )
     s = scored['combined_score']
-    print(f'  {scored.height:,} rows   score mean {s.mean():.6f}   std {s.std():.6f}   nulls {s.null_count():,}')
-    counts = scored.group_by('period').agg(pl.col('date').n_unique().alias('dates')).sort('dates', descending=True)
-    print('  dates per period: ' + ', '.join(f'{r["period"]} {r["dates"]}' for r in counts.iter_rows(named=True)))
-    print(f'  search: up to {train_end}   gap: until {holdout_start}   holdout: from {holdout_start}')
+    counts = dict(scored.group_by('period').agg(pl.col('date').n_unique()).iter_rows())
+    out.info('search', f'up to {train_end}   ({counts.get("search", 0)} dates)')
+    out.info('gap', f'until {holdout_start}   ({counts.get("gap", 0)} dates)')
+    out.info('holdout', f'from {holdout_start}   ({counts.get("holdout", 0)} dates)')
+    out.info('rows scored', f'{scored.height:,} (missing scores: {s.null_count():,})')
 
     # ------------------------------------------------------------------
     # [5/6] Report: search (out-of-fold) vs holdout
     # ------------------------------------------------------------------
-    print('\n[5/6] Quality of the combined score (labels with horizon overlap: Newey-West and sqrt(252/h) used)')
+    out.step(5, 6, 'Quality of the combined score: search (out-of-fold) against holdout',
+             'the search numbers are optimistic (the penalty was chosen on these folds); only the holdout is clean')
     reports = {}
     for name in ('search', 'holdout'):
         # Keep rows with a real label and a real score (the last h dates have no label yet; null AND NaN count as missing).
@@ -322,17 +332,22 @@ def main(date: str, tag: str = 'default', combine: str = 'auto'):
             & pl.col('combined_score').is_not_null() & pl.col('combined_score').is_not_nan()
         )
         reports[name] = signal_report(part.lazy(), 'combined_score', fwd_ret_col, horizon=horizon)
-        print_report(name, reports[name])
+    out.table(['period', 'mean IC', 'NW t', 'hit rate', 'L/S Sharpe', 'dates'],
+              [report_row(n, reports[n]) for n in ('search', 'holdout')], [-8, 8, 6, 8, 10, 6])
+    out.note('NW t: Newey-West t of the daily IC (lag covers the label overlap). L/S Sharpe: top minus bottom '
+             'quintile, annualised with sqrt(252 / h). No costs here.')
     ic_s, ic_h = reports['search'].get('ic_mean'), reports['holdout'].get('ic_mean')
     if isinstance(ic_s, float) and isinstance(ic_h, float) and ic_s * ic_h < 0:
-        print('  WARNING: the IC changes sign between search and holdout. Do not trust the combination.')
+        out.fail('the IC changes sign between search and holdout. Do not trust the combination.')
     elif isinstance(ic_s, float) and isinstance(ic_h, float) and abs(ic_h) < 0.5 * abs(ic_s):
-        print('  NOTE: the holdout IC is less than half of the search IC. Expect a weaker strategy than the search suggests.')
+        out.warn('the holdout IC is less than half of the search IC: expect a weaker strategy than the search suggests')
+    elif isinstance(ic_s, float) and isinstance(ic_h, float):
+        out.ok('the holdout IC has the sign of the search IC and at least half its size')
 
     # ------------------------------------------------------------------
     # [6/6] Save
     # ------------------------------------------------------------------
-    print('\n[6/6] Saving...')
+    out.step(6, 6, 'Save the scores and the model')
     scores_dir, model_dir = cfg.stage_dir('en_scores'), cfg.stage_dir('en_model')
     scores_dir.mkdir(parents=True, exist_ok=True)
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -388,9 +403,8 @@ def main(date: str, tag: str = 'default', combine: str = 'auto'):
             'search_report': reports['search'],
             'holdout_report': reports['holdout'],
         }), f, indent=2, default=str)
-    print(f'  scores: {scores_dir / "en_scores.parquet"}')
-    print(f'  model:  {model_dir / "model.json"}')
-    print(f'\nNext: python scripts/pipeline/07_estimate_risk_model.py --date {date} --tag {tag}')
+    out.done({'scores': scores_dir / 'en_scores.parquet', 'model': model_dir / 'model.json'},
+             f'python scripts/pipeline/07_estimate_risk_model.py --date {date} --tag {tag}')
 
 
 if __name__ == '__main__':

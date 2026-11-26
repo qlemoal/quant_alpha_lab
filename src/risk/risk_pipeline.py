@@ -259,7 +259,7 @@ def run_risk_model(panel: ReturnsPanel, plans: list, config: dict, out_dir: Path
     )
     summaries = []
     with Parallel(n_jobs=n_jobs, backend='loky', return_as='generator') as parallel:
-        for summary in tqdm(parallel(tasks), total=len(plans), desc='  Risk model', unit='date'):
+        for summary in tqdm(parallel(tasks), total=len(plans), desc='      dates', unit='date', leave=False):
             summaries.append(summary)
     return summaries
 
