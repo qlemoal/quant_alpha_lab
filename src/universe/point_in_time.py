@@ -104,7 +104,7 @@ def rule_universe(ohlcv: pl.DataFrame, top_n: int = DEFAULT_RULE['top_n'], adv_w
 
     dates = df['date'].unique().sort()
     recon_dates = dates.gather(list(range(0, len(dates), reconstitute_every)))
-    df = df.with_columns(pl.col('date').is_in(recon_dates.implode()).alias('_recon'))
+    df = df.with_columns(pl.col('date').is_in(recon_dates.to_list()).alias('_recon'))
 
     eligible = (pl.col('adv') >= min_adv) & (pl.col('_i') + 1 >= min_history)
     df = df.with_columns(pl.when(eligible).then(pl.col('adv')).otherwise(None).alias('_adv_elig'))
