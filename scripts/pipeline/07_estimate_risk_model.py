@@ -43,9 +43,9 @@ NO LOOK-AHEAD
 
 INPUTS
     {clean_base}/features/features.parquet                    (columns: date, ticker, logret)
-    {clean_base}/en_scores/{run_id}/en_scores.parquet         (columns: date, ticker, combined_score)
+    {clean_base}/runs/{run_id}/en_scores/en_scores.parquet         (columns: date, ticker, combined_score)
 
-OUTPUTS   {clean_base}/risk_model/{run_id}/
+OUTPUTS   {clean_base}/runs/{run_id}/risk_model/
     corr_clean.parquet    cleaned correlation, long format, upper triangle  [date, ticker_i, ticker_j, corr]
     cov.parquet           ANNUALISED covariance, same format                [date, ticker_i, ticker_j, cov]
     clusters.parquet      [date, ticker, cluster_id]

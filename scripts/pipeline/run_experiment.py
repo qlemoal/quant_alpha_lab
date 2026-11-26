@@ -25,7 +25,7 @@ THE PIPELINE
      |
     09  run the backtest        weights/, ohlcv, features        ->  backtest/      (judge the HOLDOUT block)
 
-    Every stage folder is {clean_base}/{stage}/{run_id}/, with run_id = {date}_{tag}.
+    Every stage folder is {clean_base}/runs/{run_id}/{stage}/, with run_id = {date}_{tag}.
 
 USAGE
     python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default                 # stages 04 to 09

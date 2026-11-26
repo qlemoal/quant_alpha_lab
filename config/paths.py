@@ -5,8 +5,9 @@ Structure:
   data/
     raw/{source}/{asset}/{region}/{universe}/{freq}/{type}/
     clean/{asset}/{region}/{universe}/{freq}/
-      base/           # ohlcv.parquet, features.parquet (shared)
-      {stage}/{run_id}/  # signals, signal_eval, en_scores, en_model, risk_model, weights, backtest
+      ohlcv/, universe/, features/   # shared by all runs
+      runs/{run_id}/{stage}/         # signals, signal_eval, en_scores, en_model, risk_model, weights, backtest
+                                     # one experiment = one folder: delete it to delete the experiment
 """
 
 from pathlib import Path
@@ -109,7 +110,7 @@ class DataPaths:
         """Get directory for a pipeline stage (signals, en_scores, etc.)."""
         if self.run_id is None:
             raise ValueError("run_id required for pipeline output paths")
-        return self.clean_base / stage / self.run_id
+        return self.clean_base / 'runs' / self.run_id / stage
 
 
 def get_paths(

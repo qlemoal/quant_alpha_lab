@@ -39,11 +39,11 @@ UNITS
     gross 1 = 50% long + 50% short.  gross 4 = 200% long + 200% short.
 
 INPUTS
-    {clean_base}/en_scores/{run_id}/en_scores.parquet      (date, ticker, combined_score)
-    {clean_base}/risk_model/{run_id}/                      (07 outputs)
+    {clean_base}/runs/{run_id}/en_scores/en_scores.parquet      (date, ticker, combined_score)
+    {clean_base}/runs/{run_id}/risk_model/                      (07 outputs)
     {clean_base}/features/features.parquet                 (beta252, for the beta neutralisation)
 
-OUTPUTS   {clean_base}/weights/{run_id}/
+OUTPUTS   {clean_base}/runs/{run_id}/weights/
     weights.parquet        [date, ticker, score, cluster_id, raw_weight, capped_weight, weight]
     weights_diag.parquet   one row per date: gross, long/short/net exposure, beta exposure, ex-ante vol, turnover, ...
     config.json

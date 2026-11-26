@@ -14,18 +14,18 @@ Focus: Equity long-short, cross-sectional signals, Elastic Net combination, risk
 ## Structure
 ```
 scripts/pipeline/     # Sequential steps (run in order):
-  01_download_data.py      # YFinance → data/raw/prices.parquet
-  02_etl_prices.py         # Clean/align → data/processed/prices.parquet
-  03_build_features.py     # Technical features → data/processed/features.parquet
-  04_generate_signals.py  # On-demand signals → data/processed/signals/{date}_{tag}/signals.parquet
-  05_evaluate_signals.py  # IC, FDR, decay → data/exports/signal_eval_{tag}/
-  06_fit_combiner.py      # Elastic Net → data/exports/combiner_{tag}/
+  01_download_data.py      # YFinance → data/raw/{source}/.../ohlcv/
+  02_etl_prices.py         # Clean/align → data/clean/.../ohlcv/ohlcv.parquet
+  02b_build_universe.py    # Point-in-time universe → data/clean/.../universe/
+  03_build_features.py     # Technical features → data/clean/.../features/features.parquet
+  04_generate_signals.py   # On-demand signals → runs/{date}_{tag}/signals/
+  05_evaluate_signals.py   # IC, FDR, decay → runs/{date}_{tag}/signal_eval/
+  06_fit_combiner.py       # Elastic Net → runs/{date}_{tag}/en_scores/, en_model/
   07_estimate_risk_model.py  # RMT correlation + Louvain clustering
   08_construct_weights.py # Portfolio optimization with risk model
   09_run_backtest.py      # Full backtest with costs
-  04_inspect.py            # ← DEPRECATED, use scripts/analysis/inspect_signals.py
 
-scripts/analysis/     # Exploration tools (run anytime):
+scripts/demos/        # Exploration tools (run anytime):
   inspect_signals.py       # List/compare/plot signal runs
 
 src/                  # Library code:
@@ -40,7 +40,7 @@ src/                  # Library code:
 ```
 
 ## Key Concepts
-- **Signals are generated on-demand** (04) — no persistent signals.parquet in processed/, versioned by `{date}_{tag}/`
+- **Signals are generated on-demand** (04) — one folder per experiment: `runs/{date}_{tag}/{stage}/`
 - **Config is code** — `SIGNAL_SPECS` in 04 defines what signals to build; config.json saved per run for reproducibility
 - **Forward returns use open-to-open** (`fwdret{h}` = logret from open(t+1) to open(t+h+1), realistic execution)
 - **Evaluation horizon** = 20 days default (fwdret20)
@@ -50,34 +50,28 @@ src/                  # Library code:
 
 ## Common Commands
 ```bash
-# Generate signals
-python scripts/pipeline/04_generate_signals.py
+python scripts/pipeline/04_generate_signals.py --date 2026-11-07 --tag default
+python scripts/pipeline/05_evaluate_signals.py --date 2026-11-07 --tag default
 
-# Evaluate signals
-python scripts/pipeline/05_evaluate_signals.py --signal-dir data/processed/signals/2026-10-29_default
+python scripts/demos/inspect_signals.py list
+python scripts/demos/inspect_signals.py stats --run 2026-11-07_default
 
-# Inspect runs
-python scripts/analysis/inspect_signals.py list
-python scripts/analysis/inspect_signals.py stats --run 2026-10-29_default
-python scripts/analysis/inspect_signals.py ic --run 2026-10-29_default --horizon 20 --plot
-python scripts/analysis/inspect_signals.py compare --runs 2026-10-29_default 2026-10-29_mom_rev
-
-# Full pipeline
-python scripts/pipeline/run_experiment.py
+# Stages 04 to 09
+python scripts/pipeline/run_experiment.py --date 2026-11-07 --tag default
 ```
 
 ## Data Files
+Dataset root: `data/clean/{asset}/{region}/{universe}/{freq}/` (set in `config/dataset_config.json`). Paths come from `config/paths.py`.
+
 | Path | Description |
 |------|-------------|
-| `data/raw/prices.parquet` | Raw OHLCV from YFinance |
-| `data/processed/prices.parquet` | Cleaned, aligned prices |
-| `data/processed/features.parquet` | Technical features (mom, vol, beta, adv, etc.) |
-| `data/processed/signals/{date}_{tag}/signals.parquet` | Generated signals + fwd returns |
-| `data/processed/signals/{date}_{tag}/config.json` | Full run config + stats |
-| `data/exports/signal_eval_{tag}/` | IC, FDR, decay reports |
-| `data/exports/combiner_{tag}/` | Elastic Net coefficients, predictions |
-| `data/exports/risk_model_{tag}/` | Correlation matrices, clusters |
-| `data/exports/weights_{tag}.parquet` | Portfolio weights per date |
+| `data/raw/{source}/...` | Raw data, never edited |
+| `ohlcv/`, `universe/`, `features/` | Shared by all runs |
+| `runs/{date}_{tag}/signals/` | Signals + fwd returns, config.json |
+| `runs/{date}_{tag}/signal_eval/` | IC, FDR, decay, selection |
+| `runs/{date}_{tag}/en_scores/`, `en_model/` | Combiner scores and model |
+| `runs/{date}_{tag}/risk_model/` | Covariance, clusters |
+| `runs/{date}_{tag}/weights/`, `backtest/` | Portfolio weights, backtest results |
 
 ## Environment
 - Python 3.11+ (uses `str|list` union syntax)

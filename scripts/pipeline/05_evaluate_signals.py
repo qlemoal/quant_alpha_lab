@@ -33,11 +33,11 @@ WHAT CHANGED vs the previous version (and why)
 4. No crash if a t-stat is missing (None): the p-value is NaN and the signal is ignored by FDR.
 
 Inputs:
-  data/clean/{asset}/{region}/{universe}/{freq}/signals/{run_id}/signals.parquet
-  data/clean/{asset}/{region}/{universe}/{freq}/signals/{run_id}/config.json
+  data/clean/{asset}/{region}/{universe}/{freq}/runs/{run_id}/signals/signals.parquet
+  data/clean/{asset}/{region}/{universe}/{freq}/runs/{run_id}/signals/config.json
 
 Outputs:
-  data/clean/{asset}/{region}/{universe}/{freq}/signal_eval/{run_id}/
+  data/clean/{asset}/{region}/{universe}/{freq}/runs/{run_id}/signal_eval/
     ├── ic_summary.parquet      # Per-signal IC stats (training dates only)
     ├── ic_by_year.parquet      # Mean IC of each signal per calendar year (stability, survivorship check)
     ├── ic_decay.parquet        # IC vs horizon (training dates only)

@@ -599,7 +599,7 @@ flowchart TD
 
 ## 15. Reproducibility
 
-- Every stage reads files and writes files under `data/clean/.../{stage}/{run_id}/`.
+- Every stage reads files and writes files under `data/clean/.../runs/{run_id}/{stage}/`.
 - `config.json` in each stage stores: parameters, a hash of the parameters, a hash of the input file, the git commit, and whether the working tree had uncommitted changes.
 - Random seeds are fixed where randomness exists (cross-validation, Louvain).
 - `run_experiment.py` runs the chain and stops at the first failure.

@@ -58,7 +58,7 @@ HOW TO ADD A SIGNAL
     Keep the list of what you tried, also the ones you removed.
 
 INPUTS    {clean_base}/features/features.parquet
-OUTPUTS   {clean_base}/signals/{run_id}/
+OUTPUTS   {clean_base}/runs/{run_id}/signals/
     signals.parquet   [date, ticker, <signals>, fwdret1, fwdret5, fwdret10, fwdret20]
     config.json       specs, skipped specs, hashes, git commit, statistics, label checks
 

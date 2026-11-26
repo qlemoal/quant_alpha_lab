@@ -64,14 +64,14 @@ UNITS
       coefficients_raw_units      to score a raw signal value by hand
 
 INPUTS
-    {clean_base}/signals/{run_id}/signals.parquet
-    {clean_base}/signal_eval/{run_id}/selected_signals.json, fdr_report.parquet
+    {clean_base}/runs/{run_id}/signals/signals.parquet
+    {clean_base}/runs/{run_id}/signal_eval/selected_signals.json, fdr_report.parquet
 
 OUTPUTS
-    {clean_base}/en_scores/{run_id}/en_scores.parquet   [date, ticker, combined_score, period, <signals>]
-    {clean_base}/en_scores/{run_id}/config.json
-    {clean_base}/en_model/{run_id}/model.json           (includes train_end and holdout_start: 09 reads them)
-    {clean_base}/en_model/{run_id}/stability.parquet    coefficients of each CV fold
+    {clean_base}/runs/{run_id}/en_scores/en_scores.parquet   [date, ticker, combined_score, period, <signals>]
+    {clean_base}/runs/{run_id}/en_scores/config.json
+    {clean_base}/runs/{run_id}/en_model/model.json           (includes train_end and holdout_start: 09 reads them)
+    {clean_base}/runs/{run_id}/en_model/stability.parquet    coefficients of each CV fold
 
 USAGE
     python scripts/pipeline/06_fit_combiner.py --date 2026-11-07 --tag default

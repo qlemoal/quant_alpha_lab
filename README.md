@@ -295,16 +295,18 @@ data/
 └── clean/equities/US/SP500/daily/
     ├── ohlcv/         ohlcv.parquet            one file, shared by all runs
     ├── features/      features.parquet         one file, shared by all runs
-    ├── signals/       {run_id}/                signals.parquet, config.json
-    ├── signal_eval/   {run_id}/                ic_summary, ic_decay, fdr_report, selected_signals.json
-    ├── en_scores/     {run_id}/                en_scores.parquet
-    ├── en_model/      {run_id}/                model.json, stability.parquet
-    ├── risk_model/    {run_id}/                cov, corr_clean, clusters, summary.json
-    ├── weights/       {run_id}/                weights.parquet, weights_diag.parquet
-    └── backtest/      {run_id}/                returns, trades, metrics.json, equity_curve.png
+    └── runs/{run_id}/                          one folder per experiment
+        ├── signals/                            signals.parquet, config.json
+        ├── signal_eval/                        ic_summary, ic_decay, fdr_report, selected_signals.json
+        ├── en_scores/                          en_scores.parquet
+        ├── en_model/                           model.json, stability.parquet
+        ├── risk_model/                         cov, corr_clean, clusters, summary.json
+        ├── weights/                            weights.parquet, weights_diag.parquet
+        └── backtest/                           returns, trades, metrics.json, equity_curve.png
 ```
 
 - `run_id = {date}_{tag}`, for example `2026-11-07_default`. A new tag keeps the old result.
+- To delete an experiment, delete `runs/{run_id}/`. It still counts as a trial if you used its result to choose anything.
 - Each run saves its provenance: git commit, hash of the input file, hash of the parameters.
 - Raw data is never edited. Parquet files are git-ignored. Small JSON summaries can be committed.
 

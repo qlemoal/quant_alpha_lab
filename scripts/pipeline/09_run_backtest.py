@@ -42,12 +42,12 @@ HOW TO READ THE RESULT
     6. Missing from the simulation: borrow cost, financing cost, delisting returns, survivorship bias.
 
 INPUTS
-    {clean_base}/weights/{run_id}/weights.parquet, weights_diag.parquet
-    {clean_base}/en_model/{run_id}/model.json      (optional: gives the holdout dates)
+    {clean_base}/runs/{run_id}/weights/weights.parquet, weights_diag.parquet
+    {clean_base}/runs/{run_id}/en_model/model.json      (optional: gives the holdout dates)
     {clean_base}/ohlcv/ohlcv.parquet               (open_adj)
     {clean_base}/features/features.parquet         (log_adv60, vol60, fwdret{h})
 
-OUTPUTS   {clean_base}/backtest/{run_id}/
+OUTPUTS   {clean_base}/runs/{run_id}/backtest/
     returns.parquet     [date, gross_ret, long_ret, short_ret, cost, market_ret, net_ret]  daily
     trades.parquet      one row per rebalance: turnover, cost by component, exposures
     metrics.json        full | pre_holdout | holdout   (each with an 'alpha_regression' block)

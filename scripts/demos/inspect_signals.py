@@ -58,21 +58,16 @@ from src.utils.helpers import file_hash
 
 Path('tmp').mkdir(exist_ok=True)          # the plots go to ./tmp/
 
-# New structure: clean/equities/US/SP500/daily/{step}/{run_id}/{data_file}.parquet + config.json
+# One folder per experiment: {BASE}/runs/{run_id}/{stage}/
 BASE = Path('data/clean/equities/US/SP500/daily')
-SIGNALS_BASE = BASE / 'signals'
-SIGNAL_EVAL_BASE = BASE / 'signal_eval'
-EN_SCORES_BASE = BASE / 'en_scores'
-RISK_MODEL_BASE = BASE / 'risk_model'
-WEIGHTS_BASE = BASE / 'weights'
-BACKTEST_BASE = BASE / 'backtest'
+RUNS = BASE / 'runs'
 
 
 def list_runs():
     '''List all available signal runs with key metadata.'''
     runs = []
-    if SIGNALS_BASE.exists():
-        for d in sorted(SIGNALS_BASE.iterdir()):
+    if RUNS.exists():
+        for d in sorted(RUNS.glob('*/signals')):
             if d.is_dir():
                 config_file = d / 'config.json'
                 signals_file = d / 'signals.parquet'
@@ -80,7 +75,7 @@ def list_runs():
                     with open(config_file) as f:
                         cfg = json.load(f)
                     runs.append({
-                        'run_id': d.name,
+                        'run_id': d.parent.name,
                         'tag': cfg.get('signal_tag', 'unknown'),
                         'date': cfg.get('run_date', 'unknown'),
                         'n_signals': cfg.get('n_signals', 0),
@@ -102,26 +97,21 @@ def list_runs():
         print(f'{r["run_id"]:<25} {r["tag"]:<15} {r["date"]:<12} {sigs:<20} {r["n_rows"]:>10,} {r["git_commit"]:<10}')
 
 
-def find_run_dir(base: Path, run_id: str) -> Path | None:
-    """Find the run directory for a given base path and run_id."""
-    if not base.exists():
-        return None
-    exact = base / run_id
+def find_run_dir(stage: str, run_id: str) -> Path | None:
+    """The folder of one stage of one run. Falls back to the latest run with the same tag."""
+    exact = RUNS / run_id / stage
     if exact.exists():
         return exact
-    # Fallback: find by tag suffix
     tag = run_id.split('_', 1)[1] if '_' in run_id else run_id
-    matches = list(base.glob(f'*_{tag}'))
-    if matches:
-        return sorted(matches)[-1]
-    return None
+    matches = sorted(RUNS.glob(f'*_{tag}/{stage}'))
+    return matches[-1] if matches else None
 
 
 def load_run(run_id: str):
     '''Load signals data and config for a run.'''
-    run_dir = find_run_dir(SIGNALS_BASE, run_id)
+    run_dir = find_run_dir('signals', run_id)
     if not run_dir:
-        raise ValueError(f'Run not found: {run_id} in {SIGNALS_BASE}')
+        raise ValueError(f'Run not found: {run_id} in {RUNS}')
     
     config_file = run_dir / 'config.json'
     signals_file = run_dir / 'signals.parquet'
@@ -140,9 +130,9 @@ def load_run(run_id: str):
 
 def load_signal_eval(run_id: str):
     '''Load signal evaluation data for a run.'''
-    run_dir = find_run_dir(SIGNAL_EVAL_BASE, run_id)
+    run_dir = find_run_dir('signal_eval', run_id)
     if not run_dir:
-        raise ValueError(f'Signal eval run not found: {run_id} in {SIGNAL_EVAL_BASE}')
+        raise ValueError(f'Signal eval run not found: {run_id} in {RUNS}')
     
     config_file = run_dir / 'config.json'
     # Could also load IC data, FDR data, decay data
@@ -219,7 +209,7 @@ def cmd_ic(args):
         return
     
     print(f'\n=== IC Analysis (horizon={args.horizon}d) ===')
-    run_dir = find_run_dir(SIGNALS_BASE, args.run)
+    run_dir = find_run_dir('signals', args.run)
     if not run_dir:
         print(f'Run directory not found: {args.run}')
         return
@@ -271,7 +261,7 @@ def cmd_perf(args):
         return
     
     print(f'\n=== Decile Long-Short Performance (horizon={args.horizon}d) ===')
-    run_dir = find_run_dir(SIGNALS_BASE, args.run)
+    run_dir = find_run_dir('signals', args.run)
     if not run_dir:
         print(f'Run directory not found: {args.run}')
         return
@@ -316,7 +306,7 @@ def cmd_turnover(args):
     sig_cols = get_signal_cols(df)
     
     print(f'\n=== Signal Turnover (Stability) ===')
-    run_dir = find_run_dir(SIGNALS_BASE, args.run)
+    run_dir = find_run_dir('signals', args.run)
     if not run_dir:
         print(f'Run directory not found: {args.run}')
         return
