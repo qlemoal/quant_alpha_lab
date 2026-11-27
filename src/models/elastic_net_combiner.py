@@ -1,5 +1,5 @@
 '''
-GOAL: combine several already-evaluated candidate signals (the survivors of 05: IC + Newey-West + FDR)
+GOAL: combine several already-evaluated candidate signals (the signals admitted by 05: prior, sign, Romano-Wolf bootstrap test)
     into ONE score, using an Elastic Net regression against forward returns.
     The hyper-parameters (alpha, l1_ratio) are chosen with the leakage-safe combinatorial purged CV
     (src/validation/cpcv.py), NOT with sklearn's random k-fold (which would leak overlapping labels).
