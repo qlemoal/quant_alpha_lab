@@ -363,6 +363,8 @@ def period_metrics(df: pl.DataFrame, trades: pl.DataFrame, ex_ante_vol: "float |
         'sharpe_ci95': ([sr - 1.96 * np.sqrt((1 + 0.5 * sr ** 2) / years),
                          sr + 1.96 * np.sqrt((1 + 0.5 * sr ** 2) / years)] if sr is not None else None),
         'sharpe_gross': sharpe_ratio(gross),
+        'gross_return_simple_ann': float(gross.mean() * TRADING_DAYS),   # before costs, not compounded
+        'cost_ann': float(cost.sum() / years),                           # fraction of NAV per year
         'max_drawdown': mdd,
         'calmar': (ann_ret / abs(mdd)) if mdd else None,
         'hit_rate': float((net > 0).mean()),

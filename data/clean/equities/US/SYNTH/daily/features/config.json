@@ -1,8 +1,8 @@
 {
-  "run_timestamp": "2026-11-25T17:18:25.074323",
+  "run_timestamp": "2026-11-26T20:14:24.320188",
   "source_ohlcv": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/clean/equities/US/SYNTH/daily/ohlcv/ohlcv.parquet",
   "ohlcv_hash": "sha256:4987a3a605e8d066",
-  "git_commit": "7826c4eb7eacf97fca8e3e1e9cd55a15b387d530",
+  "git_commit": "6cc8901b79ff2971da5fbe42d0b616a33246ee02",
   "windows": {
     "beta": [
       60,

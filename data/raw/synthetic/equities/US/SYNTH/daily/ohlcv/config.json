@@ -14,9 +14,13 @@
     "c_liq": 8e-05,
     "c_rev": 0.0008,
     "c_mom": 9e-05,
-    "max_dividend_yield": 0.02
+    "max_dividend_yield": 0.02,
+    "delist_rate": 0.0,
+    "delist_sensitivity": 1.0
   },
   "digest": "ef32f5e927ee55c9c38a262795cc9696cf53bea6dd7f4725fd054aa87c5a0f12",
   "n_tickers": 300,
-  "n_days": 2520
+  "n_days": 2520,
+  "n_dead_in_market": 0,
+  "drop_dead": false
 }

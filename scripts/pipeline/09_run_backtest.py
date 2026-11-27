@@ -31,15 +31,14 @@ WHERE IS THE COMPLICATED PART?
     src/portfolio/costs.py              the cost formulas
     This script only calls them, in order.
 
-HOW TO READ THE RESULT
-    1. Look at the HOLDOUT block, not at the whole period.
-    2. The Sharpe interval (sharpe_ci95) is wide: a few years of data cannot pin a Sharpe down.
-    3. market_beta should be close to 0. The ALPHA line gives the return left after the market exposure, with a
-       Newey-West t-stat. A good Sharpe with a small alpha t-stat is market exposure, not skill.
-       The YEARLY table shows whether the result holds in every year or one year carries the sample.
-    4. realised_over_ex_ante_vol far from 1 means the risk model is wrong.
-    5. sharpe_vs_cost_multiplier: if the Sharpe collapses at 2x costs, the strategy is fragile.
-    6. Missing from the simulation: borrow cost, financing cost, delisting returns, survivorship bias.
+HOW TO READ THE RESULT (the console prints it in this order)
+    1. The HOLDOUT column, not the DEVELOPMENT one.
+    2. RETURN PER YEAR: before costs + trading costs = after costs. A large cost line means the book trades too much.
+    3. The Sharpe 95% range is wide: a few years of data cannot pin a Sharpe down.
+    4. YEAR BY YEAR: does the result hold every year, or does one year carry the sample?
+    5. VERDICT: skill after costs, survives 2x costs, market neutral, risk model right.
+    metrics.json also holds the alpha against the market (Newey-West t), hit rate, long and short legs.
+    Missing from the simulation: borrow cost, financing cost, survivorship bias of the universe.
 
 INPUTS
     {clean_base}/runs/{run_id}/weights/weights.parquet, weights_diag.parquet
@@ -135,12 +134,12 @@ def main(run_date: str, tag: str):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     c = BACKTEST_CONFIG
-    out.stage('09', 'Run the backtest', 'What would the book have earned, after trading costs, '
-              'and what is the honest number?')
+    out.stage('09', 'Backtest with trading costs', 'Would this book have made money after paying for its trades?')
     out.info('run', run_id)
-    out.info('costs (assumptions)', f'AUM ${c["aum"]:,.0f}, half-spread {c["spread_kwargs"].get("spread_bps")} bps, '
-             f'square-root impact k = {c["impact_kappa"]}, commission {c["commission_bps"]} bp')
-    out.note('not modelled: borrow cost of shorts, financing of leverage. Both make the result optimistic.')
+    out.info('cost assumptions', f'${c["aum"] / 1e6:,.0f}M book. Each trade pays half the bid-ask spread '
+             f'({c["spread_kwargs"].get("spread_bps")} bps), a commission ({c["commission_bps"]} bp) and a market '
+             f'impact that grows with the square root of (trade size / daily volume), k = {c["impact_kappa"]}')
+    out.note('not in the costs: borrow fee of the shorts, financing. A real book would do a little worse.')
 
     # [1/4] -----------------------------------------------------------------------------------------------------------
     out.step(1, 4, 'Read the weights and the prices')
@@ -150,9 +149,10 @@ def main(run_date: str, tag: str):
     holdout_start = holdout_start_date(model_file, paths.features_file)
     out.info('rebalances', f'{weights_df["date"].n_unique()} dates, {weights_df["ticker"].n_unique()} stocks')
     out.info('prices', f'{len(panel.dates)} dates x {len(panel.tickers)} stocks')
-    out.info('dead stocks', f'{int((panel.marked & ~panel.tradable).any(axis=0).sum())} '
-             '(their last close, with the delisting return, is booked the day after their last row)')
-    out.info('holdout starts', holdout_start or 'unknown (no split reported by 06)')
+    out.info('delisted stocks', f'{int((panel.marked & ~panel.tradable).any(axis=0).sum())} '
+             '(a position in a dead stock is closed at its last price, the day after)')
+    out.info('holdout starts', f'{holdout_start}: no model has seen the dates after it' if holdout_start
+             else 'unknown (stage 06 reported no split)')
 
     # [2/4] -----------------------------------------------------------------------------------------------------------
     out.step(2, 4, 'Simulate the book day by day',
@@ -168,9 +168,9 @@ def main(run_date: str, tag: str):
         out.note(f'{n_untr} target positions could not be traded (no real price on the entry day) and were dropped')
 
     # [3/4] -----------------------------------------------------------------------------------------------------------
-    out.step(3, 4, 'Performance by period: judge the strategy on the HOLDOUT only',
-             'before the holdout the scores are out-of-fold, but each comes from models trained on blocks BEFORE '
-             'AND AFTER its date: that is not what you could have traded live, so it is a development number')
+    out.step(3, 4, 'Results. Only the HOLDOUT column is an honest test',
+             'the DEVELOPMENT column uses scores from models that were also trained on later data: you could not '
+             'have traded it live. Use it to debug, never to judge')
     metrics = summarise(returns_df, trades_df, holdout_start, ex_ante_vol)
     net_all = returns_df['net_ret'].to_numpy()
     mkt_all = returns_df['market_ret'].to_numpy()
@@ -184,18 +184,11 @@ def main(run_date: str, tag: str):
             sel = np.ones(len(dates_all), dtype=bool)
         m['alpha_regression'] = alpha_regression(net_all[sel], mkt_all[sel])
     print_metrics_table(metrics)
-    judge_holdout(metrics.get('holdout'))
 
     yearly = yearly_table(dates_all, returns_df['gross_ret'].to_numpy(), returns_df['cost'].to_numpy(), mkt_all,
                           trades_df['entry_date'].to_numpy(), trades_df['turnover'].to_numpy())
-    print()
-    out.info('year by year', '(net of costs; one good year can carry a whole sample)')
-    f = lambda v, spec: num(v, spec)
-    out.table(['year', 'days', 'return', 'vol', 'Sharpe', 'gross Sh', 'beta', 'cost bps', 'turnover'],
-              [[r['year'], r['n_days'], f(r['net_return'], '+.1%'), f(r['ann_vol'], '.1%'), f(r['sharpe_net'], '+.2f'),
-                f(r['sharpe_gross'], '+.2f'), f(r['beta'], '+.2f'), f(r['cost_bps'], '.0f'), f(r['turnover'], '.1f')]
-               for r in yearly], [4, 5, 7, 6, 7, 8, 6, 8, 8])
-    out.info('positive years', f'{sum(1 for r in yearly if r["net_return"] > 0)} of {len(yearly)}')
+    print_yearly(yearly, holdout_start)
+    judge_holdout(metrics.get('holdout'))
 
     # [4/4] -----------------------------------------------------------------------------------------------------------
     out.step(4, 4, 'Save')
@@ -219,62 +212,108 @@ def main(run_date: str, tag: str):
 # PRINTING
 # =============================================================================
 
+def _years_label(m: dict) -> str:
+    return f'{str(m["start"])[:7]} to {str(m["end"])[:7]}'
+
+
 def print_metrics_table(metrics: dict) -> None:
-    '''One row per number, one column per period (full, pre-holdout, holdout).'''
-    names = [n for n in ('full', 'pre_holdout', 'holdout') if metrics.get(n) and metrics[n].get('sharpe') is not None]
+    '''One row per number, one column per period. Without a holdout, the whole period is shown.'''
+    names = [n for n in ('pre_holdout', 'holdout') if (metrics.get(n) or {}).get('sharpe') is not None]
+    if not names:
+        names = ['full'] if (metrics.get('full') or {}).get('sharpe') is not None else []
     if not names:
         out.warn('no period is long enough for metrics')
         return
-    def cell(m, key, spec):
-        return num(m.get(key), spec)
+    header = {'full': 'WHOLE PERIOD', 'pre_holdout': 'DEVELOPMENT', 'holdout': 'HOLDOUT'}
+    pct = lambda key: (lambda m: num(m.get(key), '+.1%'))
+    sh = lambda key: (lambda m: num(m.get(key), '+.2f'))
     def ci(m):
         lo, hi = m.get('sharpe_ci95') or (None, None)
-        return f'[{num(lo, "+.1f")}, {num(hi, "+.1f")}]'
-    def alpha(m):
-        a = m.get('alpha_regression') or {}
-        return f'{num(a.get("alpha_ann"), "+.1%")} (t {num(a.get("alpha_t"), "+.1f")})'
+        return f'{num(lo, "+.1f")} to {num(hi, "+.1f")}'
     rows = [
-        ('period', lambda m: f'{m["start"]}..{str(m["end"])[2:]}'),
-        ('years', lambda m: m['years']),
-        ('Sharpe, net of costs', lambda m: cell(m, 'sharpe', '+.2f')),
-        ('  95% interval', ci),
-        ('Sharpe, before costs', lambda m: cell(m, 'sharpe_gross', '+.2f')),
-        ('Sharpe at 2x costs', lambda m: num((m.get('sharpe_vs_cost_multiplier') or {}).get('2x'), '+.2f')),
-        ('annual return, net', lambda m: cell(m, 'ann_return', '+.1%')),
-        ('annual volatility', lambda m: cell(m, 'ann_vol', '.1%')),
-        ('max drawdown', lambda m: cell(m, 'max_drawdown', '.1%')),
-        ('market beta', lambda m: cell(m, 'market_beta', '+.2f')),
-        ('alpha per year (NW t)', alpha),
-        ('turnover per year', lambda m: cell(m, 'annual_turnover', '.1f') + 'x'),
-        ('cost per year (bps)', lambda m: cell(m, 'annual_cost_bps', '.0f')),
-        ('realised / ex-ante vol', lambda m: cell(m, 'realised_over_ex_ante_vol', '.2f')),
+        ('dates', _years_label),
+        ('years', lambda m: f'{m["years"]:.1f}'),
+        None,
+        ('RETURN PER YEAR', None),
+        ('  before costs', pct('gross_return_simple_ann')),
+        ('  trading costs', lambda m: num(-m['cost_ann'], '+.1%')),
+        ('  after costs', lambda m: num(m['gross_return_simple_ann'] - m['cost_ann'], '+.1%')),
+        None,
+        ('SHARPE RATIO (return / risk)', None),
+        ('  before costs', sh('sharpe_gross')),
+        ('  after costs', sh('sharpe')),
+        ('    95% range', ci),
+        ('  if costs were 2x', lambda m: num((m.get('sharpe_vs_cost_multiplier') or {}).get('2x'), '+.2f')),
+        None,
+        ('RISK', None),
+        ('  volatility per year', lambda m: num(m.get('ann_vol'), '.1%')),
+        ('  worst fall from a peak', lambda m: num(m.get('max_drawdown'), '.1%')),
+        ('  market beta (target 0)', sh('market_beta')),
+        ('  realised / planned vol', lambda m: num(m.get('realised_over_ex_ante_vol'), '.2f')),
+        None,
+        ('TRADING', None),
+        ('  book traded per year', lambda m: num(m.get('annual_turnover'), '.0f') + ' times'),
     ]
-    header = {'full': 'FULL', 'pre_holdout': 'BEFORE HOLDOUT', 'holdout': 'HOLDOUT'}
-    out.table([''] + [header[n] for n in names], [[label] + [fn(metrics[n]) for n in names] for label, fn in rows],
-              [-24] + [22] * len(names))
-    out.note('Sharpe interval: Lo (2002). Alpha: return left after the market exposure, Newey-West t. '
-             'Realised / ex-ante vol near 1 means the risk model sized the book right.')
+    widths = [-28] + [20] * len(names)
+    out.table([''] + [header[n] for n in names], [], widths)
+    for r in rows:
+        if r is None:
+            print()
+        elif r[1] is None:
+            print(out.INDENT + r[0])
+        else:
+            out.table_row([r[0]] + [r[1](metrics[n]) for n in names], widths)
+    out.note('returns per year are simple sums of daily returns, so "before costs" + "trading costs" = "after '
+             'costs". The 95% range of the Sharpe ratio is Lo (2002); 3 years of data give about +/- 1.1.')
+
+
+def print_yearly(yearly: list, holdout_start) -> None:
+    '''One row per calendar year: does the result hold every year, or does one year carry it?'''
+    hy = holdout_start.year if holdout_start is not None else None
+    def part(y):
+        if hy is None:
+            return ''
+        return 'holdout' if y > hy else ('both' if y == hy else 'development')
+    print()
+    print(out.INDENT + 'YEAR BY YEAR (one good year can carry a whole sample: look for a steady pattern)')
+    full = [r for r in yearly if r['n_days'] >= 120]
+    out.table(['year', 'part', 'after costs', 'Sharpe before', 'Sharpe after', 'costs', 'traded'],
+              [[r['year'], part(r['year']), num(r['net_return'], '+.1%'), num(r['sharpe_gross'], '+.1f'),
+                num(r['sharpe_net'], '+.1f'), num(-r['cost_bps'] / 1e4, '+.1%'), num(r['turnover'], '.0f') + 'x']
+               for r in full], [4, -11, 11, 13, 12, 7, 7])
+    n_short = len(yearly) - len(full)
+    gains = sum(1 for r in full if r['net_return'] > 0)
+    print(out.INDENT + f'{gains} of {len(full)} years gain after costs'
+          + (f' ({n_short} partial year of less than 120 days not shown)' if n_short else ''))
 
 
 def judge_holdout(m: "dict | None") -> None:
-    '''Plain-language verdicts on the holdout numbers.'''
+    '''The verdict, in plain words, on the holdout only. Each line says what was checked and what it means.'''
     print()
+    print(out.INDENT + 'VERDICT (holdout only)')
     if not m or m.get('sharpe') is None:
-        out.warn('no holdout block: the only clean number is missing')
+        out.warn('no holdout: the only honest number is missing')
         return
     lo, hi = m['sharpe_ci95']
-    out.verdict(lo > 0, f'holdout net Sharpe {m["sharpe"]:+.2f}: its 95% interval [{lo:+.1f}, {hi:+.1f}] '
-                + ('excludes 0' if lo > 0 else 'includes 0, so the holdout cannot tell this strategy from no skill'))
-    two_x = (m.get('sharpe_vs_cost_multiplier') or {}).get('2x')
-    if two_x is not None:
-        out.verdict(two_x > 0, f'at 2x the assumed costs the net Sharpe is {two_x:+.2f}'
-                    + ('' if two_x > 0 else ': the strategy depends on the cost assumptions'))
+    out.verdict(lo > 0, (f'skill after costs: Sharpe {m["sharpe"]:+.2f}, 95% range {lo:+.1f} to {hi:+.1f}. ')
+                + ('The range is above 0.' if lo > 0 else 'The range includes 0: this result could be luck.'))
+
+    gross, net, two_x = m.get('sharpe_gross'), m['sharpe'], (m.get('sharpe_vs_cost_multiplier') or {}).get('2x')
+    if gross is not None and two_x is not None:
+        out.verdict(two_x > 0, f'survives higher costs: Sharpe {gross:+.2f} before costs, {net:+.2f} after, '
+                    f'{two_x:+.2f} if costs were twice the assumption.')
+        if two_x <= 0 and gross > 1:
+            out.note(f'the signal works before costs, but the book is traded {m["annual_turnover"]:.0f} times a year, '
+                     f'which costs {m["cost_ann"]:.0%} of capital a year. Trade less first (stage 08), do not look for '
+                     'a better signal.')
     beta = m.get('market_beta')
     if beta is not None:
-        out.verdict(abs(beta) < 0.1, f'realised market beta {beta:+.2f} (a beta-neutral book should be near 0)')
+        out.verdict(abs(beta) < 0.1, f'market neutral: beta {beta:+.2f} (should be between -0.1 and +0.1).')
     ratio = m.get('realised_over_ex_ante_vol')
-    if ratio is not None and not (0.7 <= ratio <= 1.3):
-        out.warn(f'realised volatility is {ratio:.2f} x the ex-ante one: the risk model misjudges the book')
+    if ratio is not None:
+        out.verdict(0.7 <= ratio <= 1.3, f'risk model: realised volatility = {ratio:.2f} x the planned one '
+                    '(should be between 0.7 and 1.3).')
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Backtest the 08 weights with trading costs')

@@ -147,23 +147,32 @@ def _read_json(path: Path):
 def print_headline(cfg) -> None:
     '''The few numbers that matter, from the files of the stages, so that the last thing you read is the honest one.'''
     sel = _read_json(cfg.stage_dir('signal_eval') / 'selected_signals.json')
+    report = _read_json(cfg.stage_dir('signal_eval') / 'signal_report.json') or {}
     if sel is not None:
-        out.info('05 signals admitted', f'{len(sel["signals"])}: {", ".join(sel["signals"]) or "none"}')
+        n_tested = report.get('n_signals', '?')
+        out.info('05 signals kept', f'{len(sel["signals"])} of {n_tested}: {", ".join(sel["signals"]) or "none"}')
     model = _read_json(cfg.stage_dir('en_model') / 'model.json')
     if model:
         s, h = (model.get('search_report') or {}).get('ic_mean'), (model.get('holdout_report') or {}).get('ic_mean')
-        out.info('06 IC of the score', f'search {num(s, "+.4f")} (out-of-fold)   holdout {num(h, "+.4f")}')
+        out.info('06 prediction quality', f'IC {num(s, "+.3f")} development, {num(h, "+.3f")} holdout '
+                 f'(IC: rank correlation of the score with the next {model.get("horizon", "?")}-day return; 0 = none)')
     metrics = _read_json(cfg.stage_dir('backtest') / 'metrics.json')
-    if metrics:
-        block = metrics.get('holdout') or metrics.get('full')
-        name = 'HOLDOUT' if metrics.get('holdout') else 'FULL PERIOD (no holdout reported)'
-        if block and block.get('sharpe') is not None:
-            lo, hi = block['sharpe_ci95']
-            out.info(f'09 {name} net Sharpe', f'{block["sharpe"]:+.2f}   95% interval [{lo:+.2f}, {hi:+.2f}]   '
-                     f'gross {num(block.get("sharpe_gross"), "+.2f")}')
-            out.info('   return, drawdown', f'{block["ann_return"]:+.1%} a year, max drawdown {block["max_drawdown"]:.1%}')
-            out.verdict(lo > 0, 'the holdout interval excludes 0' if lo > 0
-                        else 'the holdout interval includes 0: no evidence of skill after costs')
+    if not metrics:
+        return
+    m, name = (metrics.get('holdout'), 'holdout') if metrics.get('holdout') else (metrics.get('full'), 'whole period')
+    if not m or m.get('sharpe') is None:
+        return
+    lo, hi = m['sharpe_ci95']
+    gross_ret, cost = m.get('gross_return_simple_ann'), m.get('cost_ann')
+    out.info(f'09 {name}, before costs', f'{num(gross_ret, "+.1%")} a year, Sharpe {num(m.get("sharpe_gross"), "+.2f")}')
+    out.info(f'09 {name}, after costs', f'{num(None if gross_ret is None else gross_ret - cost, "+.1%")} a year, '
+             f'Sharpe {m["sharpe"]:+.2f} (95% range {lo:+.1f} to {hi:+.1f}), worst fall {m["max_drawdown"]:.1%}')
+    print()
+    out.verdict(lo > 0, 'evidence of skill after costs: the Sharpe range is above 0' if lo > 0
+                else 'no evidence of skill after costs: the Sharpe range includes 0')
+    if lo <= 0 and (m.get('sharpe_gross') or 0) > 1 and cost:
+        out.note(f'the signals work before costs, but trading costs take {cost:.0%} of capital a year '
+                 f'(book traded {m.get("annual_turnover", 0):.0f} times a year). Next fix: trade less.')
 
 
 def main():
@@ -218,7 +227,7 @@ def main():
             sys.exit(1)
 
     print('\n')
-    out.stage('04-09', 'Summary of the experiment', f'{run_id}: all stages done in {_duration((time.time() - start) / 60)} '
+    out.stage('04-09', 'Result of the experiment', f'{run_id}, done in {_duration((time.time() - start) / 60)} '
               f'({", ".join(f"{k} {_duration(v)}" for k, v in TIMES.items())})')
     print_headline(cfg)
 

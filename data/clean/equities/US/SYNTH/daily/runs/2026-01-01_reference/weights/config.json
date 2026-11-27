@@ -16,7 +16,7 @@
     "min_names": 50
   },
   "score_col": "combined_score",
-  "n_dates": 480,
+  "n_dates": 454,
   "n_skipped": 0,
   "skipped": []
 }

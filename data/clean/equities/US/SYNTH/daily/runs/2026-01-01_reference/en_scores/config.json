@@ -1,15 +1,15 @@
 {
   "run_id": "2026-01-01_reference",
-  "signal_dir": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/clean/equities/US/SYNTH/daily/signals/2026-01-01_reference",
+  "signal_dir": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/clean/equities/US/SYNTH/daily/runs/2026-01-01_reference/signals",
   "fwd_ret_col": "fwdret20",
   "horizon": 20,
   "signal_cols": [
     "fam_illiquidity",
-    "fam_low_volatility",
-    "fam_momentum"
+    "fam_momentum",
+    "fam_reversal"
   ],
   "q_values": {},
-  "train_end": "2024-09-04",
-  "holdout_start": "2024-10-25",
+  "train_end": "2022-07-19",
+  "holdout_start": "2022-09-08",
   "periods": "search = out-of-fold score | gap = final model, close to search | holdout = final model, clean test"
 }

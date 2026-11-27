@@ -73,18 +73,17 @@ def verdict(passed: bool, text: str) -> None:
     (ok if passed else fail)(text)
 
 
+def table_row(cells: list, widths: list) -> None:
+    '''One row of a fixed-width table. widths: one int per column (negative = left-aligned).'''
+    print(INDENT + ' '.join(str(c).ljust(-w) if w < 0 else str(c).rjust(w) for c, w in zip(cells, widths)))
+
+
 def table(header: list, rows: list, widths: list) -> None:
-    '''A small fixed-width table. widths: one int per column (negative = left-aligned).'''
-    def fmt(cells):
-        out = []
-        for c, w in zip(cells, widths):
-            s = str(c)
-            out.append(s.ljust(-w) if w < 0 else s.rjust(w))
-        return INDENT + ' '.join(out)
-    print(fmt(header))
+    '''A small fixed-width table: header, a line, the rows.'''
+    table_row(header, widths)
     print(INDENT + '-' * (sum(abs(w) for w in widths) + len(widths) - 1))
     for r in rows:
-        print(fmt(r))
+        table_row(r, widths)
 
 
 def done(outputs: dict, next_cmd: "str | None" = None) -> None:

@@ -1,10 +1,10 @@
 {
-  "run_timestamp": "2026-11-25T17:18:23.889894",
+  "run_timestamp": "2026-11-26T20:14:23.200075",
   "source": "synthetic",
   "raw_dir": "/Users/lemoal/switchdrive/Laptop Files/Documents/Personnal/Projects/quant_alpha_lab/data/raw/synthetic/equities/US/SYNTH/daily/ohlcv",
   "output_file": "ohlcv.parquet",
   "output_hash": "sha256:4987a3a605e8d066",
-  "git_commit": "7826c4eb7eacf97fca8e3e1e9cd55a15b387d530",
+  "git_commit": "6cc8901b79ff2971da5fbe42d0b616a33246ee02",
   "n_raw_rows": 756000,
   "removed": {
     "unreadable": 0,

@@ -108,7 +108,7 @@ def main(update_golden: bool, compare_only: bool):
     if update_golden:
         GOLDEN.parent.mkdir(parents=True, exist_ok=True)
         GOLDEN.write_text(json.dumps(measured, indent=2))
-        print(f'\nGolden numbers written to {GOLDEN}')
+        print(f'\nGolden numbers written to {GOLDEN.relative_to(ROOT)}')
         return
     golden = json.loads(GOLDEN.read_text())
     rows = compare(measured, golden)

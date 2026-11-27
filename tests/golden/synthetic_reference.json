@@ -3,24 +3,22 @@
     "log_adv10_zscore_tanh",
     "log_adv20_zscore_tanh",
     "log_adv60_zscore_tanh",
-    "mom120_zscore_tanh",
     "mom252_zscore_tanh",
-    "vol120_zscore_clip",
-    "vol252_zscore_clip"
+    "mom5_zscore_tanh"
   ],
   "families": [
     "illiquidity",
-    "low_volatility",
-    "momentum"
+    "momentum",
+    "reversal"
   ],
-  "holdout_ic": 0.04967688307647862,
+  "holdout_ic": 0.07116471076603967,
   "avg_n_clusters": 7.8,
   "cluster_ari": 1.0,
   "market_mode_removed_share": 1.0,
-  "beta_exposure_max_abs": 2.165938533000594e-14,
-  "realised_beta_full": 0.008554249092514957,
-  "sharpe_gross_full": 1.4902652834222514,
-  "sharpe_net_full": 0.5022707803219454,
-  "annual_cost_bps_full": 683.5186003860887,
-  "alpha_t_full": 1.3138525400757248
+  "beta_exposure_max_abs": 8.399335550185493e-15,
+  "realised_beta_full": 0.021213944154675077,
+  "sharpe_gross_full": 4.7034907710986555,
+  "sharpe_net_full": -0.6803538476914327,
+  "annual_cost_bps_full": 3977.059854114027,
+  "alpha_t_full": -2.3490164261230997
 }
